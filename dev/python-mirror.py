@@ -5,6 +5,7 @@ import random
 import re
 import time
 import logging
+import shutil
 from pathlib import Path
 from bs4 import BeautifulSoup
 
@@ -24,6 +25,7 @@ class AsyncPythonMirror:
         self.url_ftp = "https://www.python.org/ftp/python/"
         self.root_dir = Path(__file__).resolve().parent.parent.resolve()
         self.data_dir = (self.root_dir / "data" / "python-ver").resolve()
+        self.data_dir.mkdir(parents=True, exist_ok=True) 
         
         self.proxies = self._load_proxies(proxies)
         self.network_mode = network_mode
@@ -32,8 +34,54 @@ class AsyncPythonMirror:
         self.show_progress = show_progress
         self.max_retries = 3
 
+    async def _get_remote_file_size(self, session: aiohttp.ClientSession, version: str, name: str) -> int:
+        url = f"{self.url_ftp}{version}/{name}"
+        try:
+            async with session.head(url, proxy=self._choose_proxy()) as resp:
+                if resp.status == 200:
+                    return int(resp.headers.get('Content-Length', 0))
+        except Exception:
+            pass
+        return 0
+
+    async def _check_disk_space(self, session: aiohttp.ClientSession, version: str, file_names: list):
+        """
+        Проверяет, достаточно ли места для файлов (x2) 
+        И остается ли после этого защитный порог в 3 ГБ.
+        """
+        MIN_SAFE_FREE_SPACE = 3 * 1024 * 1024 * 1024
+        
+        tasks = [self._get_remote_file_size(session, version, name) for name in file_names]
+        sizes = await asyncio.gather(*tasks)
+        total_required = sum(sizes)
+        
+        if total_required == 0:
+            return
+
+        _, _, free_space = shutil.disk_usage(self.data_dir)
+        
+        projected_usage = total_required * 2
+        remaining_after_download = free_space - projected_usage
+
+        if remaining_after_download < MIN_SAFE_FREE_SPACE:
+            needed_extra = (MIN_SAFE_FREE_SPACE - remaining_after_download) / (1024**3)
+            free_gb = free_space / (1024**3)
+            req_gb = projected_usage / (1024**3)
+            
+            error_msg = (
+                f"ОПАСНО: Недостаточно места для сохранения стабильности системы!\n"
+                f"Свободно сейчас: {free_gb:.2f} ГБ\n"
+                f"Будет занято (с запасом x2): {req_gb:.2f} ГБ\n"
+                f"Остаток будет меньше лимита в 3 ГБ. Нужно еще хотя бы {needed_extra:.2f} ГБ."
+            )
+            logger.critical(error_msg)
+            raise IOError(error_msg)
+        
+        if self.show_progress:
+            expected_free = (remaining_after_download) / (1024**3)
+            logger.info(f"Проверка безопасности: OK. После загрузки останется ~{expected_free:.2f} ГБ свободного места.")
+
     def _safe_path(self, *parts) -> Path:
-        """Защита от Path Traversal: гарантирует, что путь внутри data_dir."""
         target_path = self.data_dir.joinpath(*parts).resolve()
         if not str(target_path).startswith(str(self.data_dir)):
             raise ValueError(f"Попытка доступа за пределы рабочей директории: {target_path}")
@@ -52,49 +100,40 @@ class AsyncPythonMirror:
             return None
         return random.choice(self.proxies)
 
-    async def get_versions(self, session: aiohttp.ClientSession):
-        async with session.get(self.url_ftp) as resp:
-            resp.raise_for_status()
-            html = await resp.text()
-        
-        soup = await asyncio.to_thread(BeautifulSoup, html, "html.parser")
-        
-        versions = []
-        for a in soup.find_all("a"):
-            href = a.get("href", "").strip("/")
-            if href and href[0].isdigit() and ".." not in href:
-                versions.append(href)
-        return versions
-
     def _is_useful_file(self, name: str, version: str) -> bool:
         for pattern in self.FILE_PATTERNS:
             if re.fullmatch(pattern.format(version=version), name):
                 return True
         return False
 
+    async def _check_file_integrity(self, session: aiohttp.ClientSession, version: str, name: str, dest: Path):
+        if not dest.exists(): return False
+        url = f"{self.url_ftp}{version}/{name}"
+        try:
+            async with session.head(url, proxy=self._choose_proxy()) as resp:
+                server_size = int(resp.headers.get('Content-Length', 0))
+                return dest.stat().st_size == server_size
+        except:
+            return False
+
     async def _download_file(self, session: aiohttp.ClientSession, url: str, dest: Path):
         proxy = self._choose_proxy()
         temp = dest.with_suffix(".download.tmp")
-        
         try:
             async with session.get(url, proxy=proxy) as resp:
                 resp.raise_for_status()
                 start = time.time()
                 downloaded = 0
-                
                 async with aiofiles.open(temp, "wb") as f:
                     async for chunk in resp.content.iter_chunked(65536):
                         await f.write(chunk)
                         downloaded += len(chunk)
-                        
                         if self.rate_limit:
                             elapsed = time.time() - start
                             expected = downloaded / self.rate_limit
                             if expected > elapsed:
                                 await asyncio.sleep(expected - elapsed)
-
-            if dest.exists():
-                dest.unlink()
+            if dest.exists(): dest.unlink()
             temp.rename(dest)
             return True
         except Exception as e:
@@ -103,23 +142,9 @@ class AsyncPythonMirror:
                 except: pass
             raise e
 
-    async def _check_file_integrity(self, session: aiohttp.ClientSession, version: str, name: str, dest: Path):
-        """HEAD запрос выполняется только если файл существует локально."""
-        if not dest.exists():
-            return False
-        
-        url = f"{self.url_ftp}{version}/{name}"
-        try:
-            async with session.head(url) as resp:
-                server_size = int(resp.headers.get('Content-Length', 0))
-                return dest.stat().st_size == server_size
-        except:
-            return False
-
-    async def _download_single(self, session: aiohttp.ClientSession, version: str, name: str, session_dir: Path, sem: asyncio.Semaphore):
+    async def _download_single(self, session: aiohttp.ClientSession, version: str, name: str, sem: asyncio.Semaphore):
         async with sem:
             dest = self._safe_path(version, name)
-            
             if await self._check_file_integrity(session, version, name, dest):
                 if self.show_progress:
                     logger.info(f"[-] {name} уже корректно скачан.")
@@ -151,13 +176,16 @@ class AsyncPythonMirror:
         files_to_download = [a.get("href") for a in soup.find_all("a") 
                              if a.get("href") and self._is_useful_file(a.get("href"), version)]
         
-        if self.show_progress:
-            logger.info(f"Найдено файлов для {version}: {len(files_to_download)}")
+        if not files_to_download:
+            logger.warning(f"Файлы для версии {version} не найдены.")
+            return False
+
+        await self._check_disk_space(session, version, files_to_download)
             
         sem = asyncio.Semaphore(self.parallel)
         
         for attempt in range(self.max_retries):
-            tasks = [self._download_single(session, version, name, session_dir, sem) for name in files_to_download]
+            tasks = [self._download_single(session, version, name, sem) for name in files_to_download]
             results = await asyncio.gather(*tasks)
             
             failed_files = [files_to_download[i] for i, success in enumerate(results) if not success]
