@@ -175,22 +175,62 @@ class AsyncPythonMirror:
 
 # --- БЛОК ДЛЯ ОТЛАДКИ ---
 async def _debug_main():
-    mirror = AsyncPythonMirror(parallel=4)
+    mirror = AsyncPythonMirror(parallel=8)
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
         try:
             versions = await mirror.get_versions(session)
-            print(f"Доступно версий: {len(versions)}")
-            ver = input("Какую версию скачать? ").strip()
+            print(f"Доступно версий на сервере: {len(versions)}")
             
-            if ver in versions:
-                await mirror.install_version(session, ver)
+            print("\nВыберите действие:")
+            print("1. Скачать конкретную версию (введите номер, например 3.11.0)")
+            print("2. Скачать ВЕ СУЩЕСТВУЮЩИЕ версии (введите 'all')")
+            print("3. ТОЛЬКО ТЕСТ (проверка локальных файлов без загрузки) (введите 'test')")
+            
+            choice = input("\nВаш выбор: ").strip().lower()
+
+            if choice == 'test':
+                print("\n--- Запуск проверки соответствия серверу ---")
+                for ver in versions:
+                    ver_dir = mirror.data_dir / ver
+                    if ver_dir.exists():
+                        print(f"Проверка версии {ver}...")
+                        async with session.get(f"{mirror.url_ftp}{ver}/") as resp:
+                            html = await resp.text()
+                            soup = BeautifulSoup(html, "html.parser")
+                            files = [a.get("href") for a in soup.find_all("a") 
+                                    if a.get("href") and mirror._is_useful_file(a.get("href"), ver)]
+                        
+                        for f_name in files:
+                            dest = ver_dir / f_name
+                            is_ok = await mirror._check_file_integrity(session, ver, f_name, dest)
+                            status = "[OK]" if is_ok else "[ERROR/MISSING]"
+                            if not is_ok:
+                                print(f"  {status} {f_name}")
+                print("\n--- Проверка завершена ---")
+
+            elif choice == 'all':
+                print(f"Внимание! Будет скачано {len(versions)} версий.")
+                confirm = input("Продолжить? (y/n): ")
+                if confirm.lower() == 'y':
+                    for i, ver in enumerate(versions, 1):
+                        print(f"\n[{i}/{len(versions)}] Обработка версии: {ver}")
+                        try:
+                            await mirror.install_version(session, ver)
+                        except Exception as e:
+                            print(f"Ошибка в версии {ver}: {e}")
+                print("\n--- Массовая загрузка завершена ---")
+
+            elif choice in versions:
+                await mirror.install_version(session, choice)
                 print("\nГотово!")
             else:
-                print("Версия не найдена.")
+                print("Версия не найдена или команда не распознана.")
+
         except Exception as e:
             print(f"\nКритическая ошибка: {e}")
 
 if __name__ == "__main__":
+    Path("data/python-ver").mkdir(parents=True, exist_ok=True)
     try:
         asyncio.run(_debug_main())
     except KeyboardInterrupt:
