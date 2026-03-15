@@ -2126,7 +2126,7 @@ class AsyncArduinoMirror:
             report["status"] = "issues_found"
         return report
 
-    async def repair(self, session: Optional[aiohttp.ClientSession]) -> Dict[str, Any]:
+    async def repair(self, session: Optional[aiohttp.ClientSession] = None) -> Dict[str, Any]:
         report = await self.verify(session=session)
         repaired_assets = 0
         repaired_pages = 0
@@ -2329,7 +2329,319 @@ class AsyncArduinoMirror:
                 return path
         return None
 
-    def delete_target(self, section: str, slug: Optional[str] = None) -> bool:
+    def _is_url_like(self, value: str) -> bool:
+        """Return True if value looks like HTTP/HTTPS URL."""
+        return value.strip().lower().startswith(("http://", "https://"))
+
+    def _record_slug(self, record: Dict[str, Any]) -> str:
+        """Build stable slug for page record."""
+        source_url = record.get("normalized_url") or record.get("source_url") or ""
+        if source_url:
+            path = urlparse(source_url).path.strip("/")
+            if path:
+                return self._safe_slug(path.split("/")[-1], keep_dot=False)
+        title = record.get("title", "")
+        if title:
+            return self._safe_slug(title, keep_dot=False)
+        local_md = record.get("local_markdown_path", "")
+        if local_md:
+            return self._safe_slug(Path(local_md).stem, keep_dot=False)
+        return "page"
+
+    async def _read_json_async(self, path: Path) -> Optional[Dict[str, Any]]:
+        """Read JSON file asynchronously and return dict payload."""
+        if not path.exists():
+            return None
+        try:
+            async with aiofiles.open(path, "r", encoding="utf-8") as handle:
+                content = await handle.read()
+            data = json.loads(content)
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
+
+    def _ensure_indexes_ready(self) -> None:
+        """Lazy rebuild indexes if in-memory indexes are empty."""
+        if self.pages_index or self.assets_index or self.hardware_index:
+            return
+        self.rebuild_indexes()
+
+    async def _iter_hardware_infos(self) -> List[Dict[str, Any]]:
+        """Load all HardwareInfo.json files."""
+        infos: List[Dict[str, Any]] = []
+        hardware_root = self._safe_path("hardware")
+        if not hardware_root.exists():
+            return infos
+        for info_file in hardware_root.rglob("HardwareInfo.json"):
+            data = await self._read_json_async(info_file)
+            if data:
+                infos.append(data)
+        return infos
+
+    async def get_hardware_info(self, slug_or_url: str) -> Optional[Dict[str, Any]]:
+        """Return full hardware info dict from HardwareInfo.json."""
+        needle = slug_or_url.strip()
+        if not needle:
+            return None
+        normalized = self._normalize_url(needle) if self._is_url_like(needle) else ""
+        slug = self._safe_slug(Path(urlparse(normalized).path).name if normalized else needle)
+
+        for info in await self._iter_hardware_infos():
+            info_slug = self._safe_slug(str(info.get("slug", "")))
+            info_name = self._safe_slug(str(info.get("name", "")))
+            info_url = self._normalize_url(str(info.get("source_url", ""))) if info.get("source_url") else ""
+            if normalized and info_url and info_url == normalized:
+                return info
+            if slug and slug in {info_slug, info_name}:
+                return info
+        return None
+
+    async def list_hardware(self) -> List[Dict[str, Any]]:
+        """List all hardware entities with key fields."""
+        result: List[Dict[str, Any]] = []
+        for info in await self._iter_hardware_infos():
+            result.append(
+                {
+                    "name": info.get("name", ""),
+                    "slug": info.get("slug", self._safe_slug(str(info.get("name", "")))),
+                    "type": info.get("type", ""),
+                    "local_dir": info.get("local_dir", ""),
+                    "source_url": info.get("source_url", ""),
+                }
+            )
+        result.sort(key=lambda x: str(x.get("name", "")).lower())
+        return result
+
+    async def search_hardware(self, query: str) -> List[Dict[str, Any]]:
+        """Search hardware by name/family/type/tags/description."""
+        needle = query.strip().lower()
+        if not needle:
+            return await self.list_hardware()
+        matches: List[Dict[str, Any]] = []
+        for info in await self._iter_hardware_infos():
+            haystack = " ".join(
+                [
+                    str(info.get("name", "")),
+                    str(info.get("slug", "")),
+                    str(info.get("family", "")),
+                    str(info.get("type", "")),
+                    str(info.get("description", "")),
+                    " ".join(info.get("tags", [])) if isinstance(info.get("tags"), list) else "",
+                ]
+            ).lower()
+            if needle in haystack:
+                matches.append(
+                    {
+                        "name": info.get("name", ""),
+                        "slug": info.get("slug", self._safe_slug(str(info.get("name", "")))),
+                        "type": info.get("type", ""),
+                        "local_dir": info.get("local_dir", ""),
+                        "source_url": info.get("source_url", ""),
+                    }
+                )
+        return matches
+
+    async def get_section_info(self, section: str) -> Dict[str, Any]:
+        """Return section path, existence and top-level items."""
+        section_token = section.strip().lower().replace("-", "_")
+        section_path = self._safe_path(section_token)
+        items = sorted([p.name for p in section_path.iterdir()]) if section_path.exists() else []
+        return {
+            "section": section_token,
+            "path": str(section_path),
+            "exists": section_path.exists(),
+            "items": items,
+        }
+
+    async def list_section_pages(self, section: str) -> List[Dict[str, Any]]:
+        """Return list of pages in a documentation section."""
+        self._ensure_indexes_ready()
+        section_token = section.strip().lower().replace("-", "_")
+        records: List[Dict[str, Any]] = []
+        for record in self.pages_index:
+            rec_section = str(record.get("section", "")).lower()
+            if section_token == "programming":
+                in_section = rec_section in {"programming", "language_reference"}
+            else:
+                in_section = rec_section == section_token
+            if not in_section:
+                continue
+            records.append(
+                {
+                    "title": record.get("title", ""),
+                    "slug": self._record_slug(record),
+                    "page_type": record.get("page_type", ""),
+                    "local_markdown_path": record.get("local_markdown_path", ""),
+                    "source_url": record.get("source_url", record.get("normalized_url", "")),
+                }
+            )
+        records.sort(key=lambda x: str(x.get("title", "")).lower())
+        return records
+
+    async def get_page_info(self, slug_or_url: str) -> Optional[Dict[str, Any]]:
+        """Return full page metadata for slug or URL."""
+        self._ensure_indexes_ready()
+        needle = slug_or_url.strip()
+        if not needle:
+            return None
+        if self._is_url_like(needle):
+            normalized = self._normalize_url(needle)
+            for record in self.pages_index:
+                if record.get("normalized_url") == normalized:
+                    return dict(record)
+            return None
+
+        slug = self._safe_slug(needle, keep_dot=False)
+        for record in self.pages_index:
+            options = {
+                self._record_slug(record),
+                self._safe_slug(record.get("title", ""), keep_dot=False),
+            }
+            local_md = str(record.get("local_markdown_path", ""))
+            if local_md:
+                options.add(self._safe_slug(Path(local_md).stem, keep_dot=False))
+            if slug in options:
+                return dict(record)
+        return None
+
+    async def get_asset_info(self, slug_or_url: str) -> Optional[AssetRecord]:
+        """Return asset metadata for URL or slug/filename."""
+        self._ensure_indexes_ready()
+        needle = slug_or_url.strip()
+        if not needle:
+            return None
+
+        if self._is_url_like(needle):
+            key = self._url_lookup_key(needle)
+            asset = self._assets_by_url.get(key)
+            if asset:
+                return dict(asset)
+            for rec in self.assets_index:
+                if self._url_lookup_key(rec.get("source_url", "")) == key:
+                    return dict(rec)
+            return None
+
+        slug = self._safe_slug(needle, keep_dot=True)
+        for rec in self.assets_index:
+            filename = self._safe_slug(rec.get("filename", ""), keep_dot=True)
+            label = self._safe_slug(rec.get("label", ""), keep_dot=True)
+            local_stem = self._safe_slug(Path(rec.get("local_path", "")).stem, keep_dot=True)
+            if slug in {filename, label, local_stem}:
+                return dict(rec)
+        return None
+
+    async def list_all_assets(self) -> List[AssetRecord]:
+        """Return all known asset records."""
+        self._ensure_indexes_ready()
+        return [dict(rec) for rec in self.assets_index]
+
+    async def verify_asset(self, slug_or_url: str) -> Dict[str, str]:
+        """Verify one asset integrity by URL or slug."""
+        asset = await self.get_asset_info(slug_or_url)
+        if not asset:
+            return {"status": "error", "reason": "asset_not_found"}
+        ok, reason = self._verify_asset(asset)
+        return {"status": "ok" if ok else "error", "reason": reason}
+
+    async def refresh_page(self, url: str) -> Dict[str, Any]:
+        """Refresh one page by URL."""
+        return await self.refresh(session=None, url=url)
+
+    async def refresh_section(self, section: str) -> Dict[str, Any]:
+        """Refresh one section by name."""
+        return await self.refresh(session=None, section=section)
+
+    async def get_markdown(self, slug_or_url: str) -> Optional[str]:
+        """Load markdown text for one mirrored page."""
+        page = await self.get_page_info(slug_or_url)
+        if not page:
+            return None
+        local_path = page.get("local_markdown_path", "")
+        if not local_path:
+            return None
+        path = Path(local_path)
+        if not path.exists():
+            return None
+        async with aiofiles.open(path, "r", encoding="utf-8") as handle:
+            return await handle.read()
+
+    async def get_html_snapshot(self, slug_or_url: str) -> Optional[str]:
+        """Load HTML snapshot for one mirrored page."""
+        page = await self.get_page_info(slug_or_url)
+        if not page:
+            return None
+        html_path = page.get("local_html_path", "")
+        if not html_path and page.get("local_markdown_path"):
+            html_path = str(Path(page["local_markdown_path"]).with_suffix(".html"))
+        if not html_path:
+            return None
+        path = Path(html_path)
+        if not path.exists():
+            return None
+        async with aiofiles.open(path, "r", encoding="utf-8") as handle:
+            return await handle.read()
+
+    async def rewrite_links_local(self, markdown_text: str, slug_or_url: str) -> str:
+        """Rewrite markdown links to local references for one page context."""
+        page = await self.get_page_info(slug_or_url)
+        if page and page.get("local_markdown_path"):
+            current_path = Path(page["local_markdown_path"])
+        elif self._is_url_like(slug_or_url):
+            current_path = self._predict_local_markdown_path(slug_or_url)
+        else:
+            current_path = self._safe_path("_shared", "cache", "virtual.md")
+        return self._rewrite_links_to_local(markdown_text, current_path)
+
+    async def search_pages(
+        self, query: str, section: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Search pages by title/description with optional section filter."""
+        self._ensure_indexes_ready()
+        needle = query.strip().lower()
+        section_token = section.strip().lower().replace("-", "_") if section else None
+        result: List[Dict[str, Any]] = []
+        for record in self.pages_index:
+            rec_section = str(record.get("section", "")).lower()
+            if section_token:
+                if section_token == "programming":
+                    if rec_section not in {"programming", "language_reference"}:
+                        continue
+                elif rec_section != section_token:
+                    continue
+            haystack = (
+                f"{record.get('title', '')} {record.get('description', '')} "
+                f"{record.get('page_type', '')}"
+            ).lower()
+            if needle and needle not in haystack:
+                continue
+            result.append(
+                {
+                    "title": record.get("title", ""),
+                    "slug": self._record_slug(record),
+                    "section": record.get("section", ""),
+                    "local_markdown_path": record.get("local_markdown_path", ""),
+                    "source_url": record.get("source_url", record.get("normalized_url", "")),
+                }
+            )
+        return result
+
+    async def get_stats(self) -> Dict[str, Any]:
+        """Return aggregated statistics for local mirror."""
+        self._ensure_indexes_ready()
+        stats = dict(self._collect_local_stats())
+        stats.update(
+            {
+                "hardware": len(self.hardware_index),
+                "software": len(self.software_index),
+                "programming": len(self.programming_index),
+                "learn": len(self.learn_index),
+                "failures": len(self.failures),
+            }
+        )
+        return stats
+
+    def _delete_target_sync(self, section: str, slug: Optional[str] = None) -> bool:
+        """Synchronous delete implementation used by async API wrapper."""
         target = self.get_path(section, slug)
         if not target:
             return False
@@ -2368,6 +2680,10 @@ class AsyncArduinoMirror:
         }
         self._save_state()
         return True
+
+    async def delete_target(self, section: str, slug: Optional[str] = None) -> bool:
+        """Delete section/page/asset target asynchronously."""
+        return await asyncio.to_thread(self._delete_target_sync, section, slug)
 
     # ---------------------------------------------------------------------
     # demo/debug block
@@ -2409,7 +2725,7 @@ class AsyncArduinoMirror:
                 elif choice == "7":
                     section = input("Section: ").strip()
                     slug = input("Slug (optional): ").strip() or None
-                    ok = self.delete_target(section, slug)
+                    ok = await self.delete_target(section, slug)
                     print({"deleted": ok})
                 elif choice == "0":
                     break

@@ -411,12 +411,15 @@ def test_get_path_variants(mirror):
 
 
 def test_delete_target(mirror):
-    file_path = mirror._safe_path("learn", "digital-pins.md")
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_text("# demo\n", encoding="utf-8")
+    async def _run():
+        file_path = mirror._safe_path("learn", "digital-pins.md")
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text("# demo\n", encoding="utf-8")
 
-    assert mirror.delete_target("learn", "digital-pins") is True
-    assert not file_path.exists()
+        assert await mirror.delete_target("learn", "digital-pins") is True
+        assert not file_path.exists()
+
+    asyncio.run(_run())
 
 
 def test_get_info(mirror):
