@@ -88,11 +88,16 @@ class AsyncPypiMirror:
         """
         if not file_path.exists():
             return False
-        sha256_hash = hashlib.sha256()
-        async with aiofiles.open(file_path, "rb") as f:
-            while chunk := await f.read(8192):
-                sha256_hash.update(chunk)
-        return sha256_hash.hexdigest() == expected_sha256
+
+        def _calc_sha256(path: Path) -> str:
+            sha256_hash = hashlib.sha256()
+            with path.open("rb") as f:
+                while chunk := f.read(8192):
+                    sha256_hash.update(chunk)
+            return sha256_hash.hexdigest()
+
+        actual_sha256 = await asyncio.to_thread(_calc_sha256, file_path)
+        return actual_sha256 == expected_sha256
 
     async def _fetch_metadata(self, session: aiohttp.ClientSession, name: str) -> Optional[dict]:
         """

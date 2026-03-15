@@ -6,8 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
-### DATA
+### DATA, TEST AND MORE
 data/
+.test_tmp*
 
 # Distribution / packaging
 .Python
