@@ -35,6 +35,15 @@ def get_log_level() -> str:
     return lvl if lvl in allowed else "info"
 
 
+def get_ws_protocol() -> str:
+    allowed = {"auto", "none", "websockets", "websockets-sansio", "wsproto"}
+    protocol = os.getenv("UVICORN_WS", "websockets-sansio").strip().lower()
+    if protocol in allowed:
+        return protocol
+    print(f"[WARN] Invalid UVICORN_WS={protocol!r}. Fallback to 'websockets-sansio'")
+    return "websockets-sansio"
+
+
 def is_unix() -> bool:
     return os.name != "nt"
 
@@ -77,6 +86,7 @@ async def run_uvicorn() -> None:
         host=get_host(),
         port=get_port(),
         log_level=get_log_level(),
+        ws=get_ws_protocol(),
         reload=reload_enabled,
         proxy_headers=True,
         forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"),

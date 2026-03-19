@@ -12,7 +12,7 @@ from pydantic import SecretStr
 
 from server.core.config import settings as base_settings
 from server.core.logging import IntegrityLogManager, Mailer
-from server.mcp import mcp_router
+from server.mcp import create_mcp_gateway
 from server.routes import api_router, root_router
 from server.services import build_application_services, shutdown_application_services
 
@@ -52,14 +52,24 @@ async def integration_env():
 
     app = FastAPI()
     app.state.services = services
+    mcp_gateway = create_mcp_gateway(cfg, lambda: app.state.services)
+    app.state.mcp_gateway = mcp_gateway
     app.include_router(root_router)
     app.include_router(api_router, prefix=cfg.api_prefix)
-    app.include_router(mcp_router, prefix=cfg.mcp_path)
+    app.mount(cfg.mcp_path, mcp_gateway.http_app)
 
     transport = httpx.ASGITransport(app=app)
+    await mcp_gateway.refresh_tools()
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         try:
-            yield {"settings": cfg, "workspace": workspace, "services": services, "client": client}
+            yield {
+                "app": app,
+                "settings": cfg,
+                "workspace": workspace,
+                "services": services,
+                "client": client,
+                "mcp_gateway": mcp_gateway,
+            }
         finally:
             if services.db.client is not None:
                 await services.db.client.drop_database(cfg.mongo.database)

@@ -174,6 +174,10 @@ async def reload_plugins(
 ) -> dict[str, list[str]]:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
     loaded = await services.plugins.reload_plugins(payload.plugin_keys)
+    await services.users.ensure_root_user()
+    mcp_gateway = getattr(request.app.state, "mcp_gateway", None)
+    if mcp_gateway is not None:
+        await mcp_gateway.refresh_tools()
     await services.audit.record(
         "mcp.plugins.reload",
         actor=current_user,

@@ -1,3 +1,3 @@
-from .server import router as mcp_router
+from .server import MultiplexMCPGateway, create_mcp_gateway
 
-__all__ = ["mcp_router"]
+__all__ = ["MultiplexMCPGateway", "create_mcp_gateway"]

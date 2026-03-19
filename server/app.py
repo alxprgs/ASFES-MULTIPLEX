@@ -9,7 +9,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from server.core.config import settings
 from server.core.logging import IntegrityLogManager, Mailer, get_logger
-from server.mcp import mcp_router
+from server.mcp import create_mcp_gateway
 from server.routes import api_router, root_router
 from server.services import build_application_services, periodic_integrity_verifier, shutdown_application_services
 
@@ -44,18 +44,20 @@ async def lifespan(app: FastAPI):
             services.verifier_task = asyncio.create_task(periodic_integrity_verifier(services))
 
         app.state.services = services
-        LOGGER.info(
-            "Multiplex application startup completed",
-            extra={
-                "event_type": "app.startup",
-                "payload": {
-                    "api_prefix": settings.api_prefix,
-                    "mcp_path": settings.mcp_path,
-                    "redis_mode": settings.redis.mode,
+        await app.state.mcp_gateway.refresh_tools()
+        async with app.state.mcp_gateway.lifespan():
+            LOGGER.info(
+                "Multiplex application startup completed",
+                extra={
+                    "event_type": "app.startup",
+                    "payload": {
+                        "api_prefix": settings.api_prefix,
+                        "mcp_path": settings.mcp_path,
+                        "redis_mode": settings.redis.mode,
+                    },
                 },
-            },
-        )
-        yield
+            )
+            yield
     finally:
         if services is not None:
             await shutdown_application_services(services)
@@ -71,9 +73,11 @@ def create_app() -> FastAPI:
         redoc_url=f"{settings.api_prefix}/redoc",
         lifespan=lifespan,
     )
+    mcp_gateway = create_mcp_gateway(settings, lambda: app.state.services)
+    app.state.mcp_gateway = mcp_gateway
     app.include_router(root_router)
     app.include_router(api_router, prefix=settings.api_prefix)
-    app.include_router(mcp_router, prefix=settings.mcp_path)
+    app.mount(settings.mcp_path, mcp_gateway.http_app)
     return app
 
 

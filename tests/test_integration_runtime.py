@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlparse
 
+import httpx
 import pytest
+from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 
 from server.core.database import SETTINGS
 from server.core.security import build_pkce_challenge
@@ -45,7 +48,9 @@ async def test_bootstrap_creates_runtime_root_plugins_and_safe_runtime_upserts(i
 
 @pytest.mark.asyncio
 async def test_rest_oauth_and_mcp_flow_respects_user_scoping(integration_env) -> None:
+    app = integration_env["app"]
     client = integration_env["client"]
+    mcp_gateway = integration_env["mcp_gateway"]
     services = integration_env["services"]
     cfg = integration_env["settings"]
 
@@ -160,47 +165,46 @@ async def test_rest_oauth_and_mcp_flow_respects_user_scoping(integration_env) ->
     )
     assert token.status_code == 200
     oauth_access = token.json()["access_token"]
-    mcp_headers = {"Authorization": f"Bearer {oauth_access}"}
 
-    tool_manifest_list = await client.post(
-        "/mcp",
-        headers=mcp_headers,
-        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+    def mcp_httpx_client_factory(**kwargs):
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+            **kwargs,
+        )
+
+    mcp_transport = StreamableHttpTransport(
+        "http://testserver/mcp",
+        auth=oauth_access,
+        httpx_client_factory=mcp_httpx_client_factory,
     )
-    assert tool_manifest_list.status_code == 200
-    tool_names = {item["name"] for item in tool_manifest_list.json()["result"]["tools"]}
-    assert "docker.list_containers" in tool_names
-    assert "docker.restart_container" not in tool_names
 
     async def fake_list_containers(context, arguments):
         return {"containers": [{"Names": "web"}], "count": 1, "user": context.user.username}
 
     services.plugins.plugins["docker"].tools["docker.list_containers"].handler = fake_list_containers
 
-    tool_call = await client.post(
-        "/mcp",
-        headers=mcp_headers,
-        json={
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {"name": "docker.list_containers", "arguments": {"all": False}},
-        },
-    )
-    assert tool_call.status_code == 200
-    structured = tool_call.json()["result"]["structuredContent"]
-    assert structured["count"] == 1
-    assert structured["user"] == "alice"
+    async with mcp_gateway.lifespan():
+        async with Client(mcp_transport) as mcp_client:
+            tools = await mcp_client.list_tools()
+            tool_names = {tool.name for tool in tools}
+            assert "docker.list_containers" in tool_names
+            assert "docker.restart_container" not in tool_names
 
-    denied_call = await client.post(
-        "/mcp",
-        headers=mcp_headers,
-        json={
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "tools/call",
-            "params": {"name": "docker.restart_container", "arguments": {"container": "web"}},
-        },
-    )
-    assert denied_call.status_code == 200
-    assert denied_call.json()["error"]["message"] == "Tool access denied"
+            tool_call = await mcp_client.call_tool(
+                "docker.list_containers",
+                {"all": False},
+                raise_on_error=False,
+            )
+            assert tool_call.is_error is False
+            assert tool_call.structured_content is not None
+            assert tool_call.structured_content["count"] == 1
+            assert tool_call.structured_content["user"] == "alice"
+
+            denied_call = await mcp_client.call_tool(
+                "docker.restart_container",
+                {"container": "web"},
+                raise_on_error=False,
+            )
+            assert denied_call.is_error is True
+            assert any("Tool access denied" in getattr(item, "text", "") for item in denied_call.content)
