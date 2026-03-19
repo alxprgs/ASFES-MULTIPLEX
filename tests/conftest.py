@@ -32,6 +32,13 @@ def make_test_settings():
     cfg.root.email = "root.integration@example.com"
     cfg.logging.directory = workspace / "logs"
     cfg.logging.sqlite_path = workspace / "logs.db"
+    cfg.host_ops.managed_file_roots = [workspace / "managed"]
+    cfg.host_ops.managed_log_roots = [workspace / "managed" / "logs"]
+    cfg.host_ops.backup_directory = workspace / "backups"
+    cfg.host_ops.database_profiles_directory = workspace / "profiles" / "databases"
+    cfg.host_ops.vpn_profiles_directory = workspace / "profiles" / "vpn"
+    cfg.host_ops.ssl_profiles_directory = workspace / "profiles" / "ssl"
+    cfg.host_ops.nginx_config_paths = [workspace / "managed" / "nginx"]
     return cfg, workspace
 
 

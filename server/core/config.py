@@ -103,6 +103,21 @@ class LoggingConfig(BaseModel):
     console_rich_tracebacks: bool = True
 
 
+class HostOpsConfig(BaseModel):
+    managed_file_roots: list[Path] = Field(default_factory=lambda: [BASE_DIR / "data", BASE_DIR / "runtime"])
+    managed_log_roots: list[Path] = Field(default_factory=lambda: [BASE_DIR / "runtime" / "logs"])
+    backup_directory: Path = BASE_DIR / "runtime" / "backups"
+    command_timeout_seconds: int = 30
+    max_output_bytes: int = 65536
+    alert_poll_interval_seconds: int = 60
+    executable_overrides: dict[str, str] = Field(default_factory=dict)
+    provider_overrides: dict[str, str] = Field(default_factory=dict)
+    database_profiles_directory: Path = BASE_DIR / "data" / "profiles" / "databases"
+    vpn_profiles_directory: Path = BASE_DIR / "data" / "profiles" / "vpn"
+    ssl_profiles_directory: Path = BASE_DIR / "data" / "profiles" / "ssl"
+    nginx_config_paths: list[Path] = Field(default_factory=lambda: [BASE_DIR / "data" / "nginx"])
+
+
 class SecurityConfig(BaseModel):
     api_jwt_secret: SecretStr = SecretStr("ChangeThisApiJwtSecretImmediately")
     oauth_jwt_secret: SecretStr = SecretStr("ChangeThisOauthJwtSecretImmediately")
@@ -168,6 +183,7 @@ class Settings(BaseSettings):
     smtp: SMTPConfig = Field(default_factory=SMTPConfig)
     root: RootAccountConfig = Field(default_factory=RootAccountConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    host_ops: HostOpsConfig = Field(default_factory=HostOpsConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     oauth: OAuthConfig = Field(default_factory=OAuthConfig)
     rate_limits: RateLimitPresetConfig = Field(default_factory=RateLimitPresetConfig)
@@ -178,6 +194,33 @@ class Settings(BaseSettings):
         self.logging.sqlite_path = (
             self.logging.sqlite_path if self.logging.sqlite_path.is_absolute() else BASE_DIR / self.logging.sqlite_path
         )
+        self.host_ops.managed_file_roots = [
+            path if path.is_absolute() else BASE_DIR / path for path in self.host_ops.managed_file_roots
+        ]
+        self.host_ops.managed_log_roots = [
+            path if path.is_absolute() else BASE_DIR / path for path in self.host_ops.managed_log_roots
+        ]
+        self.host_ops.backup_directory = (
+            self.host_ops.backup_directory if self.host_ops.backup_directory.is_absolute() else BASE_DIR / self.host_ops.backup_directory
+        )
+        self.host_ops.database_profiles_directory = (
+            self.host_ops.database_profiles_directory
+            if self.host_ops.database_profiles_directory.is_absolute()
+            else BASE_DIR / self.host_ops.database_profiles_directory
+        )
+        self.host_ops.vpn_profiles_directory = (
+            self.host_ops.vpn_profiles_directory
+            if self.host_ops.vpn_profiles_directory.is_absolute()
+            else BASE_DIR / self.host_ops.vpn_profiles_directory
+        )
+        self.host_ops.ssl_profiles_directory = (
+            self.host_ops.ssl_profiles_directory
+            if self.host_ops.ssl_profiles_directory.is_absolute()
+            else BASE_DIR / self.host_ops.ssl_profiles_directory
+        )
+        self.host_ops.nginx_config_paths = [
+            path if path.is_absolute() else BASE_DIR / path for path in self.host_ops.nginx_config_paths
+        ]
         if self.redis.mode != "disabled" and not self.redis.url:
             raise ValueError("REDIS__URL is required when REDIS__MODE is not 'disabled'")
         if self.app.mcp_path == self.app.api_prefix:

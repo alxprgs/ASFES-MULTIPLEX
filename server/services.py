@@ -10,12 +10,14 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from server.alerting import AlertingService
 from server.core.config import Settings
 from server.core.database import AUDIT_EVENTS, OAUTH_CLIENTS, OAUTH_CODES, PLUGINS, REFRESH_TOKENS, SETTINGS, TOOL_POLICIES, USERS, DatabaseManager
 from server.core.logging import IntegrityLogManager, Mailer, get_logger
 from server.core.ratelimit import RateLimitPolicy, RateLimiter
 from server.core.security import TokenBundle, create_jwt, decode_jwt, hash_password, now_utc, random_token, sha256_text, verify_password, verify_pkce
-from server.models import MCPTool, PermissionDefinition, PluginDefinition, ToolExecutionContext, UserPrincipal
+from server.host_ops import HostOpsService
+from server.models import MCPTool, PermissionDefinition, PluginDefinition, RuntimeAvailability, ToolExecutionContext, UserPrincipal
 
 
 LOGGER = get_logger("multiplex.services")
@@ -724,6 +726,9 @@ class PluginRegistry:
         loaded: list[str] = []
         targets = plugin_keys or [module_name.rsplit(".", 1)[-1] for module_name in self._iter_plugin_module_names()]
         for key in targets:
+            old_plugin = self.plugins.get(key)
+            if old_plugin and old_plugin.shutdown and self._services:
+                await old_plugin.shutdown(self._services)
             await self._load_plugin_module(f"server.mcp.plugins.{key}", reload_existing=True)
             loaded.append(key)
         return loaded
@@ -789,6 +794,7 @@ class PluginRegistry:
         documents: list[dict[str, Any]] = []
         async for item in cursor:
             runtime_plugin = self.plugins.get(item["key"])
+            availability = await self._plugin_availability(runtime_plugin) if runtime_plugin else RuntimeAvailability(available=False, reason="Plugin is not loaded")
             documents.append(
                 {
                     "key": item["key"],
@@ -798,6 +804,10 @@ class PluginRegistry:
                     "enabled": bool(item.get("enabled", True)),
                     "os_support": item.get("os_support", []),
                     "tool_keys": sorted(runtime_plugin.tools.keys()) if runtime_plugin else [],
+                    "available": availability.available,
+                    "availability_reason": availability.reason,
+                    "required_backends": availability.required_backends,
+                    "providers": availability.providers,
                 }
             )
         return documents
@@ -810,6 +820,7 @@ class PluginRegistry:
                 continue
             for tool in plugin.tools.values():
                 global_policy = await self.db.collection(TOOL_POLICIES).find_one({"tool_key": tool.manifest.key, "scope": "global", "subject_id": "*"})
+                availability = await self._tool_availability(plugin, tool)
                 documents.append(
                     {
                         "key": tool.manifest.key,
@@ -820,6 +831,11 @@ class PluginRegistry:
                         "permissions": tool.manifest.permissions,
                         "tags": tool.manifest.tags,
                         "global_enabled": bool(global_policy.get("enabled", True)) if global_policy else True,
+                        "available": availability.available,
+                        "availability_reason": availability.reason,
+                        "os_support": tool.manifest.os_support,
+                        "required_backends": availability.required_backends,
+                        "providers": availability.providers,
                     }
                 )
         return documents
@@ -876,6 +892,61 @@ class PluginRegistry:
                 return plugin.tools[tool_key]
         return None
 
+    def get_plugin_for_tool(self, tool_key: str) -> PluginDefinition | None:
+        for plugin in self.plugins.values():
+            if tool_key in plugin.tools:
+                return plugin
+        return None
+
+    async def _plugin_availability(self, plugin: PluginDefinition | None) -> RuntimeAvailability:
+        if plugin is None:
+            return RuntimeAvailability(available=False, reason="Plugin is not loaded")
+        availability = RuntimeAvailability(
+            available=True,
+            required_backends=list(plugin.manifest.required_backends),
+            providers=list(plugin.manifest.providers),
+        )
+        if self._services is None:
+            return availability
+        availability = self._merge_availability(
+            availability,
+            self._services.host_ops.availability_for_os(plugin.manifest.os_support),
+        )
+        if plugin.availability:
+            availability = self._merge_availability(availability, await plugin.availability(self._services))
+        return availability
+
+    async def _tool_availability(self, plugin: PluginDefinition, tool: MCPTool) -> RuntimeAvailability:
+        availability = self._merge_availability(
+            await self._plugin_availability(plugin),
+            RuntimeAvailability(
+                available=True,
+                required_backends=list(tool.manifest.required_backends),
+                providers=list(tool.manifest.providers),
+            ),
+        )
+        if self._services is None:
+            return availability
+        availability = self._merge_availability(
+            availability,
+            self._services.host_ops.availability_for_os(tool.manifest.os_support),
+        )
+        if tool.availability:
+            availability = self._merge_availability(availability, await tool.availability(self._services))
+        return availability
+
+    def _merge_availability(self, *items: RuntimeAvailability) -> RuntimeAvailability:
+        available = all(item.available for item in items)
+        reason = next((item.reason for item in items if not item.available and item.reason), None)
+        required_backends = sorted({backend for item in items for backend in item.required_backends})
+        providers = sorted({provider for item in items for provider in item.providers})
+        return RuntimeAvailability(
+            available=available,
+            reason=reason,
+            required_backends=required_backends,
+            providers=providers,
+        )
+
     async def is_tool_enabled_for_user(self, user: UserPrincipal, tool_key: str) -> bool:
         runtime = await self.settings_service.get_runtime_settings()
         if not runtime.get("mcp_enabled", True):
@@ -883,7 +954,11 @@ class PluginRegistry:
         tool = self.get_tool(tool_key)
         if tool is None:
             return False
-        plugin = next(plugin for plugin in self.plugins.values() if tool_key in plugin.tools)
+        plugin = self.get_plugin_for_tool(tool_key)
+        if plugin is None:
+            return False
+        if not (await self._tool_availability(plugin, tool)).available:
+            return False
         plugin_doc = await self.db.collection(PLUGINS).find_one({"key": plugin.manifest.key})
         if plugin_doc and not plugin_doc.get("enabled", True):
             return False
@@ -924,6 +999,12 @@ class PluginRegistry:
         tool = self.get_tool(tool_key)
         if tool is None:
             raise LookupError("Tool not found")
+        plugin = self.get_plugin_for_tool(tool_key)
+        if plugin is None:
+            raise LookupError("Plugin not found")
+        availability = await self._tool_availability(plugin, tool)
+        if not availability.available:
+            raise RuntimeError(availability.reason or "Tool is currently unavailable")
         if not await self.is_tool_enabled_for_user(user, tool_key):
             raise PermissionError("Tool access denied")
         policy_name = "mcp_read" if tool.manifest.read_only else "mcp_write"
@@ -932,12 +1013,17 @@ class PluginRegistry:
             raise RuntimeError("Plugin services are not attached")
         context = ToolExecutionContext(user=user, services=self._services, request_meta=request_meta)
         result = await tool.handler(context, arguments)
+        redacted_arguments = self._services.host_ops.redact_arguments(
+            arguments,
+            sensitive_fields=tool.manifest.audit_redact_fields,
+            max_string_length=tool.manifest.audit_max_string_length,
+        )
         await self.audit.record(
             "mcp.tool.call",
             actor=user,
             request_meta=request_meta,
             target={"tool_key": tool_key},
-            metadata={"arguments": arguments, "read_only": tool.manifest.read_only},
+            metadata={"arguments": redacted_arguments, "read_only": tool.manifest.read_only},
         )
         return result if isinstance(result, dict) else {"result": result}
 
@@ -948,6 +1034,8 @@ class ApplicationServices:
     db: DatabaseManager
     logger_manager: IntegrityLogManager
     mailer: Mailer
+    host_ops: HostOpsService
+    alerts: AlertingService
     permissions: PermissionCatalog
     audit: AuditService
     rate_limiter: RateLimiter
@@ -975,6 +1063,7 @@ async def build_application_services(settings: Settings, logger_manager: Integri
     db = DatabaseManager(settings)
     await db.connect()
     await db.ensure_indexes()
+    host_ops = HostOpsService(settings)
 
     permissions = PermissionCatalog()
     permissions.register_many(CORE_PERMISSIONS)
@@ -994,6 +1083,7 @@ async def build_application_services(settings: Settings, logger_manager: Integri
     users = UserService(db, settings, permissions, audit)
     auth = AuthService(db, settings, users)
     oauth = OAuthService(db, settings, users, audit)
+    alerts = AlertingService(db, host_ops, mailer, settings.host_ops.alert_poll_interval_seconds)
     plugins = PluginRegistry(db, settings, permissions, audit, settings_service, rate_limiter)
 
     services = ApplicationServices(
@@ -1001,6 +1091,8 @@ async def build_application_services(settings: Settings, logger_manager: Integri
         db=db,
         logger_manager=logger_manager,
         mailer=mailer,
+        host_ops=host_ops,
+        alerts=alerts,
         permissions=permissions,
         audit=audit,
         rate_limiter=rate_limiter,
@@ -1023,6 +1115,7 @@ async def shutdown_application_services(services: ApplicationServices) -> None:
     for plugin in services.plugins.plugins.values():
         if plugin.shutdown:
             await plugin.shutdown(services)
+    await services.alerts.stop()
     if services.verifier_task is not None:
         services.verifier_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):

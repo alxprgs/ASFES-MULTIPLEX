@@ -16,6 +16,8 @@ REFRESH_TOKENS = "refresh_tokens"
 PLUGINS = "plugins"
 TOOL_POLICIES = "tool_policies"
 AUDIT_EVENTS = "audit_events"
+ALERT_RULES = "alert_rules"
+ALERT_EVENTS = "alert_events"
 
 
 class DatabaseManager:
@@ -110,5 +112,22 @@ class DatabaseManager:
                 IndexModel([("created_at", ASCENDING)]),
                 IndexModel([("actor_user_id", ASCENDING), ("created_at", ASCENDING)]),
                 IndexModel([("event_type", ASCENDING), ("created_at", ASCENDING)]),
+            ]
+        )
+
+        alert_rules = self.collection(ALERT_RULES)
+        await alert_rules.create_indexes(
+            [
+                IndexModel([("name", ASCENDING)], unique=True),
+                IndexModel([("enabled", ASCENDING)]),
+                IndexModel([("source", ASCENDING)]),
+            ]
+        )
+
+        alert_events = self.collection(ALERT_EVENTS)
+        await alert_events.create_indexes(
+            [
+                IndexModel([("created_at", ASCENDING)]),
+                IndexModel([("rule_id", ASCENDING), ("created_at", ASCENDING)]),
             ]
         )

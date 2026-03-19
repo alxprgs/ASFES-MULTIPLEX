@@ -145,6 +145,10 @@ class PluginInfoResponse(BaseModel):
     enabled: bool
     os_support: list[str]
     tool_keys: list[str]
+    available: bool = True
+    availability_reason: str | None = None
+    required_backends: list[str] = Field(default_factory=list)
+    providers: list[str] = Field(default_factory=list)
 
 
 class ToolInfoResponse(BaseModel):
@@ -156,6 +160,11 @@ class ToolInfoResponse(BaseModel):
     permissions: list[str]
     tags: list[str]
     global_enabled: bool
+    available: bool = True
+    availability_reason: str | None = None
+    os_support: list[str] = Field(default_factory=lambda: ["linux", "windows"])
+    required_backends: list[str] = Field(default_factory=list)
+    providers: list[str] = Field(default_factory=list)
 
 
 class UserToolPolicyResponse(BaseModel):
@@ -172,6 +181,15 @@ class ToolExecutionContext:
 
 
 ToolHandler = Callable[[ToolExecutionContext, dict[str, Any]], Awaitable[Any]]
+AvailabilityHandler = Callable[["ApplicationServices"], Awaitable["RuntimeAvailability"]]
+
+
+@dataclass(slots=True)
+class RuntimeAvailability:
+    available: bool
+    reason: str | None = None
+    required_backends: list[str] = field(default_factory=list)
+    providers: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -184,6 +202,11 @@ class MCPToolManifest:
     tags: list[str] = field(default_factory=list)
     read_only: bool = False
     default_global_enabled: bool = True
+    os_support: list[str] = field(default_factory=lambda: ["linux", "windows"])
+    required_backends: list[str] = field(default_factory=list)
+    providers: list[str] = field(default_factory=list)
+    audit_redact_fields: list[str] = field(default_factory=list)
+    audit_max_string_length: int = 512
 
 
 @dataclass(slots=True)
@@ -195,12 +218,15 @@ class PluginManifest:
     os_support: list[str] = field(default_factory=lambda: ["linux", "windows"])
     enabled_by_default: bool = True
     permissions: list[PermissionDefinition] = field(default_factory=list)
+    required_backends: list[str] = field(default_factory=list)
+    providers: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
 class MCPTool:
     manifest: MCPToolManifest
     handler: ToolHandler
+    availability: AvailabilityHandler | None = None
 
 
 @dataclass(slots=True)
@@ -209,3 +235,4 @@ class PluginDefinition:
     tools: dict[str, MCPTool]
     startup: Callable[["ApplicationServices"], Awaitable[None]] | None = None
     shutdown: Callable[["ApplicationServices"], Awaitable[None]] | None = None
+    availability: AvailabilityHandler | None = None
