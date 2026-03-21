@@ -9,6 +9,8 @@ __pycache__/
 ### DATA, TEST AND MORE
 data/
 .test_tmp*
+*_logs.db
+runtime\multiplex_logs.db
 
 # Distribution / packaging
 .Python
