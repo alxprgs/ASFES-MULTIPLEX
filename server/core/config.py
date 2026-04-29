@@ -21,6 +21,7 @@ class AppConfig(BaseModel):
     public_base_url: HttpUrl = "https://multiplex.asfes.ru"
     api_prefix: str = "/api"
     mcp_path: str = "/mcp"
+    frontend_dist: Path = BASE_DIR / "frontend" / "dist"
     startup_progress: bool = True
 
     @field_validator("api_prefix", "mcp_path")
@@ -128,6 +129,9 @@ class SecurityConfig(BaseModel):
     oauth_refresh_token_ttl_days: int = 30
     oauth_authorization_code_ttl_minutes: int = 10
     session_cookie_name: str = "multiplex_session"
+    csrf_cookie_name: str = "multiplex_csrf"
+    cookie_secure: bool = False
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     issuer: str | None = None
     api_audience: str = "multiplex-api"
     mcp_audience: str = "multiplex-mcp"
@@ -190,6 +194,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def finalize_paths(self) -> "Settings":
+        self.app.frontend_dist = self.app.frontend_dist if self.app.frontend_dist.is_absolute() else BASE_DIR / self.app.frontend_dist
         self.logging.directory = self.logging.directory if self.logging.directory.is_absolute() else BASE_DIR / self.logging.directory
         self.logging.sqlite_path = (
             self.logging.sqlite_path if self.logging.sqlite_path.is_absolute() else BASE_DIR / self.logging.sqlite_path
@@ -282,6 +287,40 @@ class Settings(BaseSettings):
     @property
     def protected_resource_metadata_path(self) -> str:
         return f"/.well-known/oauth-protected-resource{self.mcp_path}"
+
+    @property
+    def is_production(self) -> bool:
+        return self.app.env.lower() == "production" or not self.app.dev
+
+    @property
+    def access_cookie_name(self) -> str:
+        return self.security.session_cookie_name
+
+    @property
+    def refresh_cookie_name(self) -> str:
+        return f"{self.security.session_cookie_name}_refresh"
+
+    @property
+    def csrf_cookie_name(self) -> str:
+        return self.security.csrf_cookie_name
+
+    def _uses_default_secret_values(self) -> bool:
+        insecure_values = {
+            "ChangeThisApiJwtSecretImmediately",
+            "ChangeThisOauthJwtSecretImmediately",
+            "ChangeThisPasswordPepper",
+            "ChangeMeRootPassword123!",
+            "change-this-api-secret",
+            "change-this-oauth-secret",
+            "change-this-password-pepper",
+        }
+        current_values = {
+            self.security.api_jwt_secret.get_secret_value(),
+            self.security.oauth_jwt_secret.get_secret_value(),
+            self.security.password_pepper.get_secret_value(),
+            self.root.password.get_secret_value(),
+        }
+        return bool(current_values.intersection(insecure_values))
 
 
 @lru_cache(maxsize=1)

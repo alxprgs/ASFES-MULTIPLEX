@@ -33,6 +33,11 @@ CORE_PERMISSIONS = {
 }
 
 
+def validate_runtime_security(settings: Settings) -> None:
+    if settings.is_production and settings._uses_default_secret_values():
+        raise RuntimeError("Production mode requires custom SECURITY secrets and ROOT password")
+
+
 def serialize_datetime(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
@@ -262,6 +267,10 @@ class UserService:
 
     async def get_user_by_username(self, username: str) -> dict[str, Any] | None:
         return await self.db.collection(USERS).find_one({"username": username})
+
+    async def list_users(self, limit: int = 200) -> list[dict[str, Any]]:
+        cursor = self.db.collection(USERS).find().sort("username", 1).limit(limit)
+        return [self.to_response(item) async for item in cursor]
 
     async def create_user(
         self,
@@ -773,6 +782,7 @@ class PluginRegistry:
             upsert=True,
         )
         for tool in plugin.tools.values():
+            default_enabled = tool.manifest.default_global_enabled and tool.manifest.read_only
             await self.db.collection(TOOL_POLICIES).update_one(
                 {"tool_key": tool.manifest.key, "scope": "global", "subject_id": "*"},
                 {
@@ -781,13 +791,29 @@ class PluginRegistry:
                         "tool_key": tool.manifest.key,
                         "scope": "global",
                         "subject_id": "*",
-                        "enabled": tool.manifest.default_global_enabled,
+                        "enabled": default_enabled,
                         "created_at": now_utc(),
                     },
                     "$set": {"updated_at": now_utc()},
                 },
                 upsert=True,
             )
+
+    async def set_plugin_enabled(self, plugin_key: str, enabled: bool, *, actor: UserPrincipal, request_meta: dict[str, Any]) -> None:
+        if plugin_key not in self.plugins:
+            raise LookupError("Plugin not found")
+        await self.db.collection(PLUGINS).update_one(
+            {"key": plugin_key},
+            {"$set": {"enabled": enabled, "updated_at": now_utc()}},
+            upsert=False,
+        )
+        await self.audit.record(
+            "mcp.plugin.update",
+            actor=actor,
+            request_meta=request_meta,
+            target={"plugin_key": plugin_key},
+            metadata={"enabled": enabled},
+        )
 
     async def list_plugins(self) -> list[dict[str, Any]]:
         cursor = self.db.collection(PLUGINS).find().sort("key", 1)
@@ -1060,6 +1086,7 @@ def build_rate_limit_policies(settings: Settings) -> dict[str, RateLimitPolicy]:
 
 
 async def build_application_services(settings: Settings, logger_manager: IntegrityLogManager, mailer: Mailer) -> ApplicationServices:
+    validate_runtime_security(settings)
     db = DatabaseManager(settings)
     await db.connect()
     await db.ensure_indexes()

@@ -21,6 +21,8 @@ def make_test_settings():
     unique = uuid4().hex
     workspace = Path.cwd() / ".test_runtime" / unique
     cfg = base_settings.model_copy(deep=True)
+    cfg.app.env = "test"
+    cfg.app.dev = True
     cfg.app.startup_progress = False
     cfg.mongo.database = f"{base_settings.mongo.database}_test_{unique}"
     cfg.redis.mode = "disabled"

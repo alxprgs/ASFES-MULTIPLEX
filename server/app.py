@@ -4,10 +4,13 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi import HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from server.core.config import settings
+from server.core.config import Settings, settings
 from server.core.logging import IntegrityLogManager, Mailer, get_logger
 from server.mcp import create_mcp_gateway
 from server.routes import api_router, root_router
@@ -78,7 +81,31 @@ def create_app() -> FastAPI:
     app.include_router(root_router)
     app.include_router(api_router, prefix=settings.api_prefix)
     app.mount(settings.mcp_path, mcp_gateway.http_app)
+    mount_frontend(app, settings)
     return app
+
+
+def mount_frontend(app: FastAPI, app_settings: Settings) -> None:
+    frontend_dist = app_settings.app.frontend_dist
+    assets_dir = frontend_dist / "assets"
+    app.mount("/assets", StaticFiles(directory=str(assets_dir), check_dir=False), name="frontend-assets")
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/{frontend_path:path}", include_in_schema=False)
+    async def serve_frontend(frontend_path: str = "") -> FileResponse:
+        blocked_prefixes = (
+            app_settings.api_prefix.strip("/"),
+            app_settings.mcp_path.strip("/"),
+            ".well-known",
+        )
+        first_segment = frontend_path.split("/", 1)[0] if frontend_path else ""
+        if first_segment in blocked_prefixes:
+            raise HTTPException(status_code=404, detail="Not found")
+
+        index_path = frontend_dist / "index.html"
+        if not index_path.exists():
+            raise HTTPException(status_code=404, detail="Frontend bundle is not built")
+        return FileResponse(index_path)
 
 
 app = create_app()

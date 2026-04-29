@@ -10,7 +10,9 @@ __pycache__/
 data/
 .test_tmp*
 *_logs.db
-runtime\multiplex_logs.db
+runtime/
+!runtime/.gitkeep
+*.db
 
 # Distribution / packaging
 .Python
@@ -60,6 +62,13 @@ coverage.xml
 .test_runtime/
 pytest-cache-files-*/
 cover/
+
+# Frontend dependencies/build output
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
 
 # Translations
 *.mo

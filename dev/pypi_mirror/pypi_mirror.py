@@ -19,7 +19,7 @@ logger = logging.getLogger("AsyncPypiMirror")
 
 
 class MirrorConfig(BaseModel):
-    """Configuration for the PyPI mirror."""
+    """Конфигурация зеркала PyPI."""
 
     api_base: str = "https://pypi.org/pypi"
     data_dir: Path = Field(default_factory=lambda: Path(__file__).resolve().parent / "pypi_storage")
@@ -37,7 +37,7 @@ class MirrorConfig(BaseModel):
 
 
 class AsyncPypiMirror:
-    """Asynchronous PyPI mirror with low-level and high-level APIs."""
+    """Асинхронное зеркало PyPI с низкоуровневым и высокоуровневым API."""
 
     def __init__(self, config: MirrorConfig):
         self.cfg = config
@@ -45,7 +45,7 @@ class AsyncPypiMirror:
         self.proxies = self._load_proxies(self.cfg.proxies)
         self._rate_limit_bytes = (self.cfg.rate_limit_mb * 1024 * 1024) if self.cfg.rate_limit_mb else None
 
-    # ------------------------- Core helpers -------------------------
+    # ------------------------- Базовые помощники -------------------------
 
     def _result(self, ok: bool, action: str, **data: Any) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"ok": ok, "action": action}
@@ -181,7 +181,7 @@ class AsyncPypiMirror:
             "total_size_human": self._format_size(total_size),
         }
 
-    # ------------------------- Low-level methods -------------------------
+    # ------------------------- Низкоуровневые методы -------------------------
 
     async def _verify_hash(self, file_path: Path, expected_sha256: str) -> bool:
         if not file_path.exists() or not file_path.is_file():
@@ -382,7 +382,7 @@ class AsyncPypiMirror:
         except Exception:
             return sorted(versions_dirs, key=lambda p: p.name)[-1]
 
-    # ------------------------- Public high-level API -------------------------
+    # ------------------------- Публичный высокоуровневый API -------------------------
 
     async def download_version_public(
         self, name: str, ver: str, session: Optional[aiohttp.ClientSession] = None

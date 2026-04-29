@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+import hmac
+
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -18,17 +20,26 @@ def get_services(request: Request) -> ApplicationServices:
 
 
 async def get_optional_api_user(
+    request: Request,
     services: ApplicationServices = Depends(get_services),
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> UserPrincipal | None:
-    if credentials is None:
+    token = credentials.credentials if credentials is not None else request.cookies.get(services.settings.access_cookie_name)
+    using_cookie = credentials is None and bool(token)
+    request.state.auth_via_cookie = using_cookie
+    if token is None:
         return None
+    enforce_csrf_for_cookie_auth(request, services)
     try:
-        payload = services.auth.verify_api_access_token(credentials.credentials)
+        payload = services.auth.verify_api_access_token(token)
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API bearer token") from exc
+        if using_cookie:
+            return None
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API token") from exc
     user = await services.users.get_user_by_id(payload["sub"])
     if not user:
+        if using_cookie:
+            return None
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User does not exist")
     return services.users.to_principal(user)
 
@@ -62,6 +73,18 @@ def require_permission(permission: str) -> Callable[[UserPrincipal], UserPrincip
         return user
 
     return dependency
+
+
+def enforce_csrf_for_cookie_auth(request: Request, services: ApplicationServices) -> None:
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return
+    if not getattr(request.state, "auth_via_cookie", False):
+        return
+
+    cookie_token = request.cookies.get(services.settings.csrf_cookie_name)
+    header_token = request.headers.get("x-csrf-token")
+    if not cookie_token or not header_token or not hmac.compare_digest(cookie_token, header_token):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid CSRF token")
 
 
 async def enforce_api_rate_limit(

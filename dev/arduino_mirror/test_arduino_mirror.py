@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 
-# Lightweight stubs for environments without aiohttp/aiofiles.
+# Лёгкие заглушки для окружений без aiohttp/aiofiles.
 if "aiohttp" not in sys.modules:
     aiohttp_stub = types.ModuleType("aiohttp")
 
@@ -54,7 +54,7 @@ if "aiofiles" not in sys.modules:
     aiofiles_stub.open = _aio_open
     sys.modules["aiofiles"] = aiofiles_stub
 
-# Allow importing local module as "arduino_mirror"
+# Разрешаем импортировать локальный модуль как "arduino_mirror".
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from arduino_mirror import AsyncArduinoMirror, MirrorConfig

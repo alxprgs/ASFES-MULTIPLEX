@@ -20,7 +20,7 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 from pydantic import BaseModel, Field
 try:
     import yaml # pyright: ignore[reportMissingModuleSource]
-except Exception:  # pragma: no cover - optional dependency fallback
+except Exception:  # pragma: no cover - запасной путь для необязательной зависимости
     yaml = None
 
 logging.basicConfig(level=logging.INFO)
@@ -186,7 +186,7 @@ class AsyncArduinoMirror:
         self._load_state()
 
     # ---------------------------------------------------------------------
-    # config/models helpers
+    # Помощники конфигурации и моделей
     # ---------------------------------------------------------------------
     def _load_proxies(self, proxies: Union[List[str], str, None]) -> List[str]:
         if not proxies:
@@ -206,11 +206,11 @@ class AsyncArduinoMirror:
         return datetime.now(timezone.utc).isoformat()
 
     def _url_lookup_key(self, url: str) -> str:
-        """Build a case-insensitive key for URL-to-local lookups."""
+        """Строит регистронезависимый ключ для сопоставления URL с локальными путями."""
         return self._normalize_url(url).lower()
 
     async def _apply_rate_limit(self, chunk_size: int) -> None:
-        """Apply global token-bucket throttling across concurrent downloads."""
+        """Применяет общий token-bucket лимит к параллельным загрузкам."""
         if not self._rate_limit_bytes or chunk_size <= 0:
             return
 
@@ -235,7 +235,7 @@ class AsyncArduinoMirror:
             await asyncio.sleep(wait_time)
 
     # ---------------------------------------------------------------------
-    # path/url safety helpers
+    # Помощники безопасной работы с путями и URL
     # ---------------------------------------------------------------------
     def _safe_path(self, *parts: Union[str, Path]) -> Path:
         clean_parts: List[str] = []
@@ -404,7 +404,7 @@ class AsyncArduinoMirror:
         return digest.hexdigest()
 
     # ---------------------------------------------------------------------
-    # network/download helpers
+    # Помощники сети и загрузок
     # ---------------------------------------------------------------------
     def _request_kwargs(self) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {
@@ -512,7 +512,7 @@ class AsyncArduinoMirror:
     async def _download_file(
         self, session: aiohttp.ClientSession, url: str, dest: Path
     ) -> Dict[str, Any]:
-        """Download a file with retries, global rate-limit and temp-file safety."""
+        """Загружает файл с повторами, общим rate-limit и безопасным временным файлом."""
         normalized = self._normalize_url(url)
         if self.cfg.dry_run:
             return {"size_bytes": 0, "content_type": "", "normalized_url": normalized}
@@ -612,7 +612,7 @@ class AsyncArduinoMirror:
         dest_dir: Path,
         expected_name: Optional[str] = None,
     ) -> AssetRecord:
-        """Download and register one asset with retries and deduplication."""
+        """Загружает и регистрирует один asset с повторами и дедупликацией."""
         normalized = self._normalize_url(url)
         lookup_key = self._url_lookup_key(normalized)
         dest_dir = dest_dir.resolve()
@@ -675,7 +675,7 @@ class AsyncArduinoMirror:
             raise last_error
         raise RuntimeError(f"asset download failed for {normalized}")
     # ---------------------------------------------------------------------
-    # storage / state helpers
+    # Помощники хранилища и состояния
     # ---------------------------------------------------------------------
     def _read_json(self, path: Path, default: Any) -> Any:
         if not path.exists():
@@ -702,7 +702,7 @@ class AsyncArduinoMirror:
                 self._assets_by_url[self._url_lookup_key(normalized)] = rec
 
     async def _write_json(self, path: Path, data: Any) -> None:
-        """Atomically write JSON file via aiofiles."""
+        """Атомарно записывает JSON-файл через aiofiles."""
         path.parent.mkdir(parents=True, exist_ok=True)
         temp = path.with_name(f"{path.name}.tmp")
         payload = json.dumps(data, indent=2, ensure_ascii=False)
@@ -711,7 +711,7 @@ class AsyncArduinoMirror:
         await asyncio.to_thread(os.replace, temp, path)
 
     async def _write_markdown(self, path: Path, text: str) -> None:
-        """Atomically write markdown file via aiofiles."""
+        """Атомарно записывает markdown-файл через aiofiles."""
         path.parent.mkdir(parents=True, exist_ok=True)
         temp = path.with_name(f"{path.name}.tmp")
         async with aiofiles.open(temp, "w", encoding="utf-8") as handle:
@@ -719,7 +719,7 @@ class AsyncArduinoMirror:
         await asyncio.to_thread(os.replace, temp, path)
 
     async def _write_html_snapshot(self, path: Path, html: str) -> None:
-        """Atomically write HTML snapshot via aiofiles."""
+        """Атомарно записывает HTML-снимок через aiofiles."""
         path.parent.mkdir(parents=True, exist_ok=True)
         temp = path.with_name(f"{path.name}.tmp")
         async with aiofiles.open(temp, "w", encoding="utf-8") as handle:
@@ -727,7 +727,7 @@ class AsyncArduinoMirror:
         await asyncio.to_thread(os.replace, temp, path)
 
     async def _save_state_async(self) -> None:
-        """Persist all state/index files asynchronously."""
+        """Асинхронно сохраняет все файлы состояния и индексов."""
         await self._write_json(self._visited_file, sorted(self.visited_urls))
         await self._write_json(self._url_map_file, self.url_to_local_path)
         await self._write_json(self._failures_file, self.failures)
@@ -739,7 +739,7 @@ class AsyncArduinoMirror:
         await self._write_json(self._learn_index_file, self.learn_index)
 
     def _save_state(self) -> None:
-        """Sync wrapper for state persistence."""
+        """Синхронная обёртка для сохранения состояния."""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -788,10 +788,10 @@ class AsyncArduinoMirror:
             self._upsert_by_key(self.learn_index, page_rec, "normalized_url")
 
     # ---------------------------------------------------------------------
-    # detection / extraction helpers
+    # Помощники определения и извлечения данных
     # ---------------------------------------------------------------------
     def _detect_page_type(self, url: str, soup: BeautifulSoup, html: str) -> str:
-        """Detect page type using both URL patterns and structural/CSS hints."""
+        """Определяет тип страницы по URL-шаблонам и структурным/CSS-признакам."""
         normalized = self._normalize_url(url)
         path = urlparse(normalized).path.lower()
 
@@ -846,7 +846,7 @@ class AsyncArduinoMirror:
         return "article_page"
 
     def _extract_breadcrumbs(self, soup: BeautifulSoup) -> List[str]:
-        """Extract breadcrumb trail from common navigation selectors."""
+        """Извлекает хлебные крошки из распространённых навигационных селекторов."""
         breadcrumbs: List[str] = []
         selectors = [
             "nav[aria-label*='breadcrumb' i] a",
@@ -863,7 +863,7 @@ class AsyncArduinoMirror:
         return breadcrumbs
 
     def _extract_title(self, soup: BeautifulSoup) -> str:
-        """Extract page title from h1/title tags."""
+        """Извлекает заголовок страницы из тегов h1/title."""
         h1 = soup.find("h1")
         if isinstance(h1, Tag):
             title = h1.get_text(" ", strip=True)
@@ -877,7 +877,7 @@ class AsyncArduinoMirror:
         return "Untitled"
 
     def _extract_description(self, soup: BeautifulSoup) -> str:
-        """Extract description from meta or first paragraph fallback."""
+        """Извлекает описание из meta или, запасным путём, из первого абзаца."""
         meta = soup.find("meta", attrs={"name": "description"})
         if isinstance(meta, Tag):
             desc = meta.get("content", "").strip()
@@ -889,7 +889,7 @@ class AsyncArduinoMirror:
         return ""
 
     def _extract_last_revision(self, soup: BeautifulSoup) -> str:
-        """Extract last revision date string from page text."""
+        """Извлекает строку даты последней ревизии из текста страницы."""
         text = soup.get_text(" ", strip=True)
         match = re.search(
             r"Last\s+revision\s*[:\-]?\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|"
@@ -900,7 +900,7 @@ class AsyncArduinoMirror:
         return match.group(1).strip() if match else ""
 
     def _extract_all_links(self, soup: BeautifulSoup, base_url: str) -> List[str]:
-        """Extract all allowed internal links from a page."""
+        """Извлекает все разрешённые внутренние ссылки со страницы."""
         links: List[str] = []
         seen: set[str] = set()
         for node in soup.find_all("a", href=True):
@@ -916,7 +916,7 @@ class AsyncArduinoMirror:
         return links
 
     def _extract_asset_links(self, soup: BeautifulSoup, base_url: str) -> List[str]:
-        """Extract downloadable and image asset links from a page."""
+        """Извлекает ссылки на загружаемые файлы и изображения со страницы."""
         links: List[str] = []
         seen: set[str] = set()
 
@@ -969,7 +969,7 @@ class AsyncArduinoMirror:
     def _extract_downloadable_resources(
         self, soup: BeautifulSoup, base_url: str
     ) -> List[Dict[str, str]]:
-        """Extract links from downloadable resources section."""
+        """Извлекает ссылки из раздела загружаемых ресурсов."""
         resources: List[Dict[str, str]] = []
         seen: set[str] = set()
 
@@ -1007,7 +1007,7 @@ class AsyncArduinoMirror:
     def _extract_feature_cards(
         self, soup: BeautifulSoup, base_url: str
     ) -> List[Dict[str, str]]:
-        """Extract feature cards with title/description/tag/url fields."""
+        """Извлекает карточки возможностей с полями title/description/tag/url."""
         cards: List[Dict[str, str]] = []
         seen: set[str] = set()
         scopes: List[Tag] = []
@@ -1058,7 +1058,7 @@ class AsyncArduinoMirror:
         return cards
 
     def _extract_tech_specs(self, soup: BeautifulSoup) -> Dict[str, Any]:
-        """Extract Tech Specs section and convert to markdown."""
+        """Извлекает раздел Tech Specs и преобразует его в markdown."""
         heading = self._find_heading(soup, [r"tech specs?", r"technical specifications?"])
         if heading is None:
             return {"found": False, "markdown": "", "html": ""}
@@ -1070,7 +1070,7 @@ class AsyncArduinoMirror:
     def _extract_named_section_markdown(
         self, soup: BeautifulSoup, heading_patterns: Iterable[str]
     ) -> str:
-        """Extract any named section by heading regex and convert to markdown."""
+        """Извлекает именованный раздел по regex заголовка и преобразует его в markdown."""
         heading = self._find_heading(soup, heading_patterns)
         if heading is None:
             return ""
@@ -1078,7 +1078,7 @@ class AsyncArduinoMirror:
         return self._html_to_markdown(BeautifulSoup(html, "html.parser"), "", self.data_dir)
 
     # ---------------------------------------------------------------------
-    # markdown conversion helpers
+    # Помощники преобразования markdown
     # ---------------------------------------------------------------------
     def _inline_to_markdown(self, node: Any) -> str:
         if isinstance(node, NavigableString):
@@ -1119,7 +1119,7 @@ class AsyncArduinoMirror:
         return "".join(self._inline_to_markdown(child) for child in node.children)
 
     def _convert_table_to_markdown(self, table_tag: Tag) -> str:
-        """Convert HTML table into GitHub-compatible markdown table."""
+        """Преобразует HTML-таблицу в markdown-таблицу, совместимую с GitHub."""
         rows: List[List[str]] = []
         for tr in table_tag.find_all("tr"):
             row: List[str] = []
@@ -1146,7 +1146,7 @@ class AsyncArduinoMirror:
         return "\n".join(lines)
 
     def _convert_code_block(self, pre_tag: Tag) -> str:
-        """Convert <pre><code> block to fenced markdown code block."""
+        """Преобразует блок <pre><code> в fenced markdown code block."""
         language = ""
         code_tag = pre_tag.find("code")
         if isinstance(code_tag, Tag):
@@ -1158,7 +1158,7 @@ class AsyncArduinoMirror:
         return f"```{language}\n{code_text}\n```"
 
     def _convert_list_to_markdown(self, list_tag: Tag, level: int = 0) -> str:
-        """Convert nested HTML lists to markdown lists."""
+        """Преобразует вложенные HTML-списки в markdown-списки."""
         ordered = list_tag.name.lower() == "ol"
         lines: List[str] = []
         for idx, item in enumerate(list_tag.find_all("li", recursive=False), start=1):
@@ -1236,7 +1236,7 @@ class AsyncArduinoMirror:
         return text.strip() + "\n"
 
     def _rewrite_links_to_local(self, text: str, current_local_path: Path) -> str:
-        """Rewrite markdown links to local files with case-insensitive URL matching."""
+        """Переписывает markdown-ссылки на локальные файлы с регистронезависимым сопоставлением URL."""
         pattern = re.compile(r"(!?\[[^\]]*\]\()([^)]+)(\))")
         pages_lookup = {
             self._url_lookup_key(url): path for url, path in self.url_to_local_path.items()
@@ -1298,7 +1298,7 @@ class AsyncArduinoMirror:
         markdown = self._normalize_markdown("".join(blocks))
         return markdown
     # ---------------------------------------------------------------------
-    # section/page parser helpers
+    # Помощники парсинга разделов и страниц
     # ---------------------------------------------------------------------
     def _resolve_page_paths(
         self, url: str, page_type: str, title: str
@@ -1388,7 +1388,7 @@ class AsyncArduinoMirror:
         fetched_at: str,
         description: str = "",
     ) -> str:
-        """Build safe YAML front matter for markdown pages."""
+        """Строит безопасный YAML front matter для markdown-страниц."""
         payload = {
             "title": title or "",
             "description": description or "",
@@ -1416,7 +1416,7 @@ class AsyncArduinoMirror:
         html: str,
         page_type: str,
     ) -> Dict[str, Any]:
-        """Parse generic page types into markdown/json and collect assets."""
+        """Парсит общие типы страниц в markdown/json и собирает assets."""
         normalized = self._normalize_url(url)
         title = self._extract_title(soup)
         breadcrumbs = self._extract_breadcrumbs(soup)
@@ -1509,7 +1509,7 @@ class AsyncArduinoMirror:
     async def _parse_hardware_index(
         self, session: aiohttp.ClientSession, url: str, soup: BeautifulSoup, html: str
     ) -> Dict[str, Any]:
-        """Parse hardware hub/index-like pages."""
+        """Парсит hardware hub и index-подобные страницы."""
         return await self._parse_generic_page(session, url, soup, html, "hardware_index_like")
 
     async def _process_hardware_downloads(
@@ -1519,7 +1519,7 @@ class AsyncArduinoMirror:
         page_url: str,
         files_dir: Path,
     ) -> List[AssetRecord]:
-        """Download all downloadable resources from hardware page."""
+        """Загружает все загружаемые ресурсы со страницы hardware."""
         downloads_meta: List[AssetRecord] = []
         for resource in self._extract_downloadable_resources(soup, page_url):
             try:
@@ -1542,7 +1542,7 @@ class AsyncArduinoMirror:
         dirname: str,
         features_all_path: Path,
     ) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
-        """Extract feature cards and save summary/feature markdown files."""
+        """Извлекает карточки возможностей и сохраняет summary/feature markdown-файлы."""
         feature_cards = self._extract_feature_cards(soup, page_url)
         feature_docs: List[Dict[str, str]] = []
         features_all_lines = ["# Features", ""]
@@ -1606,7 +1606,7 @@ class AsyncArduinoMirror:
         compatibility_path: Path,
         suggested_libraries_path: Path,
     ) -> Dict[str, str]:
-        """Extract and persist Tech Specs/Compatibility/Suggested Libraries sections."""
+        """Извлекает и сохраняет разделы Tech Specs/Compatibility/Suggested Libraries."""
         tech_specs = self._extract_tech_specs(soup)
         compatibility_md = self._extract_named_section_markdown(soup, [r"compatibility"])
         suggested_libraries_md = self._extract_named_section_markdown(
@@ -1630,7 +1630,7 @@ class AsyncArduinoMirror:
     async def _parse_hardware_product(
         self, session: aiohttp.ClientSession, url: str, soup: BeautifulSoup, html: str
     ) -> Dict[str, Any]:
-        """Parse hardware product page and coordinate assets/features/spec sections."""
+        """Парсит страницу hardware-продукта и координирует assets/features/spec sections."""
         normalized = self._normalize_url(url)
         title = self._extract_title(soup)
         breadcrumbs = self._extract_breadcrumbs(soup)
@@ -1803,13 +1803,13 @@ class AsyncArduinoMirror:
     async def _parse_software_root(
         self, session: aiohttp.ClientSession, url: str, soup: BeautifulSoup, html: str
     ) -> Dict[str, Any]:
-        """Parse /software root hub page."""
+        """Парсит корневую hub-страницу /software."""
         return await self._parse_generic_page(session, url, soup, html, "section_root")
 
     async def _parse_software_tool_page(
         self, session: aiohttp.ClientSession, url: str, soup: BeautifulSoup, html: str
     ) -> Dict[str, Any]:
-        """Parse software tool page and save SoftwareInfo metadata."""
+        """Парсит страницу software tool и сохраняет метаданные SoftwareInfo."""
         parsed = await self._parse_generic_page(session, url, soup, html, "software_tool")
         title = parsed["metadata"]["title"]
         normalized = parsed["metadata"]["normalized_url"]
@@ -1832,34 +1832,34 @@ class AsyncArduinoMirror:
     async def _parse_programming_root(
         self, session: aiohttp.ClientSession, url: str, soup: BeautifulSoup, html: str
     ) -> Dict[str, Any]:
-        """Parse /programming root hub page."""
+        """Парсит корневую hub-страницу /programming."""
         return await self._parse_generic_page(session, url, soup, html, "section_root")
 
     async def _parse_reference_page(
         self, session: aiohttp.ClientSession, url: str, soup: BeautifulSoup, html: str
     ) -> Dict[str, Any]:
-        """Parse language/reference documentation page."""
+        """Парсит страницу документации language/reference."""
         return await self._parse_generic_page(session, url, soup, html, "reference_page")
 
     async def _parse_learn_root(
         self, session: aiohttp.ClientSession, url: str, soup: BeautifulSoup, html: str
     ) -> Dict[str, Any]:
-        """Parse /learn root page."""
+        """Парсит корневую страницу /learn."""
         return await self._parse_generic_page(session, url, soup, html, "section_root")
 
     async def _parse_article_page(
         self, session: aiohttp.ClientSession, url: str, soup: BeautifulSoup, html: str
     ) -> Dict[str, Any]:
-        """Parse generic article-like documentation page."""
+        """Парсит общую article-like страницу документации."""
         return await self._parse_generic_page(session, url, soup, html, "article_page")
 
     async def _parse_tutorial_page(
         self, session: aiohttp.ClientSession, url: str, soup: BeautifulSoup, html: str
     ) -> Dict[str, Any]:
-        """Parse tutorial page into markdown/json."""
+        """Парсит tutorial-страницу в markdown/json."""
         return await self._parse_generic_page(session, url, soup, html, "tutorial_page")
     # ---------------------------------------------------------------------
-    # crawl API
+    # API обхода
     # ---------------------------------------------------------------------
     @asynccontextmanager
     async def _managed_session(self, session: Optional[aiohttp.ClientSession]):
@@ -2025,7 +2025,7 @@ class AsyncArduinoMirror:
         return await self.crawl_all(session)
 
     # ---------------------------------------------------------------------
-    # verification / repair / info helpers
+    # Помощники проверки, восстановления и информации
     # ---------------------------------------------------------------------
     def _verify_asset(self, record: Dict[str, Any]) -> Tuple[bool, str]:
         path = Path(record.get("local_path", ""))
@@ -2330,11 +2330,11 @@ class AsyncArduinoMirror:
         return None
 
     def _is_url_like(self, value: str) -> bool:
-        """Return True if value looks like HTTP/HTTPS URL."""
+        """Возвращает True, если значение похоже на HTTP/HTTPS URL."""
         return value.strip().lower().startswith(("http://", "https://"))
 
     def _record_slug(self, record: Dict[str, Any]) -> str:
-        """Build stable slug for page record."""
+        """Строит стабильный slug для записи страницы."""
         source_url = record.get("normalized_url") or record.get("source_url") or ""
         if source_url:
             path = urlparse(source_url).path.strip("/")
@@ -2349,7 +2349,7 @@ class AsyncArduinoMirror:
         return "page"
 
     async def _read_json_async(self, path: Path) -> Optional[Dict[str, Any]]:
-        """Read JSON file asynchronously and return dict payload."""
+        """Асинхронно читает JSON-файл и возвращает dict payload."""
         if not path.exists():
             return None
         try:
@@ -2361,13 +2361,13 @@ class AsyncArduinoMirror:
             return None
 
     def _ensure_indexes_ready(self) -> None:
-        """Lazy rebuild indexes if in-memory indexes are empty."""
+        """Лениво перестраивает индексы, если in-memory индексы пусты."""
         if self.pages_index or self.assets_index or self.hardware_index:
             return
         self.rebuild_indexes()
 
     async def _iter_hardware_infos(self) -> List[Dict[str, Any]]:
-        """Load all HardwareInfo.json files."""
+        """Загружает все файлы HardwareInfo.json."""
         infos: List[Dict[str, Any]] = []
         hardware_root = self._safe_path("hardware")
         if not hardware_root.exists():
@@ -2379,7 +2379,7 @@ class AsyncArduinoMirror:
         return infos
 
     async def get_hardware_info(self, slug_or_url: str) -> Optional[Dict[str, Any]]:
-        """Return full hardware info dict from HardwareInfo.json."""
+        """Возвращает полный dict с hardware-информацией из HardwareInfo.json."""
         needle = slug_or_url.strip()
         if not needle:
             return None
@@ -2397,7 +2397,7 @@ class AsyncArduinoMirror:
         return None
 
     async def list_hardware(self) -> List[Dict[str, Any]]:
-        """List all hardware entities with key fields."""
+        """Возвращает список всех hardware-сущностей с ключевыми полями."""
         result: List[Dict[str, Any]] = []
         for info in await self._iter_hardware_infos():
             result.append(
@@ -2413,7 +2413,7 @@ class AsyncArduinoMirror:
         return result
 
     async def search_hardware(self, query: str) -> List[Dict[str, Any]]:
-        """Search hardware by name/family/type/tags/description."""
+        """Ищет hardware по name/family/type/tags/description."""
         needle = query.strip().lower()
         if not needle:
             return await self.list_hardware()
@@ -2442,7 +2442,7 @@ class AsyncArduinoMirror:
         return matches
 
     async def get_section_info(self, section: str) -> Dict[str, Any]:
-        """Return section path, existence and top-level items."""
+        """Возвращает путь раздела, признак существования и элементы верхнего уровня."""
         section_token = section.strip().lower().replace("-", "_")
         section_path = self._safe_path(section_token)
         items = sorted([p.name for p in section_path.iterdir()]) if section_path.exists() else []
@@ -2454,7 +2454,7 @@ class AsyncArduinoMirror:
         }
 
     async def list_section_pages(self, section: str) -> List[Dict[str, Any]]:
-        """Return list of pages in a documentation section."""
+        """Возвращает список страниц в разделе документации."""
         self._ensure_indexes_ready()
         section_token = section.strip().lower().replace("-", "_")
         records: List[Dict[str, Any]] = []
@@ -2479,7 +2479,7 @@ class AsyncArduinoMirror:
         return records
 
     async def get_page_info(self, slug_or_url: str) -> Optional[Dict[str, Any]]:
-        """Return full page metadata for slug or URL."""
+        """Возвращает полные метаданные страницы по slug или URL."""
         self._ensure_indexes_ready()
         needle = slug_or_url.strip()
         if not needle:
@@ -2505,7 +2505,7 @@ class AsyncArduinoMirror:
         return None
 
     async def get_asset_info(self, slug_or_url: str) -> Optional[AssetRecord]:
-        """Return asset metadata for URL or slug/filename."""
+        """Возвращает метаданные asset по URL или slug/filename."""
         self._ensure_indexes_ready()
         needle = slug_or_url.strip()
         if not needle:
@@ -2531,12 +2531,12 @@ class AsyncArduinoMirror:
         return None
 
     async def list_all_assets(self) -> List[AssetRecord]:
-        """Return all known asset records."""
+        """Возвращает все известные записи assets."""
         self._ensure_indexes_ready()
         return [dict(rec) for rec in self.assets_index]
 
     async def verify_asset(self, slug_or_url: str) -> Dict[str, str]:
-        """Verify one asset integrity by URL or slug."""
+        """Проверяет целостность одного asset по URL или slug."""
         asset = await self.get_asset_info(slug_or_url)
         if not asset:
             return {"status": "error", "reason": "asset_not_found"}
@@ -2544,15 +2544,15 @@ class AsyncArduinoMirror:
         return {"status": "ok" if ok else "error", "reason": reason}
 
     async def refresh_page(self, url: str) -> Dict[str, Any]:
-        """Refresh one page by URL."""
+        """Обновляет одну страницу по URL."""
         return await self.refresh(session=None, url=url)
 
     async def refresh_section(self, section: str) -> Dict[str, Any]:
-        """Refresh one section by name."""
+        """Обновляет один раздел по имени."""
         return await self.refresh(session=None, section=section)
 
     async def get_markdown(self, slug_or_url: str) -> Optional[str]:
-        """Load markdown text for one mirrored page."""
+        """Загружает markdown-текст одной зеркалированной страницы."""
         page = await self.get_page_info(slug_or_url)
         if not page:
             return None
@@ -2566,7 +2566,7 @@ class AsyncArduinoMirror:
             return await handle.read()
 
     async def get_html_snapshot(self, slug_or_url: str) -> Optional[str]:
-        """Load HTML snapshot for one mirrored page."""
+        """Загружает HTML-снимок одной зеркалированной страницы."""
         page = await self.get_page_info(slug_or_url)
         if not page:
             return None
@@ -2582,7 +2582,7 @@ class AsyncArduinoMirror:
             return await handle.read()
 
     async def rewrite_links_local(self, markdown_text: str, slug_or_url: str) -> str:
-        """Rewrite markdown links to local references for one page context."""
+        """Переписывает markdown-ссылки на локальные ссылки для контекста одной страницы."""
         page = await self.get_page_info(slug_or_url)
         if page and page.get("local_markdown_path"):
             current_path = Path(page["local_markdown_path"])
@@ -2595,7 +2595,7 @@ class AsyncArduinoMirror:
     async def search_pages(
         self, query: str, section: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Search pages by title/description with optional section filter."""
+        """Ищет страницы по title/description с опциональным фильтром раздела."""
         self._ensure_indexes_ready()
         needle = query.strip().lower()
         section_token = section.strip().lower().replace("-", "_") if section else None
@@ -2626,7 +2626,7 @@ class AsyncArduinoMirror:
         return result
 
     async def get_stats(self) -> Dict[str, Any]:
-        """Return aggregated statistics for local mirror."""
+        """Возвращает агрегированную статистику локального зеркала."""
         self._ensure_indexes_ready()
         stats = dict(self._collect_local_stats())
         stats.update(
@@ -2641,7 +2641,7 @@ class AsyncArduinoMirror:
         return stats
 
     def _delete_target_sync(self, section: str, slug: Optional[str] = None) -> bool:
-        """Synchronous delete implementation used by async API wrapper."""
+        """Синхронная реализация удаления, используемая async API-обёрткой."""
         target = self.get_path(section, slug)
         if not target:
             return False
@@ -2682,11 +2682,11 @@ class AsyncArduinoMirror:
         return True
 
     async def delete_target(self, section: str, slug: Optional[str] = None) -> bool:
-        """Delete section/page/asset target asynchronously."""
+        """Асинхронно удаляет цель section/page/asset."""
         return await asyncio.to_thread(self._delete_target_sync, section, slug)
 
     # ---------------------------------------------------------------------
-    # demo/debug block
+    # Демо- и debug-блок
     # ---------------------------------------------------------------------
     async def _debug_menu(self) -> None:
         async with aiohttp.ClientSession() as session:

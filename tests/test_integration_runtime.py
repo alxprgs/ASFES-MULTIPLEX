@@ -34,7 +34,7 @@ async def test_bootstrap_creates_runtime_root_plugins_and_safe_runtime_upserts(i
 
     tools = {item["key"]: item for item in await services.plugins.list_tools()}
     assert tools["docker.list_containers"]["global_enabled"] is True
-    assert tools["docker.restart_container"]["global_enabled"] is True
+    assert tools["docker.restart_container"]["global_enabled"] is False
     assert tools["mail.send_test_email"]["global_enabled"] is False
 
     await services.db.collection(SETTINGS).delete_one({"_id": "runtime"})
@@ -208,3 +208,69 @@ async def test_rest_oauth_and_mcp_flow_respects_user_scoping(integration_env) ->
             )
             assert denied_call.is_error is True
             assert any("Tool access denied" in getattr(item, "text", "") for item in denied_call.content)
+
+
+@pytest.mark.asyncio
+async def test_cookie_auth_csrf_and_bearer_compatibility(integration_env) -> None:
+    client = integration_env["client"]
+    services = integration_env["services"]
+    cfg = integration_env["settings"]
+
+    login = await client.post(
+        "/api/auth/login",
+        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+    )
+    assert login.status_code == 200
+    access_token = login.json()["access_token"]
+    assert client.cookies.get(cfg.access_cookie_name)
+    csrf_token = client.cookies.get(cfg.csrf_cookie_name)
+    assert csrf_token
+
+    cookie_me = await client.get("/api/auth/me")
+    assert cookie_me.status_code == 200
+    assert cookie_me.json()["username"] == cfg.root.username
+
+    blocked_write = await client.put("/api/settings/mcp", json={"enabled": False})
+    assert blocked_write.status_code == 403
+
+    cookie_write = await client.put("/api/settings/mcp", headers={"X-CSRF-Token": csrf_token}, json={"enabled": False})
+    assert cookie_write.status_code == 200
+    assert cookie_write.json()["mcp_enabled"] is False
+
+    bearer_write = await client.put(
+        "/api/settings/mcp",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={"enabled": True},
+    )
+    assert bearer_write.status_code == 200
+    assert bearer_write.json()["mcp_enabled"] is True
+
+    logout = await client.post("/api/auth/logout", headers={"X-CSRF-Token": csrf_token})
+    assert logout.status_code == 204
+    assert not client.cookies.get(cfg.access_cookie_name)
+    assert await services.settings_service.get_runtime_settings()
+
+
+@pytest.mark.asyncio
+async def test_admin_users_and_plugin_toggle(integration_env) -> None:
+    client = integration_env["client"]
+    cfg = integration_env["settings"]
+
+    login = await client.post(
+        "/api/auth/login",
+        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+    )
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    users = await client.get("/api/users", headers=headers)
+    assert users.status_code == 200
+    assert any(item["username"] == cfg.root.username for item in users.json())
+
+    disabled = await client.put("/api/mcp/plugins/docker", headers=headers, json={"enabled": False})
+    assert disabled.status_code == 200
+    assert disabled.json()["enabled"] is False
+
+    enabled = await client.put("/api/mcp/plugins/docker", headers=headers, json={"enabled": True})
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True

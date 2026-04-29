@@ -3,8 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from server.core.database import TOOL_POLICIES
-from server.core.deps import enforce_api_rate_limit, get_current_api_user, get_services, require_permission
-from server.models import AuditEventListResponse, AuditEventResponse, PermissionDefinition, PermissionMutationRequest, PluginInfoResponse, PluginReloadRequest, ProfileUpdateRequest, RuntimeSettingsResponse, ToggleRequest, ToolInfoResponse, UserResponse, UserToolPolicyResponse, UserPrincipal
+from server.core.deps import enforce_api_rate_limit, get_current_api_user, get_optional_api_user, get_services, require_permission
+from server.models import AuditEventListResponse, AuditEventResponse, BootstrapResponse, PermissionDefinition, PermissionMutationRequest, PluginInfoResponse, PluginReloadRequest, ProfileUpdateRequest, RuntimeSettingsResponse, ToggleRequest, ToolInfoResponse, UserResponse, UserToolPolicyResponse, UserPrincipal
 from server.services import ApplicationServices, request_meta_from_request
 
 
@@ -17,6 +17,34 @@ def _runtime_response(services: ApplicationServices, runtime: dict) -> RuntimeSe
         mcp_enabled=bool(runtime.get("mcp_enabled", True)),
         redis_runtime_enabled=bool(runtime.get("redis_runtime_enabled", False)),
         redis_mode=services.settings.redis.mode,
+    )
+
+
+@router.get("/bootstrap", response_model=BootstrapResponse)
+async def bootstrap(
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal | None = Depends(get_optional_api_user),
+) -> BootstrapResponse:
+    user_response = None
+    runtime_response = None
+    if current_user is not None:
+        await enforce_api_rate_limit(request, services, user=current_user)
+        user_doc = await services.users.get_user_by_id(current_user.user_id)
+        if user_doc:
+            user_response = UserResponse.model_validate(services.users.to_response(user_doc))
+        runtime_response = _runtime_response(services, await services.settings_service.get_runtime_settings())
+    return BootstrapResponse(
+        app_name=services.settings.app.name,
+        app_version=services.settings.app.version,
+        api_prefix=services.settings.api_prefix,
+        mcp_path=services.settings.mcp_path,
+        public_base_url=services.settings.public_base_url,
+        access_cookie_name=services.settings.access_cookie_name,
+        refresh_cookie_name=services.settings.refresh_cookie_name,
+        csrf_cookie_name=services.settings.csrf_cookie_name,
+        user=user_response,
+        runtime=runtime_response,
     )
 
 
@@ -48,6 +76,16 @@ async def list_permissions(
     return services.permissions.list()
 
 
+@router.get("/users", response_model=list[UserResponse])
+async def list_users(
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(require_permission("users.permission.grant")),
+) -> list[UserResponse]:
+    await enforce_api_rate_limit(request, services, user=current_user)
+    return [UserResponse.model_validate(item) for item in await services.users.list_users()]
+
+
 @router.put("/users/{user_id}/permissions", response_model=UserResponse)
 async def mutate_permissions(
     user_id: str,
@@ -57,7 +95,12 @@ async def mutate_permissions(
     current_user: UserPrincipal = Depends(require_permission("users.permission.grant")),
 ) -> UserResponse:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
-    user_doc = await services.users.mutate_permissions(user_id, payload.permissions, payload.mode, actor=current_user, request_meta=request_meta_from_request(request))
+    try:
+        user_doc = await services.users.mutate_permissions(user_id, payload.permissions, payload.mode, actor=current_user, request_meta=request_meta_from_request(request))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return UserResponse.model_validate(services.users.to_response(user_doc))
 
 
@@ -163,6 +206,28 @@ async def list_plugins(
 ) -> list[PluginInfoResponse]:
     await enforce_api_rate_limit(request, services, user=current_user)
     return [PluginInfoResponse.model_validate(item) for item in await services.plugins.list_plugins()]
+
+
+@router.put("/mcp/plugins/{plugin_key}", response_model=PluginInfoResponse)
+async def set_plugin_state(
+    plugin_key: str,
+    payload: ToggleRequest,
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(require_permission("mcp.plugin.manage")),
+) -> PluginInfoResponse:
+    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    try:
+        await services.plugins.set_plugin_enabled(plugin_key, payload.enabled, actor=current_user, request_meta=request_meta_from_request(request))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    mcp_gateway = getattr(request.app.state, "mcp_gateway", None)
+    if mcp_gateway is not None:
+        await mcp_gateway.refresh_tools()
+    plugin = next((item for item in await services.plugins.list_plugins() if item["key"] == plugin_key), None)
+    if plugin is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found")
+    return PluginInfoResponse.model_validate(plugin)
 
 
 @router.post("/mcp/plugins/reload")

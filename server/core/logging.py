@@ -185,6 +185,8 @@ class IntegrityLogManager:
             serialized["exception"] = logging.Formatter().formatException(record.exc_info)
 
         with self._lock:
+            if self._db is None:
+                return
             file_path = self._ensure_current_file(created_at)
             prev_hash = self._last_line_hash_by_file.get(str(file_path), "")
             canonical = json.dumps(serialized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

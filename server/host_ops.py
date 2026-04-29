@@ -17,7 +17,7 @@ from server.models import RuntimeAvailability
 
 try:
     import psutil as _psutil  # type: ignore
-except ImportError:  # pragma: no cover - exercised by tests via monkeypatching
+except ImportError:  # pragma: no cover - проверяется в тестах через monkeypatch
     _psutil = None
 
 

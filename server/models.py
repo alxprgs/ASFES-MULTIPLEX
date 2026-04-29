@@ -98,6 +98,19 @@ class RuntimeSettingsResponse(BaseModel):
     redis_mode: str
 
 
+class BootstrapResponse(BaseModel):
+    app_name: str
+    app_version: str
+    api_prefix: str
+    mcp_path: str
+    public_base_url: str
+    access_cookie_name: str
+    refresh_cookie_name: str
+    csrf_cookie_name: str
+    user: UserResponse | None = None
+    runtime: RuntimeSettingsResponse | None = None
+
+
 class AuditEventResponse(BaseModel):
     event_id: str
     event_type: str

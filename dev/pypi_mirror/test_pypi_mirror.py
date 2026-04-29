@@ -10,11 +10,11 @@ from uuid import uuid4
 
 import pytest
 
-# Lightweight stubs for environments without aiohttp/aiofiles installed.
+# Лёгкие заглушки для окружений без установленных aiohttp/aiofiles.
 if "aiohttp" not in sys.modules:
     aiohttp_stub = types.ModuleType("aiohttp")
 
-    class _ClientSession:  # pragma: no cover - import compatibility only
+    class _ClientSession:  # pragma: no cover - только совместимость импорта
         pass
 
     aiohttp_stub.ClientSession = _ClientSession
@@ -50,7 +50,7 @@ if "aiofiles" not in sys.modules:
     aiofiles_stub.open = _aio_open
     sys.modules["aiofiles"] = aiofiles_stub
 
-# Allow importing dev/pypi_mirror/pypi_mirror.py as module pypi_mirror
+# Разрешаем импортировать dev/pypi_mirror/pypi_mirror.py как модуль pypi_mirror.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from pypi_mirror import AsyncPypiMirror, MirrorConfig
@@ -193,7 +193,7 @@ def test_download_file_success_and_rate_limit(temp_dir, monkeypatch):
         sleep_mock = AsyncMock()
         monkeypatch.setattr(asyncio, "sleep", sleep_mock)
 
-        # Make expected > elapsed to trigger sleep branch deterministically.
+        # Делаем expected > elapsed, чтобы детерминированно попасть в ветку sleep.
         t = iter([0.0, 0.0, 0.0])
         monkeypatch.setattr("time.time", lambda: next(t, 0.0))
 
@@ -262,7 +262,7 @@ def test_download_version_hash_mismatch_removes_file(mirror):
         }
         mirror._fetch_metadata = AsyncMock(return_value=metadata)
 
-        # First check (existing file) -> False, second check (after download) -> False
+        # Первая проверка (существующий файл) -> False, вторая проверка (после загрузки) -> False.
         mirror._verify_hash = AsyncMock(side_effect=[False, False])
         mirror._check_disk_space = AsyncMock()
 
@@ -420,5 +420,5 @@ def test_get_path_fallback_for_non_pep440(mirror):
     (pkg / "abc").mkdir(parents=True)
     (pkg / "zzz").mkdir(parents=True)
 
-    # version.parse will fail for non-PEP440 names, method should fallback to lexical max.
+    # version.parse упадёт на не-PEP440 именах, метод должен откатиться к лексикографическому максимуму.
     assert mirror.get_path("weird") == pkg / "zzz"

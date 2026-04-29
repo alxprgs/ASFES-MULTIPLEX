@@ -19,7 +19,7 @@ logger = logging.getLogger("AsyncPythonMirror")
 
 
 class MirrorConfig(BaseModel):
-    """Configuration for Python distributions mirror."""
+    """Конфигурация зеркала дистрибутивов Python."""
 
     url_ftp: HttpUrl = Field(default="https://www.python.org/ftp/python/")
     data_dir: Path = Field(default_factory=lambda: Path(__file__).resolve().parent.parent / "data" / "python-ver")
@@ -38,7 +38,7 @@ class MirrorConfig(BaseModel):
 
 
 class AsyncPythonMirror:
-    """Asynchronous mirror for Python installers and source archives."""
+    """Асинхронное зеркало установщиков Python и исходных архивов."""
 
     FILE_PATTERNS = [
         "Python-{version}.tar.xz",
@@ -66,7 +66,7 @@ class AsyncPythonMirror:
         self._rate_limit_bytes = (self.cfg.rate_limit_mb * 1024 * 1024) if self.cfg.rate_limit_mb else None
         self.rate_limit = self._rate_limit_bytes
 
-    # ------------------------- Core helpers -------------------------
+    # ------------------------- Базовые помощники -------------------------
 
     def _result(self, ok: bool, action: str, **data: Any) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"ok": ok, "action": action}
@@ -206,7 +206,7 @@ class AsyncPythonMirror:
                 files.append(href)
         return files
 
-    # ------------------------- Low-level methods -------------------------
+    # ------------------------- Низкоуровневые методы -------------------------
 
     async def _get_remote_file_size(self, session: aiohttp.ClientSession, version: str, name: str) -> int:
         url = f"{self.url_ftp}{version}/{name}"
@@ -399,14 +399,14 @@ class AsyncPythonMirror:
         arch: Optional[str] = None,
         is_executable: Optional[bool] = None,
     ) -> Path:
-        # New API: get_file_path(version, filename)
-        # Backward compatibility: a 2-argument call with value like "windows"/"linux"/"macos"
-        # (or extension-less value) is treated as old os_type-based API.
+        # Новый API: get_file_path(version, filename)
+        # Обратная совместимость: вызов с двумя аргументами и значением вроде "windows"/"linux"/"macos"
+        # (или значением без расширения) считается старым API на основе os_type.
         use_legacy = arch is not None or is_executable is not None or "." not in filename_or_os_type
         if not use_legacy:
             return self._safe_path(version, filename_or_os_type)
 
-        # Backward compatible API: get_file_path(version, os_type, arch="amd64", is_executable=True)
+        # Обратно совместимый API: get_file_path(version, os_type, arch="amd64", is_executable=True)
         os_type = filename_or_os_type.lower()
         arch_value = (arch or "amd64").lower()
         executable = True if is_executable is None else bool(is_executable)
@@ -445,7 +445,7 @@ class AsyncPythonMirror:
             logger.error("remove_version_error version=%s error=%s", version, exc)
             return False
 
-    # ------------------------- Public high-level API -------------------------
+    # ------------------------- Публичный высокоуровневый API -------------------------
 
     async def get_versions_public(self, session: Optional[aiohttp.ClientSession] = None) -> Dict[str, Any]:
         try:
