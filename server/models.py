@@ -136,6 +136,15 @@ class OAuthClientCreateRequest(BaseModel):
     confidential: bool = False
 
 
+class OAuthDynamicClientRegistrationRequest(BaseModel):
+    client_name: str = "MCP Client"
+    redirect_uris: list[str]
+    grant_types: list[str] = Field(default_factory=lambda: ["authorization_code", "refresh_token"])
+    response_types: list[str] = Field(default_factory=lambda: ["code"])
+    token_endpoint_auth_method: str = "none"
+    scope: str | None = None
+
+
 class OAuthClientResponse(BaseModel):
     client_id: str
     name: str

@@ -677,6 +677,7 @@ class OAuthService:
             "issuer": self.settings.oauth_issuer,
             "authorization_endpoint": self.settings.authorization_endpoint,
             "token_endpoint": self.settings.token_endpoint,
+            "registration_endpoint": f"{self.settings.oauth_issuer}/register",
             "revocation_endpoint": self.settings.revocation_endpoint,
             "jwks_uri": self.settings.jwks_uri,
             "response_types_supported": ["code"],

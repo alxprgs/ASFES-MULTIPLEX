@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 
 from server.core.deps import enforce_api_rate_limit, get_services, require_permission
 from server.core.ratelimit import RateLimitError
-from server.models import OAuthClientCreateRequest, OAuthClientResponse, UserPrincipal
+from server.models import OAuthClientCreateRequest, OAuthClientResponse, OAuthDynamicClientRegistrationRequest, UserPrincipal
 from server.services import ApplicationServices, request_meta_from_request
 
 
@@ -237,6 +237,53 @@ async def create_oauth_client(
     return OAuthClientResponse.model_validate(client)
 
 
+@oauth_router.post("/register", status_code=status.HTTP_201_CREATED)
+async def register_oauth_client(payload: OAuthDynamicClientRegistrationRequest, request: Request, services: ApplicationServices = Depends(get_services)) -> JSONResponse:
+    if payload.token_endpoint_auth_method != "none":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only public OAuth clients are supported")
+    if "authorization_code" not in payload.grant_types:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="authorization_code grant is required")
+    if "code" not in payload.response_types:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="code response type is required")
+
+    requested_scopes = [scope for scope in (payload.scope or "mcp").split(" ") if scope]
+    client = await services.oauth.create_client(
+        payload.client_name,
+        payload.redirect_uris,
+        requested_scopes,
+        client_id=None,
+        confidential=False,
+    )
+    root_actor = UserPrincipal(
+        user_id="system",
+        username="system",
+        is_root=True,
+        permissions=[],
+        email=None,
+        tg_id=None,
+        vk_id=None,
+    )
+    await services.audit.record(
+        "oauth.client.dynamic_register",
+        actor=root_actor,
+        request_meta=request_meta_from_request(request),
+        target={"client_id": client["client_id"]},
+        metadata={"redirect_uris": payload.redirect_uris, "allowed_scopes": client["allowed_scopes"]},
+    )
+    return JSONResponse(
+        {
+            "client_id": client["client_id"],
+            "client_name": client["name"],
+            "redirect_uris": client["redirect_uris"],
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+            "scope": " ".join(client["allowed_scopes"]),
+        },
+        status_code=status.HTTP_201_CREATED,
+    )
+
+
 @oauth_router.get("/jwks")
 async def oauth_jwks() -> dict[str, list]:
     return {"keys": []}
@@ -254,6 +301,6 @@ async def well_known_protected_resource_root(services: ApplicationServices = Dep
 
 @well_known_router.get("/.well-known/oauth-protected-resource{resource_path:path}")
 async def well_known_protected_resource(resource_path: str, services: ApplicationServices = Depends(get_services)) -> dict[str, object]:
-    if resource_path != services.settings.mcp_path:
+    if resource_path.rstrip("/") != services.settings.mcp_path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Protected resource metadata not found")
     return services.oauth.protected_resource_metadata()
