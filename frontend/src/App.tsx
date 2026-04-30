@@ -5,6 +5,7 @@ import {
   Loader2,
   LogOut,
   Plug,
+  Power,
   QrCode,
   RefreshCw,
   Save,
@@ -27,6 +28,14 @@ type Toast = {
   tone: ToastTone;
   title: string;
   message?: string;
+};
+
+type Confirmation = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  tone?: "default" | "danger";
+  onConfirm: () => void;
 };
 
 const navItems: Array<{ view: View; label: string; icon: ReactNode }> = [
@@ -111,6 +120,35 @@ function ToastViewport({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id:
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
       ))}
+    </div>
+  );
+}
+
+function ConfirmDialog({ confirmation, onCancel }: { confirmation: Confirmation | null; onCancel: () => void }) {
+  if (!confirmation) {
+    return null;
+  }
+  return (
+    <div className="confirm-backdrop" role="presentation" onMouseDown={onCancel}>
+      <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title" onMouseDown={(event) => event.stopPropagation()}>
+        <h2 id="confirm-title">{confirmation.title}</h2>
+        <p>{confirmation.message}</p>
+        <div className="confirm-actions">
+          <button type="button" className="secondary-button" onClick={onCancel}>
+            Отмена
+          </button>
+          <button
+            type="button"
+            className={confirmation.tone === "danger" ? "danger-button" : "primary-button"}
+            onClick={() => {
+              onCancel();
+              confirmation.onConfirm();
+            }}
+          >
+            {confirmation.confirmLabel}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -239,14 +277,16 @@ function OverviewView({
   runtime,
   pendingKeys,
   onToggleRuntime,
-  onRunUpdate,
+  onConfirmUpdate,
+  onRunRestart,
   onRefresh
 }: {
   health: Health | null;
   runtime: RuntimeSettings | null;
   pendingKeys: ReadonlySet<string>;
   onToggleRuntime: (key: "registration_enabled" | "mcp_enabled" | "redis_runtime_enabled", value: boolean) => void;
-  onRunUpdate: () => void;
+  onConfirmUpdate: () => void;
+  onRunRestart: () => void;
   onRefresh: () => void;
 }) {
   return (
@@ -324,9 +364,13 @@ function OverviewView({
             />
           </div>
         </div>
-        <button className="secondary-button update-button" onClick={onRunUpdate} disabled={pendingKeys.has("system:update")}>
+        <button className="secondary-button update-button" onClick={onConfirmUpdate} disabled={pendingKeys.has("system:update")}>
           <RefreshCw size={16} className={pendingKeys.has("system:update") ? "spin" : ""} />
           Обновить приложение
+        </button>
+        <button className="secondary-button update-button" onClick={onRunRestart} disabled={pendingKeys.has("system:restart")}>
+          <Power size={16} className={pendingKeys.has("system:restart") ? "spin" : ""} />
+          Перезапустить приложение
         </button>
       </div>
     </section>
@@ -538,6 +582,8 @@ function formatAuditEvent(event: AuditEvent, plugins: PluginInfo[], tools: ToolI
       return { title: `Redis во время работы ${enabledText(event.metadata.enabled)}`, detail: "Настройка Redis во время работы обновлена" };
     case "system.update":
       return { title: "Обновление приложения запущено", detail: `Скрипт update.sh завершился: ${formatResult(event.result)}` };
+    case "system.restart":
+      return { title: "Перезапуск приложения запланирован", detail: `Скрипт restart.sh завершился: ${formatResult(event.result)}` };
     case "users.permission.mutate":
       return { title: "Права пользователя обновлены", detail: textValue(event.target.user_id) || event.event_type };
     case "account.profile.update":
@@ -765,6 +811,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
   const pendingActionsRef = useRef<Set<string>>(new Set());
 
@@ -856,6 +903,36 @@ export function App() {
     }
   }
 
+  function requestUpdate() {
+    setConfirmation({
+      title: "Обновить приложение?",
+      message: "Будет выполнен git fetch, git pull, установка зависимостей, сборка фронтенда и перезапуск сервиса.",
+      confirmLabel: "Обновить",
+      onConfirm: () =>
+        void runAction(async () => {
+          const result = await api.runSystemUpdate();
+          await loadAll();
+          const detail = result.stdout.trim().split("\n").slice(-2).join(" · ");
+          pushToast("success", "Обновление завершено", detail || `Код выхода: ${result.returncode}`);
+        }, { pendingKey: "system:update", errorTitle: "Не удалось обновить приложение" })
+    });
+  }
+
+  function requestRestart() {
+    setConfirmation({
+      title: "Перезапустить приложение?",
+      message: "Сервис ASFES Multiplex будет перезапущен через systemctl. Интерфейс может быть недоступен несколько секунд.",
+      confirmLabel: "Перезапустить",
+      tone: "danger",
+      onConfirm: () =>
+        void runAction(async () => {
+          const result = await api.runSystemRestart();
+          const detail = result.stdout.trim().split("\n").slice(-2).join(" · ");
+          pushToast("success", "Перезапуск запланирован", detail || `Код выхода: ${result.returncode}`);
+        }, { pendingKey: "system:restart", errorTitle: "Не удалось перезапустить приложение" })
+    });
+  }
+
   if (loading && !bootstrap) {
     return <div className="loading">Загрузка ASFES Multiplex...</div>;
   }
@@ -864,6 +941,7 @@ export function App() {
     return (
       <>
         <ToastViewport toasts={toasts} onDismiss={dismissToast} />
+        <ConfirmDialog confirmation={confirmation} onCancel={() => setConfirmation(null)} />
         <LoginView onLogin={(nextUser) => {
           setUser(nextUser);
           void loadAll();
@@ -875,6 +953,7 @@ export function App() {
   return (
     <div className="app-shell">
       <ToastViewport toasts={toasts} onDismiss={dismissToast} />
+      <ConfirmDialog confirmation={confirmation} onCancel={() => setConfirmation(null)} />
       <aside className="sidebar">
         <div className="brand">
           <Shield size={24} />
@@ -932,14 +1011,8 @@ export function App() {
                 pushToast("success", `Настройка «${runtimeLabels[key]}» ${value ? "включена" : "отключена"}`);
               }, { pendingKey: `runtime:${key}`, errorTitle: "Не удалось переключить настройку" })
             }
-            onRunUpdate={() =>
-              runAction(async () => {
-                const result = await api.runSystemUpdate();
-                await loadAll();
-                const detail = result.stdout.trim().split("\n").slice(-2).join(" · ");
-                pushToast("success", "Обновление завершено", detail || `Код выхода: ${result.returncode}`);
-              }, { pendingKey: "system:update", errorTitle: "Не удалось обновить приложение" })
-            }
+            onConfirmUpdate={requestUpdate}
+            onRunRestart={requestRestart}
           />
         ) : null}
         {view === "users" ? (

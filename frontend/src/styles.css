@@ -70,6 +70,7 @@ button:disabled {
 .status-strip,
 .secondary-button,
 .primary-button,
+.danger-button,
 .logout {
   align-items: center;
   display: flex;
@@ -137,6 +138,7 @@ input:focus {
 
 .primary-button,
 .secondary-button,
+.danger-button,
 .icon-button,
 .sidebar nav button,
 .logout,
@@ -145,7 +147,8 @@ input:focus {
 }
 
 .primary-button,
-.secondary-button {
+.secondary-button,
+.danger-button {
   border-radius: 6px;
   gap: 8px;
   justify-content: center;
@@ -173,6 +176,7 @@ input:focus {
 .danger-button {
   background: #fff1f2;
   color: #be123c;
+  font-weight: 750;
 }
 
 .app-shell {
@@ -338,6 +342,34 @@ input:focus {
 .toast-close:hover {
   background: #eff4f6;
   color: #1f2937;
+}
+
+.confirm-backdrop {
+  align-items: center;
+  background: rgba(23, 33, 38, 0.46);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 18px;
+  position: fixed;
+  z-index: 60;
+}
+
+.confirm-dialog {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(23, 33, 38, 0.28);
+  display: grid;
+  gap: 14px;
+  max-width: 460px;
+  padding: 20px;
+  width: min(460px, 100%);
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
 }
 
 .page-grid {

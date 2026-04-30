@@ -201,6 +201,7 @@ chown root:"${APP_USER}" "${ENV_FILE}"
 
 cat >"${SUDOERS_FILE}" <<EOF
 ${APP_USER} ALL=(root) NOPASSWD: /bin/bash ${INSTALL_DIR}/scripts/update.sh
+${APP_USER} ALL=(root) NOPASSWD: /bin/bash ${INSTALL_DIR}/scripts/restart.sh
 EOF
 chmod 440 "${SUDOERS_FILE}"
 

@@ -232,6 +232,10 @@ export const api = {
     apiFetch<SystemUpdateResult>("/system/update", {
       method: "POST"
     }),
+  runSystemRestart: () =>
+    apiFetch<SystemUpdateResult>("/system/restart", {
+      method: "POST"
+    }),
   plugins: () => apiFetch<PluginInfo[]>("/mcp/plugins"),
   togglePlugin: (pluginKey: string, enabled: boolean) =>
     apiFetch<PluginInfo>(`/mcp/plugins/${encodeURIComponent(pluginKey)}`, {

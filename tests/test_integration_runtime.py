@@ -380,7 +380,7 @@ async def test_two_factor_protects_api_login_and_mcp_oauth_authorize(integration
 
 
 @pytest.mark.asyncio
-async def test_admin_users_plugin_toggle_and_system_update(integration_env, monkeypatch) -> None:
+async def test_admin_users_plugin_toggle_system_update_and_restart(integration_env, monkeypatch) -> None:
     client = integration_env["client"]
     cfg = integration_env["settings"]
     services = integration_env["services"]
@@ -426,3 +426,7 @@ async def test_admin_users_plugin_toggle_and_system_update(integration_env, monk
     update = await client.post("/api/system/update", headers=headers)
     assert update.status_code == 200
     assert update.json()["stdout"] == "updated"
+
+    restart = await client.post("/api/system/restart", headers=headers)
+    assert restart.status_code == 200
+    assert restart.json()["stdout"] == "updated"

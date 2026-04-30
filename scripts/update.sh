@@ -60,7 +60,7 @@ npm --prefix "${INSTALL_DIR}/frontend" run build
 sed -i '/^APP__VERSION=/d' "${ENV_FILE}"
 
 chown -R "${APP_USER}:${APP_USER}" "${INSTALL_DIR}" "${DATA_DIR}" "${LOG_DIR}"
-systemctl restart "${SERVICE_NAME}"
+nohup bash -c "sleep 1; systemctl restart '${SERVICE_NAME}'" >/dev/null 2>&1 &
 
 echo "Готово. Проверка:"
 echo "  systemctl status ${SERVICE_NAME}"

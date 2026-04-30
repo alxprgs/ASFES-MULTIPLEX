@@ -23,6 +23,12 @@ def _runtime_response(services: ApplicationServices, runtime: dict) -> RuntimeSe
     )
 
 
+def _system_script_command(script_path: str) -> list[str]:
+    if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() != 0:
+        return ["sudo", "-n", "/bin/bash", script_path]
+    return ["bash", script_path]
+
+
 @router.get("/bootstrap", response_model=BootstrapResponse)
 async def bootstrap(
     request: Request,
@@ -189,9 +195,7 @@ async def run_system_update(
     script_path = BASE_DIR / "scripts" / "update.sh"
     if not script_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="update.sh not found")
-    command = ["bash", str(script_path)]
-    if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() != 0:
-        command = ["sudo", "-n", "/bin/bash", str(script_path)]
+    command = _system_script_command(str(script_path))
     try:
         result = await services.host_ops.run(command, cwd=BASE_DIR, timeout_seconds=900)
     except Exception as exc:
@@ -221,6 +225,50 @@ async def run_system_update(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=result.stderr.strip() or result.stdout.strip() or "update.sh failed",
+        )
+    return SystemUpdateResponse.model_validate(result.to_dict())
+
+
+@router.post("/system/restart", response_model=SystemUpdateResponse)
+async def run_system_restart(
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(require_permission("system.restart")),
+) -> SystemUpdateResponse:
+    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    script_path = BASE_DIR / "scripts" / "restart.sh"
+    if not script_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="restart.sh not found")
+    command = _system_script_command(str(script_path))
+    try:
+        result = await services.host_ops.run(command, cwd=BASE_DIR, timeout_seconds=60)
+    except Exception as exc:
+        await services.audit.record(
+            "system.restart",
+            actor=current_user,
+            request_meta=request_meta_from_request(request),
+            target={"script": str(script_path)},
+            result="error",
+            metadata={"error": str(exc)},
+        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+    audit_result = "success" if result.returncode == 0 else "error"
+    await services.audit.record(
+        "system.restart",
+        actor=current_user,
+        request_meta=request_meta_from_request(request),
+        target={"script": str(script_path)},
+        result=audit_result,
+        metadata={
+            "returncode": result.returncode,
+            "duration_ms": result.duration_ms,
+            "truncated": result.truncated,
+        },
+    )
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.stderr.strip() or result.stdout.strip() or "restart.sh failed",
         )
     return SystemUpdateResponse.model_validate(result.to_dict())
 
