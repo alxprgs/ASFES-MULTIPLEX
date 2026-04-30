@@ -123,7 +123,6 @@ PASSWORD_PEPPER="$(sed -n '3p' <<<"${SECRET_VALUES}")"
 
 cat >"${ENV_FILE}" <<EOF
 APP__NAME=ASFES Multiplex
-APP__VERSION=0.1.0
 APP__ENV=production
 APP__DEV=false
 APP__HOST=${APP_HOST}

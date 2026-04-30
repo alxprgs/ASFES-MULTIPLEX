@@ -488,7 +488,7 @@ export function App() {
           <Shield size={24} />
           <div>
             <strong>{bootstrap?.app_name || "ASFES Multiplex"}</strong>
-            <small>{bootstrap?.app_version || "0.1.0"}</small>
+            <small>{bootstrap?.app_version || ""}</small>
           </div>
         </div>
         <nav>

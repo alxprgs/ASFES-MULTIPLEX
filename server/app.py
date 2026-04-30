@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from server.core.config import Settings, settings
 from server.core.logging import IntegrityLogManager, Mailer, get_logger
@@ -18,6 +19,19 @@ from server.services import build_application_services, periodic_integrity_verif
 
 
 LOGGER = get_logger("multiplex.startup")
+
+
+class ExactPathSlashMiddleware:
+    def __init__(self, app: ASGIApp, path: str) -> None:
+        self.app = app
+        self.path = path.rstrip("/") or "/"
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope.get("path") == self.path:
+            scope = dict(scope)
+            scope["path"] = f"{self.path}/"
+            scope["raw_path"] = scope["path"].encode("ascii")
+        await self.app(scope, receive, send)
 
 
 @asynccontextmanager
@@ -76,6 +90,7 @@ def create_app() -> FastAPI:
         redoc_url=f"{settings.api_prefix}/redoc",
         lifespan=lifespan,
     )
+    app.add_middleware(ExactPathSlashMiddleware, path=settings.mcp_path)
     mcp_gateway = create_mcp_gateway(settings, lambda: app.state.services)
     app.state.mcp_gateway = mcp_gateway
     app.include_router(root_router)

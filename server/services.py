@@ -692,6 +692,7 @@ class OAuthService:
             "resource": f"{self.settings.public_base_url}{self.settings.mcp_path}",
             "authorization_servers": [self.settings.oauth_issuer],
             "bearer_methods_supported": ["header"],
+            "scopes_supported": self.settings.oauth.supported_scopes,
         }
 
     def serialize_client(self, document: dict[str, Any]) -> dict[str, Any]:

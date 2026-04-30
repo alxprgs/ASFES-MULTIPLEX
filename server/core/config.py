@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+import tomllib
 from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, HttpUrl, SecretStr, field_validator, model_validator
@@ -11,9 +12,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 
+def read_project_version() -> str:
+    pyproject_path = BASE_DIR / "pyproject.toml"
+    try:
+        with pyproject_path.open("rb") as pyproject_file:
+            project_data = tomllib.load(pyproject_file)
+    except (OSError, tomllib.TOMLDecodeError):
+        return "0.1.0"
+    return str(project_data.get("project", {}).get("version") or "0.1.0")
+
+
 class AppConfig(BaseModel):
     name: str = "ASFES Multiplex"
-    version: str = "0.1.0"
+    version: str = Field(default_factory=read_project_version)
     env: str = "development"
     dev: bool = True
     host: str = "0.0.0.0"

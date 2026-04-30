@@ -12,6 +12,7 @@ from pydantic import SecretStr
 
 from server.core.config import settings as base_settings
 from server.core.logging import IntegrityLogManager, Mailer
+from server.app import ExactPathSlashMiddleware
 from server.mcp import create_mcp_gateway
 from server.routes import api_router, root_router
 from server.services import build_application_services, shutdown_application_services
@@ -60,6 +61,7 @@ async def integration_env():
         pytest.skip(f"Mongo-backed integration environment is unavailable: {exc}")
 
     app = FastAPI()
+    app.add_middleware(ExactPathSlashMiddleware, path=cfg.mcp_path)
     app.state.services = services
     mcp_gateway = create_mcp_gateway(cfg, lambda: app.state.services)
     app.state.mcp_gateway = mcp_gateway

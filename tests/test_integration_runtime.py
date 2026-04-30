@@ -211,6 +211,47 @@ async def test_rest_oauth_and_mcp_flow_respects_user_scoping(integration_env) ->
 
 
 @pytest.mark.asyncio
+async def test_mcp_oauth_discovery_supports_bare_mcp_path(integration_env) -> None:
+    client = integration_env["client"]
+    cfg = integration_env["settings"]
+
+    bare_get = await client.get("/mcp")
+    assert bare_get.status_code == 401
+    assert "resource_metadata=" in bare_get.headers["www-authenticate"]
+    assert f"/.well-known/oauth-protected-resource{cfg.mcp_path}" in bare_get.headers["www-authenticate"]
+
+    bare_post = await client.post("/mcp", json={})
+    assert bare_post.status_code == 401
+    assert "resource_metadata=" in bare_post.headers["www-authenticate"]
+
+    slash_get = await client.get("/mcp/")
+    assert slash_get.status_code == 401
+    assert slash_get.headers["www-authenticate"] == bare_get.headers["www-authenticate"]
+
+
+@pytest.mark.asyncio
+async def test_oauth_metadata_includes_resource_scopes_and_path_aware_issuer(integration_env) -> None:
+    client = integration_env["client"]
+    cfg = integration_env["settings"]
+
+    protected = await client.get("/.well-known/oauth-protected-resource/mcp")
+    assert protected.status_code == 200
+    assert protected.json() == {
+        "resource": f"{cfg.public_base_url}{cfg.mcp_path}",
+        "authorization_servers": [cfg.oauth_issuer],
+        "bearer_methods_supported": ["header"],
+        "scopes_supported": cfg.oauth.supported_scopes,
+    }
+
+    issuer_metadata = await client.get("/.well-known/oauth-authorization-server/api/oauth")
+    assert issuer_metadata.status_code == 200
+    assert issuer_metadata.json()["issuer"] == cfg.oauth_issuer
+
+    missing = await client.get("/.well-known/oauth-authorization-server/other")
+    assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_cookie_auth_csrf_and_bearer_compatibility(integration_env) -> None:
     client = integration_env["client"]
     services = integration_env["services"]
