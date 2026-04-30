@@ -16,19 +16,34 @@ node_runtime_supported() {
 }
 
 ensure_node_runtime() {
+  local node_root="${DATA_DIR}/runtime/nodejs"
+  if [[ -x "${node_root}/bin/node" ]]; then
+    export PATH="${node_root}/bin:${PATH}"
+  fi
   if node_runtime_supported; then
     echo "Node.js подходит: $(node --version), npm $(npm --version)"
     return
   fi
-  echo "Устанавливаю Node.js 22 для сборки frontend..."
-  apt-get update
-  apt-get install -y ca-certificates curl gnupg
-  install -d -m 0755 /etc/apt/keyrings
-  rm -f /etc/apt/keyrings/nodesource.gpg
-  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
-  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" >/etc/apt/sources.list.d/nodesource.list
-  apt-get update
-  apt-get install -y nodejs
+  local platform
+  case "$(uname -m)" in
+    x86_64 | amd64) platform="linux-x64" ;;
+    aarch64 | arm64) platform="linux-arm64" ;;
+    *) echo "Неподдерживаемая архитектура для портативного Node.js: $(uname -m)"; exit 1 ;;
+  esac
+  echo "Устанавливаю портативный Node.js 22 для сборки frontend..."
+  local tmp_dir archive
+  tmp_dir="$(mktemp -d)"
+  archive="$(curl -fsSL "https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt" | awk -v platform="${platform}" '$2 ~ ("node-v.*-" platform ".tar.xz$") {print $2; exit}')"
+  if [[ -z "${archive}" ]]; then
+    echo "Не удалось найти архив Node.js 22 для ${platform}."
+    exit 1
+  fi
+  curl -fSL "https://nodejs.org/dist/latest-v22.x/${archive}" -o "${tmp_dir}/${archive}"
+  rm -rf "${node_root}"
+  mkdir -p "${node_root}"
+  tar -xJf "${tmp_dir}/${archive}" -C "${node_root}" --strip-components=1
+  rm -rf "${tmp_dir}"
+  export PATH="${node_root}/bin:${PATH}"
   echo "Node.js установлен: $(node --version), npm $(npm --version)"
 }
 
