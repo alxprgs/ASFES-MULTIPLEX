@@ -5,6 +5,7 @@ import contextlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -318,6 +319,7 @@ class HostOpsService:
 
     def delete_path(self, raw_path: str, *, roots: list[Path] | None = None, recursive: bool = False) -> dict[str, Any]:
         path = self.resolve_managed_path(raw_path, roots=roots)
+        self._ensure_safe_write_path(path, roots or self.managed_file_roots())
         if not path.exists():
             raise HostOpsError("Path does not exist")
         if path.is_dir():
@@ -331,6 +333,9 @@ class HostOpsService:
     def move_path(self, source: str, destination: str, *, roots: list[Path] | None = None) -> dict[str, Any]:
         source_path = self.resolve_managed_path(source, roots=roots)
         destination_path = self.resolve_managed_path(destination, roots=roots)
+        write_roots = roots or self.managed_file_roots()
+        self._ensure_safe_write_path(source_path, write_roots)
+        self._ensure_safe_write_path(destination_path, write_roots)
         destination_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(source_path), str(destination_path))
         return {"source": str(source_path), "destination": str(destination_path), "moved": True}
@@ -345,6 +350,7 @@ class HostOpsService:
         append: bool = False,
     ) -> dict[str, Any]:
         path = self.resolve_managed_path(raw_path, roots=roots)
+        self._ensure_safe_write_path(path, roots or self.managed_file_roots())
         path.parent.mkdir(parents=True, exist_ok=True)
         if append:
             created_backup = False
@@ -437,6 +443,32 @@ class HostOpsService:
             return True
         except ValueError:
             return False
+
+    def _ensure_safe_write_path(self, path: Path, roots: list[Path]) -> None:
+        normalized_roots = [self._normalize_root(root) for root in roots]
+        resolved_parent = path.parent.resolve(strict=False)
+        if not self._is_within_any_root(resolved_parent, normalized_roots):
+            raise HostOpsError("Resolved parent escapes managed roots")
+        for root in normalized_roots:
+            if self._is_within_root(path.resolve(strict=False), root):
+                relative = path.resolve(strict=False).relative_to(root)
+                current = root
+                for part in relative.parts:
+                    current = current / part
+                    if current.exists() and self._is_link_or_reparse_point(current):
+                        raise HostOpsError("Refusing to write through a symlink or reparse point")
+                return
+        raise HostOpsError("Path is outside of managed roots")
+
+    def _is_link_or_reparse_point(self, path: Path) -> bool:
+        if path.is_symlink():
+            return True
+        if os.name == "nt":
+            try:
+                return bool(path.stat().st_file_attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+            except (AttributeError, OSError):
+                return False
+        return False
 
     def _backup_file(self, path: Path) -> None:
         if not path.exists() or not path.is_file():

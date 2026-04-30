@@ -36,6 +36,12 @@ async def test_call_tool_redacts_arguments_in_audit(integration_env) -> None:
     user_doc = await services.users.get_user_by_username(cfg.root.username)
     assert user_doc is not None
     user = services.users.to_principal(user_doc)
+    await services.plugins.set_global_tool_enabled(
+        "docker.restart_container",
+        True,
+        actor=user,
+        request_meta={"ip": "127.0.0.1", "user_agent": "pytest"},
+    )
 
     result = await services.plugins.call_tool(
         user,
@@ -83,15 +89,15 @@ async def test_set_global_tool_enabled_records_detailed_audit_metadata(integrati
 
     await services.plugins.set_global_tool_enabled(
         "docker.list_containers",
-        False,
+        True,
         actor=user,
         request_meta={"ip": "127.0.0.1", "user_agent": "pytest"},
     )
 
     events = await services.audit.list_events()
     event = next(item for item in events if item["event_type"] == "mcp.tool.global.update" and item["target"]["tool_key"] == "docker.list_containers")
-    assert event["metadata"]["enabled"] is False
-    assert event["metadata"]["previous_enabled"] is True
+    assert event["metadata"]["enabled"] is True
+    assert event["metadata"]["previous_enabled"] is False
     assert event["metadata"]["changed"] is True
     assert event["metadata"]["tool_name"] == "Список Docker-контейнеров"
     assert event["metadata"]["plugin_key"] == "docker"

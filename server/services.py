@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hmac
 import importlib
 import json
 import pkgutil
+from ipaddress import ip_address
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from pymongo.errors import DuplicateKeyError
@@ -38,12 +41,39 @@ CORE_PERMISSIONS = {
     "system.restart": "Перезапускать приложение из интерфейса.",
     "audit.read": "Читать аудит и записи чувствительных операций.",
     "oauth.clients.manage": "Создавать и просматривать OAuth-клиентов.",
+    "system.health.read": "Читать детальный статус внутренних сервисов.",
 }
+
+
+def validate_password_strength(password: str, settings: Settings) -> None:
+    if len(password) < settings.password_policy.min_length:
+        raise ValueError(f"Password must contain at least {settings.password_policy.min_length} characters")
+    normalized = password.strip().lower()
+    forbidden = {item.strip().lower() for item in settings.password_policy.forbidden_passwords}
+    if normalized in forbidden:
+        raise ValueError("Password is too common")
+
+
+def validate_redirect_uris(redirect_uris: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for raw_uri in redirect_uris:
+        uri = str(raw_uri).strip()
+        parsed = urlparse(uri)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.fragment:
+            raise ValueError("Redirect URI must use http/https, include a host, and must not include a fragment")
+        normalized.append(uri)
+    if not normalized:
+        raise ValueError("At least one redirect URI is required")
+    return normalized
 
 
 def validate_runtime_security(settings: Settings) -> None:
     if settings.is_production and settings._uses_default_secret_values():
         raise RuntimeError("Production mode requires custom SECURITY secrets and ROOT password")
+    validate_password_strength(settings.root.password.get_secret_value(), settings)
+    if settings.is_production and str(settings.app.public_base_url).startswith("https://"):
+        if not settings.security.cookie_secure and not settings.security.allow_insecure_cookies:
+            raise RuntimeError("Production HTTPS mode requires SECURITY__COOKIE_SECURE=true")
 
 
 def serialize_datetime(value: datetime | None) -> str | None:
@@ -76,9 +106,28 @@ def clean_passkey_name(value: str | None, default: str = "Passkey") -> str:
     return normalized[:80]
 
 
-def request_meta_from_request(request: Any) -> dict[str, Any]:
+def client_ip_from_request(request: Any, settings: Settings) -> str | None:
+    peer_ip = request.client.host if request.client else None
     forwarded = request.headers.get("x-forwarded-for")
-    ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else None)
+    if not forwarded or not peer_ip:
+        return peer_ip
+    try:
+        trusted = {str(ip_address(item)) for item in settings.app.trusted_proxy_ips}
+        if str(ip_address(peer_ip)) not in trusted:
+            return peer_ip
+    except ValueError:
+        return peer_ip
+    return forwarded.split(",")[0].strip() or peer_ip
+
+
+def request_meta_from_request(request: Any, settings: Settings | None = None) -> dict[str, Any]:
+    settings_obj = settings
+    if settings_obj is None:
+        state = getattr(getattr(request, "app", None), "state", None)
+        settings_obj = getattr(getattr(state, "services", None), "settings", None)
+    if settings_obj is None:
+        settings_obj = getattr(request.app.state, "services").settings
+    ip = client_ip_from_request(request, settings_obj)
     return {
         "ip": ip,
         "user_agent": request.headers.get("user-agent"),
@@ -306,6 +355,7 @@ class UserService:
         existing = await self.get_user_by_username(username)
         if existing:
             raise ValueError("User already exists")
+        validate_password_strength(password, self.settings)
         pepper = self.settings.security.password_pepper.get_secret_value()
         created_at = now_utc()
         document = {
@@ -615,13 +665,15 @@ class UserService:
         )
         return updated, recovery_codes
 
-    async def disable_two_factor(self, user: UserPrincipal, code: str, *, request_meta: dict[str, Any]) -> dict[str, Any]:
+    async def disable_two_factor(self, user: UserPrincipal, code: str, *, current_password: str, request_meta: dict[str, Any]) -> dict[str, Any]:
         document = await self.get_user_by_id(user.user_id)
         if not document:
             raise LookupError("User not found")
         if not self.two_factor_enabled(document):
             return document
-        if not await self.verify_second_factor(document, code, consume_recovery=False):
+        if not await self.verify_password_for_user(user, current_password):
+            raise ValueError("Current password is invalid")
+        if not await self.verify_second_factor(document, code, consume_recovery=True):
             raise ValueError("Invalid two-factor code")
         await self.db.collection(USERS).update_one(
             {"_id": user.user_id},
@@ -893,11 +945,12 @@ class OAuthService:
         scopes = sorted({scope for scope in allowed_scopes if scope in supported}) or ["mcp"]
         client_identifier = client_id or f"mcp_{uuid4().hex}"
         client_secret = random_token(24) if confidential else None
+        normalized_redirect_uris = validate_redirect_uris(redirect_uris)
         document = {
             "_id": client_identifier,
             "client_id": client_identifier,
             "name": name,
-            "redirect_uris": redirect_uris,
+            "redirect_uris": normalized_redirect_uris,
             "allowed_scopes": scopes,
             "confidential": confidential,
             "client_secret_hash": sha256_text(client_secret) if client_secret else None,
@@ -908,12 +961,37 @@ class OAuthService:
         serialized["client_secret"] = client_secret
         return serialized
 
+    async def rotate_client_secret(self, client_id: str) -> dict[str, str]:
+        client = await self.db.collection(OAUTH_CLIENTS).find_one({"client_id": client_id})
+        if not client:
+            raise LookupError("Unknown OAuth client")
+        if not client.get("confidential"):
+            raise ValueError("Only confidential clients have a secret")
+        client_secret = random_token(24)
+        await self.db.collection(OAUTH_CLIENTS).update_one(
+            {"client_id": client_id},
+            {"$set": {"client_secret_hash": sha256_text(client_secret), "updated_at": now_utc()}},
+        )
+        return {"client_id": client_id, "client_secret": client_secret}
+
     async def validate_client(self, client_id: str, redirect_uri: str) -> dict[str, Any]:
         client = await self.db.collection(OAUTH_CLIENTS).find_one({"client_id": client_id})
         if not client:
             raise LookupError("Unknown OAuth client")
         if redirect_uri not in client.get("redirect_uris", []):
             raise ValueError("Redirect URI is not registered for this client")
+        return client
+
+    async def authenticate_client(self, client_id: str, client_secret: str | None) -> dict[str, Any]:
+        client = await self.db.collection(OAUTH_CLIENTS).find_one({"client_id": client_id})
+        if not client:
+            raise LookupError("Unknown OAuth client")
+        if not client.get("confidential"):
+            return client
+        if not client_secret or not client.get("client_secret_hash"):
+            raise ValueError("Client authentication required")
+        if not hmac.compare_digest(str(client["client_secret_hash"]), sha256_text(client_secret)):
+            raise ValueError("Client authentication failed")
         return client
 
     async def create_authorization_code(
@@ -927,6 +1005,11 @@ class OAuthService:
         code_challenge_method: str,
         request_meta: dict[str, Any],
     ) -> str:
+        method = code_challenge_method.upper()
+        if method == "PLAIN" and not self.settings.oauth.allow_plain_pkce:
+            raise ValueError("plain PKCE is not allowed")
+        if method not in {"S256", "PLAIN"}:
+            raise ValueError("Unsupported PKCE code_challenge_method")
         code = random_token(32)
         await self.db.collection(OAUTH_CODES).insert_one(
             {
@@ -937,7 +1020,7 @@ class OAuthService:
                 "user_id": user.user_id,
                 "scopes": scopes,
                 "code_challenge": code_challenge,
-                "code_challenge_method": code_challenge_method,
+                "code_challenge_method": method,
                 "created_at": now_utc(),
                 "expires_at": now_utc() + timedelta(minutes=self.settings.security.oauth_authorization_code_ttl_minutes),
             }
@@ -956,11 +1039,13 @@ class OAuthService:
         *,
         code: str,
         client_id: str,
+        client_secret: str | None,
         redirect_uri: str,
         code_verifier: str,
         request_meta: dict[str, Any],
     ) -> dict[str, Any]:
         client = await self.validate_client(client_id, redirect_uri)
+        await self.authenticate_client(client_id, client_secret)
         document = await self.db.collection(OAUTH_CODES).find_one({"code": code, "client_id": client_id})
         if not document:
             raise ValueError("Authorization code is invalid")
@@ -968,6 +1053,11 @@ class OAuthService:
             raise ValueError("Authorization code expired")
         if document.get("redirect_uri") != redirect_uri:
             raise ValueError("Redirect URI mismatch")
+        if not code_verifier:
+            raise ValueError("PKCE code_verifier is required")
+        method = str(document["code_challenge_method"]).upper()
+        if method == "PLAIN" and not self.settings.oauth.allow_plain_pkce:
+            raise ValueError("plain PKCE is not allowed")
         if not verify_pkce(code_verifier, document["code_challenge"], document["code_challenge_method"]):
             raise ValueError("PKCE verification failed")
         await self.db.collection(OAUTH_CODES).delete_one({"_id": document["_id"]})
@@ -1020,7 +1110,8 @@ class OAuthService:
             "client_name": client["name"],
         }
 
-    async def refresh_token(self, *, refresh_token: str, client_id: str, request_meta: dict[str, Any]) -> dict[str, Any]:
+    async def refresh_token(self, *, refresh_token: str, client_id: str, client_secret: str | None, request_meta: dict[str, Any]) -> dict[str, Any]:
+        await self.authenticate_client(client_id, client_secret)
         document = await self.db.collection(REFRESH_TOKENS).find_one({"token_hash": sha256_text(refresh_token), "purpose": "oauth", "client_id": client_id})
         if not document:
             raise ValueError("Refresh token is invalid")
@@ -1068,8 +1159,73 @@ class OAuthService:
             "scope": " ".join(document.get("scopes", ["mcp"])),
         }
 
-    async def revoke_token(self, token: str) -> None:
-        await self.db.collection(REFRESH_TOKENS).delete_one({"token_hash": sha256_text(token)})
+    async def revoke_token(self, token: str, client_id: str | None, client_secret: str | None) -> None:
+        query: dict[str, Any] = {"token_hash": sha256_text(token)}
+        if client_id:
+            await self.authenticate_client(client_id, client_secret)
+            query["client_id"] = client_id
+        document = await self.db.collection(REFRESH_TOKENS).find_one(query)
+        if document and document.get("client_id"):
+            await self.authenticate_client(str(document["client_id"]), client_secret)
+            query["client_id"] = document["client_id"]
+        await self.db.collection(REFRESH_TOKENS).delete_one(query)
+
+    async def connected_services(self) -> list[dict[str, Any]]:
+        now = now_utc()
+        cursor = self.db.collection(REFRESH_TOKENS).find(
+            {
+                "purpose": "oauth",
+                "expires_at": {"$gt": now},
+                "scopes": "mcp",
+            }
+        )
+        grouped: dict[str, dict[str, Any]] = {}
+        async for token_doc in cursor:
+            client_id = str(token_doc.get("client_id") or "")
+            if not client_id:
+                continue
+            item = grouped.setdefault(
+                client_id,
+                {
+                    "client_id": client_id,
+                    "active_session_count": 0,
+                    "user_ids": set(),
+                    "last_token_issued_at": None,
+                },
+            )
+            item["active_session_count"] += 1
+            item["user_ids"].add(str(token_doc.get("user_id")))
+            created_at = normalize_utc_datetime(token_doc.get("created_at"))
+            if created_at and (item["last_token_issued_at"] is None or created_at > item["last_token_issued_at"]):
+                item["last_token_issued_at"] = created_at
+
+        services: list[dict[str, Any]] = []
+        for client_id, item in grouped.items():
+            client = await self.db.collection(OAUTH_CLIENTS).find_one({"client_id": client_id})
+            if not client:
+                continue
+            users = []
+            for user_id in sorted(item["user_ids"]):
+                user_doc = await self.users.get_user_by_id(user_id)
+                users.append({"user_id": user_id, "username": user_doc.get("username") if user_doc else None})
+            last_call = await self.db.collection(AUDIT_EVENTS).find_one(
+                {"event_type": "mcp.tool.call", "metadata.oauth_client_id": client_id},
+                sort=[("created_at", -1)],
+            )
+            services.append(
+                {
+                    "client_id": client_id,
+                    "client_name": client.get("name", client_id),
+                    "confidential": bool(client.get("confidential")),
+                    "allowed_scopes": list(client.get("allowed_scopes", [])),
+                    "active_session_count": item["active_session_count"],
+                    "user_count": len(users),
+                    "users": users,
+                    "last_token_issued_at": serialize_datetime(item["last_token_issued_at"]),
+                    "last_tool_call_at": serialize_datetime(last_call.get("created_at")) if last_call else None,
+                }
+            )
+        return sorted(services, key=lambda value: value["client_name"].lower())
 
     def verify_access_token(self, token: str) -> dict[str, Any]:
         return decode_jwt(
@@ -1090,7 +1246,7 @@ class OAuthService:
             "jwks_uri": self.settings.jwks_uri,
             "response_types_supported": ["code"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
-            "token_endpoint_auth_methods_supported": ["none"],
+            "token_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
             "code_challenge_methods_supported": ["S256"] + (["plain"] if self.settings.oauth.allow_plain_pkce else []),
             "scopes_supported": self.settings.oauth.supported_scopes,
         }
@@ -1477,7 +1633,11 @@ class PluginRegistry:
             actor=user,
             request_meta=request_meta,
             target={"tool_key": tool_key},
-            metadata={"arguments": redacted_arguments, "read_only": tool.manifest.read_only},
+            metadata={
+                "arguments": redacted_arguments,
+                "read_only": tool.manifest.read_only,
+                "oauth_client_id": request_meta.get("oauth_client_id"),
+            },
         )
         return result if isinstance(result, dict) else {"result": result}
 

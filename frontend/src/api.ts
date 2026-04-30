@@ -33,9 +33,33 @@ export type Bootstrap = {
 
 export type Health = {
   status: string;
+  mongodb?: string;
+  redis?: string;
+  mcp_enabled?: boolean;
+};
+
+export type HealthDetails = {
+  status: string;
   mongodb: string;
   redis: string;
   mcp_enabled: boolean;
+};
+
+export type MCPConnectedServiceUser = {
+  user_id: string;
+  username: string | null;
+};
+
+export type MCPConnectedService = {
+  client_id: string;
+  client_name: string;
+  confidential: boolean;
+  allowed_scopes: string[];
+  active_session_count: number;
+  user_count: number;
+  users: MCPConnectedServiceUser[];
+  last_token_issued_at: string | null;
+  last_tool_call_at: string | null;
 };
 
 export type SystemUpdateResult = {
@@ -216,6 +240,7 @@ async function apiFetch<T>(path: string, init: ApiFetchInit = {}, retrying = fal
 export const api = {
   bootstrap: () => apiFetch<Bootstrap>("/bootstrap"),
   health: () => apiFetch<Health>("/health"),
+  healthDetails: () => apiFetch<HealthDetails>("/health/details"),
   login: (username: string, password: string) =>
     apiFetch<LoginResult>("/auth/login", {
       method: "POST",
@@ -260,10 +285,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ code })
     }),
-  twoFactorDisable: (code: string) =>
+  twoFactorDisable: (code: string, currentPassword: string) =>
     apiFetch<User>("/auth/2fa/disable", {
       method: "POST",
-      body: JSON.stringify({ code })
+      body: JSON.stringify({ code, current_password: currentPassword })
     }),
   passkeys: () => apiFetch<Passkey[]>("/auth/passkeys"),
   passkeyRegistrationOptions: (currentPassword: string, name: string | null) =>
@@ -333,5 +358,6 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ enabled })
     }),
+  connectedServices: () => apiFetch<MCPConnectedService[]>("/mcp/connected-services"),
   audit: () => apiFetch<{ items: AuditEvent[] }>("/audit/logs")
 };

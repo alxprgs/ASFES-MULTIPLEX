@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 from server.host_ops import _psutil
 from server.mcp.plugins._common import bool_argument, int_argument, managed_path, static_availability, string_list_argument
 from server.models import MCPTool, MCPToolManifest, PermissionDefinition, PluginDefinition, PluginManifest, ToolExecutionContext
+
+
+def _ensure_allowed_command(context: ToolExecutionContext, command: list[str]) -> None:
+    allowed = {Path(item).name.lower() for item in context.services.settings.host_ops.process_allowed_executables}
+    executable = Path(command[0]).name.lower() if command else ""
+    if not allowed or executable not in allowed:
+        raise RuntimeError("Process start is not allowed for this executable")
 
 
 async def list_processes(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -46,6 +54,7 @@ async def start_process(context: ToolExecutionContext, arguments: dict[str, Any]
     command = string_list_argument(arguments, "command")
     if not command:
         raise RuntimeError("The 'command' argument must contain at least one element")
+    _ensure_allowed_command(context, command)
     cwd = None
     if arguments.get("cwd"):
         cwd = managed_path(context, str(arguments["cwd"]))
@@ -76,6 +85,7 @@ async def restart_process(context: ToolExecutionContext, arguments: dict[str, An
     cwd = proc.cwd() if proc.is_running() else None
     if not cmdline:
         raise RuntimeError("The selected process does not expose a restartable command line")
+    _ensure_allowed_command(context, cmdline)
     proc.terminate()
     proc.wait(timeout=5)
     restarted = await asyncio.create_subprocess_exec(*cmdline, cwd=cwd or None)
@@ -152,6 +162,7 @@ PLUGIN = PluginDefinition(
                 permissions=["process.write"],
                 tags=["process", "write"],
                 read_only=False,
+                default_global_enabled=False,
             ),
             handler=start_process,
         ),
@@ -172,6 +183,7 @@ PLUGIN = PluginDefinition(
                 permissions=["process.write"],
                 tags=["process", "write"],
                 read_only=False,
+                default_global_enabled=False,
                 required_backends=["psutil"],
             ),
             handler=stop_process,
@@ -191,6 +203,7 @@ PLUGIN = PluginDefinition(
                 permissions=["process.write"],
                 tags=["process", "write"],
                 read_only=False,
+                default_global_enabled=False,
                 required_backends=["psutil"],
             ),
             handler=restart_process,

@@ -683,6 +683,10 @@ input:focus {
   grid-template-columns: minmax(0, 1fr) auto auto auto;
 }
 
+.table-row-services {
+  grid-template-columns: minmax(0, 1.4fr) auto auto auto auto auto;
+}
+
 .toolbar {
   gap: 10px;
 }
@@ -869,6 +873,7 @@ input:focus {
 
   .table-row,
   .table-row-tools,
+  .table-row-services,
   .passkey-row {
     align-items: start;
     grid-template-columns: 1fr;

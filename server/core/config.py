@@ -34,6 +34,7 @@ class AppConfig(BaseModel):
     mcp_path: str = "/mcp"
     frontend_dist: Path = BASE_DIR / "frontend" / "dist"
     startup_progress: bool = True
+    trusted_proxy_ips: list[str] = Field(default_factory=lambda: ["127.0.0.1", "::1"])
 
     @field_validator("api_prefix", "mcp_path")
     @classmethod
@@ -128,6 +129,8 @@ class HostOpsConfig(BaseModel):
     vpn_profiles_directory: Path = BASE_DIR / "data" / "profiles" / "vpn"
     ssl_profiles_directory: Path = BASE_DIR / "data" / "profiles" / "ssl"
     nginx_config_paths: list[Path] = Field(default_factory=lambda: [BASE_DIR / "data" / "nginx"])
+    process_allowed_executables: list[str] = Field(default_factory=list)
+    port_probe_allowed_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "::1", "localhost"])
 
 
 class SecurityConfig(BaseModel):
@@ -143,9 +146,24 @@ class SecurityConfig(BaseModel):
     csrf_cookie_name: str = "multiplex_csrf"
     cookie_secure: bool = False
     cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    allow_insecure_cookies: bool = False
     issuer: str | None = None
     api_audience: str = "multiplex-api"
     mcp_audience: str = "multiplex-mcp"
+
+
+class PasswordPolicyConfig(BaseModel):
+    min_length: int = 12
+    forbidden_passwords: list[str] = Field(
+        default_factory=lambda: [
+            "password",
+            "password123",
+            "qwerty123",
+            "admin123",
+            "changeme",
+            "changemerootpassword123!",
+        ]
+    )
 
 
 class OAuthConfig(BaseModel):
@@ -200,6 +218,7 @@ class Settings(BaseSettings):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     host_ops: HostOpsConfig = Field(default_factory=HostOpsConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    password_policy: PasswordPolicyConfig = Field(default_factory=PasswordPolicyConfig)
     oauth: OAuthConfig = Field(default_factory=OAuthConfig)
     rate_limits: RateLimitPresetConfig = Field(default_factory=RateLimitPresetConfig)
 

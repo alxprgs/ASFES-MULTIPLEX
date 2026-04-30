@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from server.core.config import BASE_DIR
 from server.core.database import TOOL_POLICIES
 from server.core.deps import enforce_api_rate_limit, get_current_api_user, get_optional_api_user, get_services, require_permission
-from server.models import AuditEventListResponse, AuditEventResponse, BootstrapResponse, PermissionDefinition, PermissionMutationRequest, PluginInfoResponse, PluginReloadRequest, ProfileUpdateRequest, RuntimeSettingsResponse, SystemUpdateResponse, ToggleRequest, ToolInfoResponse, UserResponse, UserToolPolicyResponse, UserPrincipal
+from server.models import AuditEventListResponse, AuditEventResponse, BootstrapResponse, MCPConnectedServiceResponse, PermissionDefinition, PermissionMutationRequest, PluginInfoResponse, PluginReloadRequest, ProfileUpdateRequest, RuntimeSettingsResponse, SystemUpdateResponse, ToggleRequest, ToolInfoResponse, UserResponse, UserToolPolicyResponse, UserPrincipal
 from server.services import ApplicationServices, request_meta_from_request
 
 
@@ -27,6 +27,14 @@ def _system_script_command(script_path: str) -> list[str]:
     if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() != 0:
         return ["sudo", "-n", "/bin/bash", script_path]
     return ["bash", script_path]
+
+
+def _system_script_failure_detail(result) -> str:
+    output = result.stderr.strip() or result.stdout.strip()
+    lowered = output.lower()
+    if "sudo" in lowered or "password" in lowered or "permission" in lowered or "разреш" in lowered or "прав" in lowered:
+        return "Системное действие недоступно: настройте sudo/system-разрешения для update/restart вручную."
+    return output or "Системный скрипт завершился с ошибкой"
 
 
 @router.get("/bootstrap", response_model=BootstrapResponse)
@@ -221,6 +229,8 @@ async def run_system_update(
             "truncated": result.truncated,
         },
     )
+    if result.returncode != 0:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=_system_script_failure_detail(result))
     return SystemUpdateResponse.model_validate(result.to_dict())
 
 
@@ -263,7 +273,7 @@ async def run_system_restart(
     if result.returncode != 0:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=result.stderr.strip() or result.stdout.strip() or "restart.sh failed",
+            detail=_system_script_failure_detail(result),
         )
     return SystemUpdateResponse.model_validate(result.to_dict())
 
@@ -298,6 +308,16 @@ async def list_plugins(
 ) -> list[PluginInfoResponse]:
     await enforce_api_rate_limit(request, services, user=current_user)
     return [PluginInfoResponse.model_validate(item) for item in await services.plugins.list_plugins()]
+
+
+@router.get("/mcp/connected-services", response_model=list[MCPConnectedServiceResponse])
+async def connected_mcp_services(
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(require_permission("oauth.clients.manage")),
+) -> list[MCPConnectedServiceResponse]:
+    await enforce_api_rate_limit(request, services, user=current_user)
+    return [MCPConnectedServiceResponse.model_validate(item) for item in await services.oauth.connected_services()]
 
 
 @router.put("/mcp/plugins/{plugin_key}", response_model=PluginInfoResponse)

@@ -89,7 +89,7 @@ async def run_uvicorn() -> None:
         ws=get_ws_protocol(),
         reload=reload_enabled,
         proxy_headers=True,
-        forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"),
+        forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS", ",".join(settings.app.trusted_proxy_ips)),
         lifespan="on",
 
         timeout_keep_alive=int(os.getenv("KEEPALIVE", "5")),

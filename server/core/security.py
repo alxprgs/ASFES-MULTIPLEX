@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import json
 import secrets
 import struct
 import time
@@ -11,6 +10,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
+
+import jwt
 
 
 class SecurityError(Exception):
@@ -115,39 +116,27 @@ class TokenBundle:
 
 
 def encode_jwt(payload: dict[str, Any], secret: str) -> str:
-    header = {"alg": "HS256", "typ": "JWT"}
-    encoded_header = b64url_encode(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    encoded_payload = b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    signature = hmac.new(secret.encode("utf-8"), f"{encoded_header}.{encoded_payload}".encode("utf-8"), hashlib.sha256).digest()
-    return f"{encoded_header}.{encoded_payload}.{b64url_encode(signature)}"
+    return jwt.encode(payload, secret, algorithm="HS256", headers={"typ": "JWT"})
 
 
 def decode_jwt(token: str, secret: str, *, issuer: str, audience: str, token_type: str | None = None) -> dict[str, Any]:
     try:
-        encoded_header, encoded_payload, encoded_signature = token.split(".")
-    except ValueError as exc:
+        header = jwt.get_unverified_header(token)
+    except jwt.PyJWTError as exc:
         raise SecurityError("Malformed JWT") from exc
-
-    expected_signature = hmac.new(
-        secret.encode("utf-8"),
-        f"{encoded_header}.{encoded_payload}".encode("utf-8"),
-        hashlib.sha256,
-    ).digest()
-    if not hmac.compare_digest(b64url_encode(expected_signature), encoded_signature):
-        raise SecurityError("Invalid JWT signature")
-
-    payload = json.loads(b64url_decode(encoded_payload))
-    now = int(time.time())
-    if payload.get("iss") != issuer:
-        raise SecurityError("Invalid issuer")
-    aud = payload.get("aud")
-    if isinstance(aud, list):
-        if audience not in aud:
-            raise SecurityError("Invalid audience")
-    elif aud != audience:
-        raise SecurityError("Invalid audience")
-    if int(payload.get("exp", 0)) <= now:
-        raise SecurityError("Token expired")
+    if header.get("alg") != "HS256" or header.get("typ") != "JWT":
+        raise SecurityError("Invalid JWT header")
+    try:
+        payload = jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            issuer=issuer,
+            audience=audience,
+            options={"require": ["exp", "iat", "nbf", "iss", "aud"]},
+        )
+    except jwt.PyJWTError as exc:
+        raise SecurityError("Invalid JWT") from exc
     if token_type is not None and payload.get("token_type") != token_type:
         raise SecurityError("Unexpected token type")
     return payload

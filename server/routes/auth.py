@@ -428,7 +428,12 @@ async def two_factor_disable(
 ) -> UserResponse:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
     try:
-        user_doc = await services.users.disable_two_factor(current_user, payload.code, request_meta=request_meta_from_request(request))
+        user_doc = await services.users.disable_two_factor(
+            current_user,
+            payload.code,
+            current_password=payload.current_password,
+            request_meta=request_meta_from_request(request),
+        )
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:

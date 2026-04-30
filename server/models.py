@@ -39,6 +39,10 @@ class UserResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+
+
+class HealthDetailsResponse(BaseModel):
+    status: str
     mongodb: str
     redis: str
     mcp_enabled: bool
@@ -152,6 +156,7 @@ class TwoFactorEnableResponse(BaseModel):
 
 
 class TwoFactorDisableRequest(BaseModel):
+    current_password: str
     code: str
 
 
@@ -245,6 +250,28 @@ class OAuthClientResponse(BaseModel):
     confidential: bool
     created_at: str
     client_secret: str | None = None
+
+
+class OAuthClientSecretRotateResponse(BaseModel):
+    client_id: str
+    client_secret: str
+
+
+class MCPConnectedServiceUser(BaseModel):
+    user_id: str
+    username: str | None = None
+
+
+class MCPConnectedServiceResponse(BaseModel):
+    client_id: str
+    client_name: str
+    confidential: bool
+    allowed_scopes: list[str]
+    active_session_count: int
+    user_count: int
+    users: list[MCPConnectedServiceUser]
+    last_token_issued_at: str | None = None
+    last_tool_call_at: str | None = None
 
 
 class PluginReloadRequest(BaseModel):

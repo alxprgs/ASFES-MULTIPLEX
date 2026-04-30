@@ -33,7 +33,7 @@ async def test_bootstrap_creates_runtime_root_plugins_and_safe_runtime_upserts(i
     assert {"docker", "mail"} <= set(plugins)
 
     tools = {item["key"]: item for item in await services.plugins.list_tools()}
-    assert tools["docker.list_containers"]["global_enabled"] is True
+    assert tools["docker.list_containers"]["global_enabled"] is False
     assert tools["docker.restart_container"]["global_enabled"] is False
     assert tools["mail.send_test_email"]["global_enabled"] is False
 
@@ -94,6 +94,14 @@ async def test_rest_oauth_and_mcp_flow_respects_user_scoping(integration_env) ->
     )
     assert grant_perm.status_code == 200
     assert "docker.containers.read" in grant_perm.json()["permissions"]
+
+    enable_global_tool = await client.put(
+        "/api/mcp/tools/docker.list_containers",
+        headers=root_headers,
+        json={"enabled": True},
+    )
+    assert enable_global_tool.status_code == 200
+    assert enable_global_tool.json()["global_enabled"] is True
 
     enable_tool = await client.put(
         f"/api/mcp/users/{alice_id}/tools/docker.list_containers",
@@ -201,6 +209,13 @@ async def test_rest_oauth_and_mcp_flow_respects_user_scoping(integration_env) ->
             assert tool_call.structured_content["count"] == 1
             assert tool_call.structured_content["user"] == "alice"
 
+            connected = await client.get("/api/mcp/connected-services", headers=root_headers)
+            assert connected.status_code == 200
+            service = next(item for item in connected.json() if item["client_id"] == oauth_client_id)
+            assert service["active_session_count"] == 1
+            assert service["user_count"] == 1
+            assert service["last_tool_call_at"] is not None
+
             denied_call = await mcp_client.call_tool(
                 "docker.restart_container",
                 {"container": "web"},
@@ -298,6 +313,144 @@ async def test_cookie_auth_csrf_and_bearer_compatibility(integration_env) -> Non
     assert logout.status_code == 204
     assert not client.cookies.get(cfg.access_cookie_name)
     assert await services.settings_service.get_runtime_settings()
+
+
+@pytest.mark.asyncio
+async def test_health_details_requires_permission(integration_env) -> None:
+    client = integration_env["client"]
+    cfg = integration_env["settings"]
+
+    public_health = await client.get("/api/health")
+    assert public_health.status_code == 200
+    assert set(public_health.json()) == {"status"}
+
+    denied = await client.get("/api/health/details")
+    assert denied.status_code == 401
+
+    login = await client.post("/api/auth/login", json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()})
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    details = await client.get("/api/health/details", headers=headers)
+    assert details.status_code == 200
+    assert {"status", "mongodb", "redis", "mcp_enabled"} <= set(details.json())
+
+
+@pytest.mark.asyncio
+async def test_oauth_hardening_for_dynamic_registration_confidential_clients_and_pkce(integration_env) -> None:
+    client = integration_env["client"]
+    cfg = integration_env["settings"]
+
+    anonymous_register = await client.post(
+        "/api/oauth/register",
+        json={"client_name": "Anonymous", "redirect_uris": ["https://example.test/callback"]},
+    )
+    assert anonymous_register.status_code == 401
+
+    login = await client.post("/api/auth/login", json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()})
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    dynamic_register = await client.post(
+        "/api/oauth/register",
+        headers=headers,
+        json={"client_name": "Dynamic", "redirect_uris": ["https://example.test/dynamic"], "scope": "mcp"},
+    )
+    assert dynamic_register.status_code == 201
+
+    bad_redirect = await client.post(
+        "/api/oauth/clients",
+        headers=headers,
+        json={"name": "Bad", "redirect_uris": ["javascript:alert(1)"], "allowed_scopes": ["mcp"]},
+    )
+    assert bad_redirect.status_code == 400
+
+    confidential = await client.post(
+        "/api/oauth/clients",
+        headers=headers,
+        json={
+            "name": "Confidential",
+            "redirect_uris": ["https://example.test/confidential"],
+            "allowed_scopes": ["mcp"],
+            "confidential": True,
+        },
+    )
+    assert confidential.status_code == 201
+    confidential_payload = confidential.json()
+    client_id = confidential_payload["client_id"]
+    client_secret = confidential_payload["client_secret"]
+    assert client_secret
+
+    verifier = "confidential-pkce-verifier-123456789"
+    challenge = build_pkce_challenge(verifier)
+    plain_page = await client.get(
+        "/api/oauth/authorize",
+        params={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": "https://example.test/confidential",
+            "scope": "mcp",
+            "code_challenge": verifier,
+            "code_challenge_method": "plain",
+        },
+    )
+    assert plain_page.status_code == 400
+
+    authorize = await client.post(
+        "/api/oauth/authorize",
+        data={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": "https://example.test/confidential",
+            "scope": "mcp",
+            "state": "confidential",
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+            "approve": "true",
+        },
+        follow_redirects=False,
+    )
+    assert authorize.status_code == 302
+    code = parse_qs(urlparse(authorize.headers["location"]).query)["code"][0]
+
+    missing_secret = await client.post(
+        "/api/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": client_id,
+            "redirect_uri": "https://example.test/confidential",
+            "code": code,
+            "code_verifier": verifier,
+        },
+    )
+    assert missing_secret.status_code == 400
+
+    token = await client.post(
+        "/api/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": "https://example.test/confidential",
+            "code": code,
+            "code_verifier": verifier,
+        },
+    )
+    assert token.status_code == 200
+    refresh_token = token.json()["refresh_token"]
+
+    refresh_denied = await client.post("/api/oauth/token", data={"grant_type": "refresh_token", "client_id": client_id, "refresh_token": refresh_token})
+    assert refresh_denied.status_code == 400
+
+    rotate = await client.post(f"/api/oauth/clients/{client_id}/secret/rotate", headers=headers)
+    assert rotate.status_code == 200
+    next_secret = rotate.json()["client_secret"]
+    assert next_secret != client_secret
+
+    revoke = await client.post(
+        "/api/oauth/revoke",
+        data={"token": refresh_token, "client_id": client_id, "client_secret": next_secret},
+    )
+    assert revoke.status_code == 200
 
 
 @pytest.mark.asyncio

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
+
 from server.core.qr import _reed_solomon_generator, qr_svg
-from server.core.security import build_pkce_challenge, create_jwt, decode_jwt, hash_password, totp_code, verify_password, verify_pkce
+from server.core.security import SecurityError, build_pkce_challenge, create_jwt, decode_jwt, encode_jwt, hash_password, totp_code, verify_password, verify_pkce
 
 
 def test_password_hash_roundtrip() -> None:
@@ -20,9 +22,10 @@ def test_pkce_verification_roundtrip() -> None:
 
 
 def test_jwt_roundtrip() -> None:
+    secret = "x" * 48
     token = create_jwt(
         subject="user_1",
-        secret="secret",
+        secret=secret,
         issuer="https://multiplex.asfes.ru/api/oauth",
         audience="multiplex-api",
         token_type="api_access",
@@ -31,13 +34,41 @@ def test_jwt_roundtrip() -> None:
     )
     payload = decode_jwt(
         token,
-        "secret",
+        secret,
         issuer="https://multiplex.asfes.ru/api/oauth",
         audience="multiplex-api",
         token_type="api_access",
     )
     assert payload["sub"] == "user_1"
     assert payload["username"] == "root"
+
+
+def test_jwt_rejects_unexpected_algorithm() -> None:
+    token = encode_jwt(
+        {
+            "sub": "user_1",
+            "iss": "https://multiplex.asfes.ru/api/oauth",
+            "aud": "multiplex-api",
+            "iat": 1,
+            "nbf": 1,
+            "exp": 9999999999,
+            "token_type": "api_access",
+        },
+        "x" * 48,
+    )
+    header, payload, signature = token.split(".")
+    import base64
+    import json
+
+    bad_header = base64.urlsafe_b64encode(json.dumps({"alg": "none", "typ": "JWT"}).encode()).decode().rstrip("=")
+    with pytest.raises(SecurityError):
+        decode_jwt(
+            f"{bad_header}.{payload}.{signature}",
+            "x" * 48,
+            issuer="https://multiplex.asfes.ru/api/oauth",
+            audience="multiplex-api",
+            token_type="api_access",
+        )
 
 
 def test_totp_matches_rfc_vector() -> None:

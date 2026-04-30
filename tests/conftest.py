@@ -33,6 +33,9 @@ def make_test_settings():
     cfg.root.username = "root"
     cfg.root.password = SecretStr("IntegrationRootPass123!")
     cfg.root.email = "root.integration@example.com"
+    cfg.security.api_jwt_secret = SecretStr("IntegrationApiJwtSecretForPytest1234567890")
+    cfg.security.oauth_jwt_secret = SecretStr("IntegrationOauthJwtSecretForPytest1234567890")
+    cfg.security.password_pepper = SecretStr("IntegrationPasswordPepperForPytest1234567890")
     cfg.logging.directory = workspace / "logs"
     cfg.logging.sqlite_path = workspace / "logs.db"
     cfg.host_ops.managed_file_roots = [workspace / "managed"]

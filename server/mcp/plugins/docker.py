@@ -68,7 +68,7 @@ async def stop_container(context: ToolExecutionContext, arguments: dict[str, Any
 
 async def container_logs(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
     container = require_argument(arguments, "container")
-    tail_lines = int_argument(arguments, "tail_lines", 200)
+    tail_lines = min(max(1, int_argument(arguments, "tail_lines", 200)), 500)
     returncode, stdout, stderr = await _run_docker_command("logs", "--tail", str(max(1, tail_lines)), str(container))
     if returncode != 0:
         raise RuntimeError(stderr.strip() or "docker logs failed")
@@ -80,8 +80,35 @@ async def inspect_container(context: ToolExecutionContext, arguments: dict[str, 
     returncode, stdout, stderr = await _run_docker_command("inspect", str(container))
     if returncode != 0:
         raise RuntimeError(stderr.strip() or "docker inspect failed")
-    inspected = json.loads(stdout or "[]")
+    inspected = [_redact_inspect_item(item) for item in json.loads(stdout or "[]")]
     return {"container": container, "inspect": inspected}
+
+
+def _redact_inspect_item(item: dict[str, Any]) -> dict[str, Any]:
+    redacted = json.loads(json.dumps(item))
+    config = redacted.get("Config") or {}
+    if isinstance(config.get("Env"), list):
+        config["Env"] = [_redact_env_value(value) for value in config["Env"]]
+    for section_name in ("Config", "ContainerConfig"):
+        section = redacted.get(section_name) or {}
+        labels = section.get("Labels")
+        if isinstance(labels, dict):
+            for key in list(labels):
+                if _looks_sensitive(key):
+                    labels[key] = "[REDACTED]"
+    return redacted
+
+
+def _redact_env_value(value: str) -> str:
+    name, separator, raw = str(value).partition("=")
+    if separator and _looks_sensitive(name):
+        return f"{name}=[REDACTED]"
+    return str(value)
+
+
+def _looks_sensitive(name: str) -> bool:
+    lowered = name.lower()
+    return any(marker in lowered for marker in ("password", "passwd", "secret", "token", "key", "credential"))
 
 
 async def container_stats(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -132,7 +159,7 @@ PLUGIN = PluginDefinition(
                 permissions=["docker.containers.read"],
                 tags=["docker", "containers", "read"],
                 read_only=True,
-                default_global_enabled=True,
+                default_global_enabled=False,
                 required_backends=["docker"],
             ),
             handler=list_containers,
@@ -152,7 +179,7 @@ PLUGIN = PluginDefinition(
                 permissions=["docker.containers.read"],
                 tags=["docker", "containers", "inspect"],
                 read_only=True,
-                default_global_enabled=True,
+                default_global_enabled=False,
                 required_backends=["docker"],
             ),
             handler=inspect_container,
@@ -175,7 +202,7 @@ PLUGIN = PluginDefinition(
                 permissions=["docker.containers.read"],
                 tags=["docker", "containers", "logs"],
                 read_only=True,
-                default_global_enabled=True,
+                default_global_enabled=False,
                 required_backends=["docker"],
             ),
             handler=container_logs,
@@ -195,7 +222,7 @@ PLUGIN = PluginDefinition(
                 permissions=["docker.containers.read"],
                 tags=["docker", "containers", "stats"],
                 read_only=True,
-                default_global_enabled=True,
+                default_global_enabled=False,
                 required_backends=["docker"],
             ),
             handler=container_stats,
@@ -215,7 +242,7 @@ PLUGIN = PluginDefinition(
                 permissions=["docker.containers.start"],
                 tags=["docker", "containers", "write"],
                 read_only=False,
-                default_global_enabled=True,
+                default_global_enabled=False,
                 required_backends=["docker"],
             ),
             handler=start_container,
@@ -235,7 +262,7 @@ PLUGIN = PluginDefinition(
                 permissions=["docker.containers.stop"],
                 tags=["docker", "containers", "write"],
                 read_only=False,
-                default_global_enabled=True,
+                default_global_enabled=False,
                 required_backends=["docker"],
             ),
             handler=stop_container,
@@ -260,7 +287,7 @@ PLUGIN = PluginDefinition(
                 permissions=["docker.containers.restart"],
                 tags=["docker", "containers", "write"],
                 read_only=False,
-                default_global_enabled=True,
+                default_global_enabled=False,
                 required_backends=["docker"],
             ),
             handler=restart_container,

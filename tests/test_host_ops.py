@@ -61,6 +61,20 @@ def test_atomic_write_creates_backup(workspace: Path) -> None:
     assert any(host_ops.backup_directory().iterdir())
 
 
+def test_atomic_write_blocks_symlink_escape(workspace: Path) -> None:
+    host_ops = build_host_ops(workspace)
+    managed_root = host_ops.managed_file_roots()[0]
+    outside = workspace / "outside.txt"
+    outside.write_text("outside", encoding="utf-8")
+    link = managed_root / "link.txt"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Symlinks are unavailable: {exc}")
+    with pytest.raises(HostOpsError):
+        host_ops.atomic_write_text("link.txt", "changed", roots=host_ops.managed_file_roots())
+
+
 @pytest.mark.asyncio
 async def test_run_truncates_large_output(workspace: Path) -> None:
     host_ops = build_host_ops(workspace)

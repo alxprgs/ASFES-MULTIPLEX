@@ -70,6 +70,7 @@ def _resolve_request_user(request: Request) -> UserPrincipal:
         raise _mcp_error("Authenticated MCP user is missing an identifier", code=-32001)
 
     request.scope["multiplex.user"] = user
+    request.scope["multiplex.oauth_client_id"] = access_token.client_id
     return user
 
 
@@ -217,11 +218,13 @@ class ManagedPluginTool(Tool):
         user = _resolve_request_user(request)
 
         try:
+            request_meta = request_meta_from_request(request, services.settings)
+            request_meta["oauth_client_id"] = request.scope.get("multiplex.oauth_client_id")
             result = await services.plugins.call_tool(
                 user,
                 self._tool_key,
                 arguments,
-                request_meta_from_request(request),
+                request_meta,
             )
         except Exception as exc:
             raise ToolError(str(exc)) from exc

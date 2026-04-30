@@ -20,9 +20,9 @@ import {
   X
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, AuditEvent, Bootstrap, Health, Passkey, Permission, PluginInfo, RuntimeSettings, SystemUpdateResult, ToolInfo, TwoFactorSetup, User, api, setCsrfCookieName } from "./api";
+import { ApiError, AuditEvent, Bootstrap, Health, MCPConnectedService, Passkey, Permission, PluginInfo, RuntimeSettings, SystemUpdateResult, ToolInfo, TwoFactorSetup, User, api, setCsrfCookieName } from "./api";
 
-type View = "overview" | "users" | "plugins" | "tools" | "audit" | "profile";
+type View = "overview" | "users" | "plugins" | "tools" | "services" | "audit" | "profile";
 type ToastTone = "success" | "error" | "info" | "warning";
 
 type Toast = {
@@ -52,6 +52,7 @@ const navItems: Array<{ view: View; label: string; icon: ReactNode }> = [
   { view: "users", label: "Пользователи", icon: <Users size={18} /> },
   { view: "plugins", label: "Плагины", icon: <Plug size={18} /> },
   { view: "tools", label: "Инструменты", icon: <Wrench size={18} /> },
+  { view: "services", label: "Подключения", icon: <KeyRound size={18} /> },
   { view: "audit", label: "Аудит", icon: <ScrollText size={18} /> },
   { view: "profile", label: "Профиль", icon: <UserCircle size={18} /> }
 ];
@@ -718,6 +719,35 @@ function ToolsView({
   );
 }
 
+function ConnectedServicesView({ services }: { services: MCPConnectedService[] }) {
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <h2>MCP-подключения</h2>
+          <p>{services.length ? `${services.length} активных OAuth-клиентов` : "Активных MCP-сессий нет"}</p>
+        </div>
+      </div>
+      <div className="table">
+        {services.map((service) => (
+          <div className="table-row table-row-services" key={service.client_id}>
+            <div>
+              <strong>{service.client_name}</strong>
+              <small>{service.client_id}</small>
+              <small>{service.allowed_scopes.join(", ") || "без scope"}</small>
+            </div>
+            <Badge tone={service.confidential ? "ok" : "warn"}>{service.confidential ? "confidential" : "public"}</Badge>
+            <span>{service.active_session_count} сессий</span>
+            <span>{service.user_count} пользователей</span>
+            <span>{service.last_token_issued_at ? formatDate(service.last_token_issued_at) : "токенов нет"}</span>
+            <span>{service.last_tool_call_at ? formatDate(service.last_tool_call_at) : "вызовов нет"}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function formatAuditEvent(event: AuditEvent, plugins: PluginInfo[], tools: ToolInfo[]): { title: string; detail: string } {
   const targetPluginKey = textValue(event.target.plugin_key);
   const targetToolKey = textValue(event.target.tool_key);
@@ -955,13 +985,18 @@ function ProfileView({
               Код 2FA или резервный код
               <input value={twoFactorCode} onChange={(event) => setTwoFactorCode(event.target.value)} inputMode="numeric" autoComplete="one-time-code" />
             </label>
+            <label>
+              Текущий пароль
+              <input value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} type="password" autoComplete="current-password" />
+            </label>
             <button
               className="secondary-button danger-button"
-              disabled={twoFactorBusy || !twoFactorCode}
+              disabled={twoFactorBusy || !twoFactorCode || !currentPassword}
               onClick={() => runTwoFactor(async () => {
-                const updated = await api.twoFactorDisable(twoFactorCode);
+                const updated = await api.twoFactorDisable(twoFactorCode, currentPassword);
                 onUserUpdate(updated);
                 setTwoFactorCode("");
+                setCurrentPassword("");
                 setSetup(null);
                 setRecoveryCodes([]);
                 setTwoFactorMessage("2FA отключена");
@@ -1103,6 +1138,7 @@ export function App() {
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [tools, setTools] = useState<ToolInfo[]>([]);
+  const [connectedServices, setConnectedServices] = useState<MCPConnectedService[]>([]);
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [view, setView] = useState<View>("overview");
   const [loading, setLoading] = useState(true);
@@ -1165,13 +1201,14 @@ export function App() {
   }
 
   async function loadAll() {
-    const [nextHealth, nextRuntime, nextUsers, nextPermissions, nextPlugins, nextTools, nextAudit] = await Promise.all([
-      api.health(),
+    const [nextHealth, nextRuntime, nextUsers, nextPermissions, nextPlugins, nextTools, nextConnectedServices, nextAudit] = await Promise.all([
+      api.healthDetails().catch(() => api.health()),
       api.runtime(),
       api.users(),
       api.permissions(),
       api.plugins(),
       api.tools(),
+      api.connectedServices().catch(() => []),
       api.audit()
     ]);
     setHealth(nextHealth);
@@ -1180,6 +1217,7 @@ export function App() {
     setPermissions(nextPermissions);
     setPlugins(nextPlugins);
     setTools(nextTools);
+    setConnectedServices(nextConnectedServices);
     setEvents(nextAudit.items);
   }
 
@@ -1393,6 +1431,7 @@ export function App() {
             }
           />
         ) : null}
+        {view === "services" ? <ConnectedServicesView services={connectedServices} /> : null}
         {view === "audit" ? <AuditView events={events} plugins={plugins} tools={tools} /> : null}
         {view === "profile" ? (
           <ProfileView

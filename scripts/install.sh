@@ -181,6 +181,7 @@ APP__API_PREFIX=/api
 APP__MCP_PATH=/mcp
 APP__FRONTEND_DIST=${INSTALL_DIR}/frontend/dist
 APP__STARTUP_PROGRESS=false
+APP__TRUSTED_PROXY_IPS=["127.0.0.1","::1"]
 
 MONGO__URI=${MONGO_URI}
 MONGO__DATABASE=asfes_multiplex
@@ -217,6 +218,8 @@ HOST_OPS__DATABASE_PROFILES_DIRECTORY=${DATA_DIR}/profiles/databases
 HOST_OPS__VPN_PROFILES_DIRECTORY=${DATA_DIR}/profiles/vpn
 HOST_OPS__SSL_PROFILES_DIRECTORY=${DATA_DIR}/profiles/ssl
 HOST_OPS__NGINX_CONFIG_PATHS=["${DATA_DIR}/nginx"]
+HOST_OPS__PROCESS_ALLOWED_EXECUTABLES=[]
+HOST_OPS__PORT_PROBE_ALLOWED_HOSTS=["127.0.0.1","::1","localhost"]
 
 SECURITY__API_JWT_SECRET=${API_SECRET}
 SECURITY__OAUTH_JWT_SECRET=${OAUTH_SECRET}
@@ -228,10 +231,14 @@ SECURITY__OAUTH_REFRESH_TOKEN_TTL_DAYS=30
 SECURITY__OAUTH_AUTHORIZATION_CODE_TTL_MINUTES=10
 SECURITY__SESSION_COOKIE_NAME=multiplex_session
 SECURITY__CSRF_COOKIE_NAME=multiplex_csrf
-SECURITY__COOKIE_SECURE=false
+SECURITY__COOKIE_SECURE=true
 SECURITY__COOKIE_SAMESITE=lax
+SECURITY__ALLOW_INSECURE_COOKIES=false
 SECURITY__API_AUDIENCE=multiplex-api
 SECURITY__MCP_AUDIENCE=multiplex-mcp
+
+PASSWORD_POLICY__MIN_LENGTH=12
+PASSWORD_POLICY__FORBIDDEN_PASSWORDS=["password","password123","qwerty123","admin123","changeme","changemerootpassword123!"]
 
 OAUTH__ISSUER_PATH=/api/oauth
 OAUTH__AUTHORIZATION_PATH=/api/oauth/authorize
@@ -248,11 +255,7 @@ chmod 600 "${ENV_FILE}"
 chown -R "${APP_USER}:${APP_USER}" "${INSTALL_DIR}" "${DATA_DIR}" "${LOG_DIR}"
 chown root:"${APP_USER}" "${ENV_FILE}"
 
-cat >"${SUDOERS_FILE}" <<EOF
-${APP_USER} ALL=(root) NOPASSWD: /bin/bash ${INSTALL_DIR}/scripts/update.sh
-${APP_USER} ALL=(root) NOPASSWD: /bin/bash ${INSTALL_DIR}/scripts/restart.sh
-EOF
-chmod 440 "${SUDOERS_FILE}"
+rm -f "${SUDOERS_FILE}"
 
 echo "Проверяю подключение к MongoDB..."
 MONGO__URI="${MONGO_URI}" "${INSTALL_DIR}/.venv/bin/python" - <<'PY'
@@ -279,7 +282,7 @@ EnvironmentFile=${ENV_FILE}
 ExecStart=${INSTALL_DIR}/.venv/bin/python ${INSTALL_DIR}/run.py
 Restart=on-failure
 RestartSec=5
-NoNewPrivileges=false
+NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=full
