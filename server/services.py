@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import importlib
+import json
 import pkgutil
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -10,13 +11,17 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from pymongo.errors import DuplicateKeyError
+from webauthn import generate_authentication_options, generate_registration_options, options_to_json, verify_authentication_response, verify_registration_response
+from webauthn.helpers.structs import AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor, ResidentKeyRequirement, UserVerificationRequirement
+
 from server.alerting import AlertingService
 from server.core.config import Settings
-from server.core.database import AUDIT_EVENTS, OAUTH_CLIENTS, OAUTH_CODES, PLUGINS, REFRESH_TOKENS, SETTINGS, TOOL_POLICIES, USERS, DatabaseManager
+from server.core.database import AUDIT_EVENTS, OAUTH_CLIENTS, OAUTH_CODES, PASSKEYS, PASSKEY_CHALLENGES, PLUGINS, REFRESH_TOKENS, SETTINGS, TOOL_POLICIES, USERS, DatabaseManager
 from server.core.logging import IntegrityLogManager, Mailer, get_logger
 from server.core.qr import qr_svg
 from server.core.ratelimit import RateLimitPolicy, RateLimiter
-from server.core.security import TokenBundle, build_totp_uri, create_jwt, decode_jwt, generate_totp_secret, hash_password, now_utc, random_token, sha256_text, verify_password, verify_pkce, verify_totp_code
+from server.core.security import TokenBundle, b64url_decode, b64url_encode, build_totp_uri, create_jwt, decode_jwt, generate_totp_secret, hash_password, now_utc, random_token, sha256_text, verify_password, verify_pkce, verify_totp_code
 from server.host_ops import HostOpsService
 from server.models import MCPTool, PermissionDefinition, PluginDefinition, RuntimeAvailability, ToolExecutionContext, UserPrincipal
 
@@ -58,6 +63,17 @@ def is_expired(value: datetime | None) -> bool:
     if normalized is None:
         return True
     return normalized <= now_utc()
+
+
+def enum_value(value: Any) -> Any:
+    return getattr(value, "value", value)
+
+
+def clean_passkey_name(value: str | None, default: str = "Passkey") -> str:
+    normalized = " ".join((value or "").strip().split())
+    if not normalized:
+        return default
+    return normalized[:80]
 
 
 def request_meta_from_request(request: Any) -> dict[str, Any]:
@@ -330,6 +346,222 @@ class UserService:
         pepper = self.settings.security.password_pepper.get_secret_value()
         return verify_password(password, document["password_hash"], pepper)
 
+    async def list_passkeys(self, user: UserPrincipal) -> list[dict[str, Any]]:
+        cursor = self.db.collection(PASSKEYS).find({"user_id": user.user_id}).sort("created_at", -1)
+        return [self.to_passkey_response(item) async for item in cursor]
+
+    async def begin_passkey_registration(
+        self,
+        user: UserPrincipal,
+        *,
+        current_password: str,
+        name: str | None,
+        rp_id: str,
+        rp_name: str,
+        origin: str,
+        request_meta: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not await self.verify_password_for_user(user, current_password):
+            raise PermissionError("Current password is invalid")
+        existing = await self._passkeys_for_user(user.user_id)
+        options = generate_registration_options(
+            rp_id=rp_id,
+            rp_name=rp_name,
+            user_id=user.user_id.encode("utf-8"),
+            user_name=user.username,
+            user_display_name=user.username,
+            exclude_credentials=[
+                PublicKeyCredentialDescriptor(id=b64url_decode(item["credential_id"]))
+                for item in existing
+            ],
+            authenticator_selection=AuthenticatorSelectionCriteria(
+                resident_key=ResidentKeyRequirement.REQUIRED,
+                user_verification=UserVerificationRequirement.REQUIRED,
+            ),
+        )
+        challenge_id = await self._store_passkey_challenge(
+            purpose="registration",
+            challenge=bytes(options.challenge),
+            user_id=user.user_id,
+            rp_id=rp_id,
+            origin=origin,
+            metadata={"name": clean_passkey_name(name)},
+        )
+        await self.audit.record(
+            "account.passkey.registration_options",
+            actor=user,
+            request_meta=request_meta,
+            target={"user_id": user.user_id},
+        )
+        return {"challenge_id": challenge_id, "options": json.loads(options_to_json(options))}
+
+    async def finish_passkey_registration(
+        self,
+        user: UserPrincipal,
+        *,
+        challenge_id: str,
+        name: str | None,
+        credential: dict[str, Any],
+        request_meta: dict[str, Any],
+    ) -> dict[str, Any]:
+        challenge = await self._consume_passkey_challenge(challenge_id, purpose="registration")
+        if challenge.get("user_id") != user.user_id:
+            raise ValueError("Passkey challenge does not belong to this user")
+        verification = verify_registration_response(
+            credential=credential,
+            expected_challenge=b64url_decode(challenge["challenge"]),
+            expected_origin=challenge["origin"],
+            expected_rp_id=challenge["rp_id"],
+            require_user_verification=True,
+        )
+        transports = credential.get("response", {}).get("transports") or []
+        created_at = now_utc()
+        document = {
+            "_id": f"passkey_{uuid4().hex}",
+            "user_id": user.user_id,
+            "name": clean_passkey_name(name, challenge.get("metadata", {}).get("name") or "Passkey"),
+            "credential_id": b64url_encode(verification.credential_id),
+            "credential_public_key": b64url_encode(verification.credential_public_key),
+            "sign_count": verification.sign_count,
+            "transports": [str(item) for item in transports],
+            "authenticator_attachment": credential.get("authenticatorAttachment"),
+            "credential_device_type": enum_value(verification.credential_device_type),
+            "credential_backed_up": bool(verification.credential_backed_up),
+            "created_at": created_at,
+            "updated_at": created_at,
+            "last_used_at": None,
+        }
+        try:
+            await self.db.collection(PASSKEYS).insert_one(document)
+        except DuplicateKeyError as exc:
+            raise ValueError("This passkey is already registered") from exc
+        await self.audit.record(
+            "account.passkey.create",
+            actor=user,
+            request_meta=request_meta,
+            target={"user_id": user.user_id, "passkey_id": document["_id"]},
+            metadata={"name": document["name"]},
+        )
+        return self.to_passkey_response(document)
+
+    async def begin_passkey_authentication(
+        self,
+        *,
+        username: str | None,
+        rp_id: str,
+        origin: str,
+        request_meta: dict[str, Any],
+    ) -> dict[str, Any]:
+        username = username.strip() if username else None
+        user_doc = await self.get_user_by_username(username) if username else None
+        if username and not user_doc:
+            raise LookupError("No passkeys are available for this account")
+        passkeys = await self._passkeys_for_user(user_doc["_id"]) if user_doc else []
+        if username and not passkeys:
+            raise LookupError("No passkeys are available for this account")
+        allow_credentials = [
+            PublicKeyCredentialDescriptor(id=b64url_decode(item["credential_id"]))
+            for item in passkeys
+        ] or None
+        options = generate_authentication_options(
+            rp_id=rp_id,
+            allow_credentials=allow_credentials,
+            user_verification=UserVerificationRequirement.REQUIRED,
+        )
+        challenge_id = await self._store_passkey_challenge(
+            purpose="authentication",
+            challenge=bytes(options.challenge),
+            user_id=user_doc["_id"] if user_doc else None,
+            rp_id=rp_id,
+            origin=origin,
+            metadata={"username": username},
+        )
+        await self.audit.record(
+            "auth.passkey.options",
+            actor=self.to_principal(user_doc) if user_doc else None,
+            request_meta=request_meta,
+            target={"username": username},
+        )
+        return {"challenge_id": challenge_id, "options": json.loads(options_to_json(options))}
+
+    async def finish_passkey_authentication(
+        self,
+        *,
+        challenge_id: str,
+        credential: dict[str, Any],
+        request_meta: dict[str, Any],
+    ) -> tuple[UserPrincipal, dict[str, Any]]:
+        challenge = await self._consume_passkey_challenge(challenge_id, purpose="authentication")
+        credential_id = credential.get("id") or credential.get("rawId")
+        if not isinstance(credential_id, str) or not credential_id:
+            raise ValueError("Passkey credential id is required")
+        passkey = await self.db.collection(PASSKEYS).find_one({"credential_id": credential_id})
+        if not passkey:
+            raise LookupError("Passkey is not registered")
+        if challenge.get("user_id") and challenge["user_id"] != passkey["user_id"]:
+            raise ValueError("Passkey does not match the requested account")
+        verification = verify_authentication_response(
+            credential=credential,
+            expected_challenge=b64url_decode(challenge["challenge"]),
+            expected_origin=challenge["origin"],
+            expected_rp_id=challenge["rp_id"],
+            credential_public_key=b64url_decode(passkey["credential_public_key"]),
+            credential_current_sign_count=int(passkey.get("sign_count", 0)),
+            require_user_verification=True,
+        )
+        user_doc = await self.get_user_by_id(passkey["user_id"])
+        if not user_doc:
+            raise LookupError("User not found")
+        await self.db.collection(PASSKEYS).update_one(
+            {"_id": passkey["_id"]},
+            {
+                "$set": {
+                    "sign_count": verification.new_sign_count,
+                    "credential_device_type": enum_value(verification.credential_device_type),
+                    "credential_backed_up": bool(verification.credential_backed_up),
+                    "last_used_at": now_utc(),
+                    "updated_at": now_utc(),
+                },
+            },
+        )
+        user = self.to_principal(user_doc)
+        await self.audit.record(
+            "auth.passkey.login",
+            actor=user,
+            request_meta=request_meta,
+            target={"user_id": user.user_id, "passkey_id": passkey["_id"]},
+        )
+        return user, user_doc
+
+    async def rename_passkey(self, user: UserPrincipal, passkey_id: str, name: str, *, request_meta: dict[str, Any]) -> dict[str, Any]:
+        result = await self.db.collection(PASSKEYS).update_one(
+            {"_id": passkey_id, "user_id": user.user_id},
+            {"$set": {"name": clean_passkey_name(name), "updated_at": now_utc()}},
+        )
+        if result.matched_count == 0:
+            raise LookupError("Passkey not found")
+        updated = await self.db.collection(PASSKEYS).find_one({"_id": passkey_id, "user_id": user.user_id})
+        assert updated is not None
+        await self.audit.record(
+            "account.passkey.rename",
+            actor=user,
+            request_meta=request_meta,
+            target={"user_id": user.user_id, "passkey_id": passkey_id},
+            metadata={"name": updated["name"]},
+        )
+        return self.to_passkey_response(updated)
+
+    async def delete_passkey(self, user: UserPrincipal, passkey_id: str, *, request_meta: dict[str, Any]) -> None:
+        result = await self.db.collection(PASSKEYS).delete_one({"_id": passkey_id, "user_id": user.user_id})
+        if result.deleted_count == 0:
+            raise LookupError("Passkey not found")
+        await self.audit.record(
+            "account.passkey.delete",
+            actor=user,
+            request_meta=request_meta,
+            target={"user_id": user.user_id, "passkey_id": passkey_id},
+        )
+
     def two_factor_enabled(self, document: dict[str, Any]) -> bool:
         return bool(document.get("two_factor", {}).get("enabled"))
 
@@ -513,6 +745,55 @@ class UserService:
             "created_at": serialize_datetime(document.get("created_at")),
             "updated_at": serialize_datetime(document.get("updated_at")),
         }
+
+    def to_passkey_response(self, document: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "passkey_id": document["_id"],
+            "name": document.get("name") or "Passkey",
+            "created_at": serialize_datetime(document.get("created_at")),
+            "last_used_at": serialize_datetime(document.get("last_used_at")),
+            "transports": list(document.get("transports", [])),
+            "authenticator_attachment": document.get("authenticator_attachment"),
+            "credential_device_type": document.get("credential_device_type"),
+            "credential_backed_up": bool(document.get("credential_backed_up")),
+        }
+
+    async def _passkeys_for_user(self, user_id: str) -> list[dict[str, Any]]:
+        cursor = self.db.collection(PASSKEYS).find({"user_id": user_id})
+        return [item async for item in cursor]
+
+    async def _store_passkey_challenge(
+        self,
+        *,
+        purpose: str,
+        challenge: bytes,
+        user_id: str | None,
+        rp_id: str,
+        origin: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        challenge_id = f"passkey_challenge_{uuid4().hex}"
+        await self.db.collection(PASSKEY_CHALLENGES).insert_one(
+            {
+                "_id": challenge_id,
+                "purpose": purpose,
+                "challenge": b64url_encode(challenge),
+                "user_id": user_id,
+                "rp_id": rp_id,
+                "origin": origin,
+                "metadata": metadata or {},
+                "created_at": now_utc(),
+                "expires_at": now_utc() + timedelta(minutes=5),
+            }
+        )
+        return challenge_id
+
+    async def _consume_passkey_challenge(self, challenge_id: str, *, purpose: str) -> dict[str, Any]:
+        document = await self.db.collection(PASSKEY_CHALLENGES).find_one({"_id": challenge_id, "purpose": purpose})
+        if not document or is_expired(document.get("expires_at")):
+            raise ValueError("Passkey challenge is invalid or expired")
+        await self.db.collection(PASSKEY_CHALLENGES).delete_one({"_id": challenge_id})
+        return document
 
 
 class AuthService:

@@ -18,6 +18,8 @@ TOOL_POLICIES = "tool_policies"
 AUDIT_EVENTS = "audit_events"
 ALERT_RULES = "alert_rules"
 ALERT_EVENTS = "alert_events"
+PASSKEYS = "passkeys"
+PASSKEY_CHALLENGES = "passkey_challenges"
 
 
 class DatabaseManager:
@@ -86,6 +88,24 @@ class DatabaseManager:
             [
                 IndexModel([("token_hash", ASCENDING)], unique=True),
                 IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0),
+                IndexModel([("user_id", ASCENDING), ("purpose", ASCENDING)]),
+            ]
+        )
+
+        passkeys = self.collection(PASSKEYS)
+        await passkeys.create_indexes(
+            [
+                IndexModel([("credential_id", ASCENDING)], unique=True),
+                IndexModel([("user_id", ASCENDING)]),
+                IndexModel([("created_at", ASCENDING)]),
+            ]
+        )
+
+        passkey_challenges = self.collection(PASSKEY_CHALLENGES)
+        await passkey_challenges.create_indexes(
+            [
+                IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0),
+                IndexModel([("challenge", ASCENDING)], unique=True),
                 IndexModel([("user_id", ASCENDING), ("purpose", ASCENDING)]),
             ]
         )

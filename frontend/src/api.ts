@@ -105,6 +105,22 @@ export type TwoFactorSetup = {
   qr_svg: string;
 };
 
+export type Passkey = {
+  passkey_id: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+  transports: string[];
+  authenticator_attachment: string | null;
+  credential_device_type: string | null;
+  credential_backed_up: boolean;
+};
+
+export type PasskeyOptions = {
+  challenge_id: string;
+  options: Record<string, unknown>;
+};
+
 export class ApiError extends Error {
   status: number;
 
@@ -176,6 +192,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ challenge_token: challengeToken, code })
     }),
+  passkeyAuthenticationOptions: (username: string | null) =>
+    apiFetch<PasskeyOptions>("/auth/passkeys/authentication/options", {
+      method: "POST",
+      body: JSON.stringify({ username })
+    }),
+  passkeyAuthenticationVerify: (challengeId: string, credential: Record<string, unknown>) =>
+    apiFetch<{ user: User }>("/auth/passkeys/authentication/verify", {
+      method: "POST",
+      body: JSON.stringify({ challenge_id: challengeId, credential })
+    }),
   refresh: () =>
     apiFetch<{ user: User }>("/auth/refresh", {
       method: "POST"
@@ -204,6 +230,26 @@ export const api = {
     apiFetch<User>("/auth/2fa/disable", {
       method: "POST",
       body: JSON.stringify({ code })
+    }),
+  passkeys: () => apiFetch<Passkey[]>("/auth/passkeys"),
+  passkeyRegistrationOptions: (currentPassword: string, name: string | null) =>
+    apiFetch<PasskeyOptions>("/auth/passkeys/registration/options", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword, name })
+    }),
+  passkeyRegistrationVerify: (challengeId: string, name: string | null, credential: Record<string, unknown>) =>
+    apiFetch<Passkey>("/auth/passkeys/registration/verify", {
+      method: "POST",
+      body: JSON.stringify({ challenge_id: challengeId, name, credential })
+    }),
+  renamePasskey: (passkeyId: string, name: string) =>
+    apiFetch<Passkey>(`/auth/passkeys/${encodeURIComponent(passkeyId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ name })
+    }),
+  deletePasskey: (passkeyId: string) =>
+    apiFetch<void>(`/auth/passkeys/${encodeURIComponent(passkeyId)}`, {
+      method: "DELETE"
     }),
   users: () => apiFetch<User[]>("/users"),
   permissions: () => apiFetch<Permission[]>("/permissions"),

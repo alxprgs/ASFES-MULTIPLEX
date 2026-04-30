@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 
 from server.core.deps import enforce_api_rate_limit, enforce_csrf_for_cookie_auth, get_current_api_user, get_optional_api_user, get_services
 from server.core.ratelimit import RateLimitError
 from server.core.security import random_token
-from server.models import AuthTokensResponse, LoginRequest, LoginTwoFactorRequest, LogoutRequest, RefreshRequest, RegisterRequest, RegistrationStatusResponse, TwoFactorChallengeResponse, TwoFactorDisableRequest, TwoFactorEnableRequest, TwoFactorEnableResponse, TwoFactorSetupRequest, TwoFactorSetupResponse, TwoFactorStatusResponse, UserResponse, UserPrincipal
+from server.models import AuthTokensResponse, LoginRequest, LoginTwoFactorRequest, LogoutRequest, PasskeyBeginAuthenticationRequest, PasskeyBeginRegistrationRequest, PasskeyFinishAuthenticationRequest, PasskeyFinishRegistrationRequest, PasskeyOptionsResponse, PasskeyResponse, PasskeyUpdateRequest, RefreshRequest, RegisterRequest, RegistrationStatusResponse, TwoFactorChallengeResponse, TwoFactorDisableRequest, TwoFactorEnableRequest, TwoFactorEnableResponse, TwoFactorSetupRequest, TwoFactorSetupResponse, TwoFactorStatusResponse, UserResponse, UserPrincipal
 from server.services import ApplicationServices, request_meta_from_request
 
 
@@ -65,6 +67,18 @@ def _clear_auth_cookies(response: Response, services: ApplicationServices) -> No
         services.settings.csrf_cookie_name,
     ):
         response.delete_cookie(cookie_name, path="/", secure=secure, samesite=same_site)
+
+
+def _webauthn_relying_party(request: Request, services: ApplicationServices) -> tuple[str, str, str]:
+    origin = request.headers.get("origin")
+    if not origin:
+        public = urlparse(services.settings.public_base_url)
+        origin = f"{public.scheme}://{public.netloc}"
+    parsed = urlparse(origin)
+    if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid WebAuthn origin")
+    rp_id = parsed.hostname
+    return rp_id, services.settings.app.name, f"{parsed.scheme}://{parsed.netloc}"
 
 
 @router.post("/login", response_model=AuthTokensResponse | TwoFactorChallengeResponse)
@@ -136,6 +150,53 @@ async def login_two_factor(
     user = services.users.to_principal(user_doc)
     tokens = await services.auth.issue_api_tokens(user, request_meta)
     await services.audit.record("auth.login", actor=user, request_meta=request_meta, target={"user_id": user.user_id}, metadata={"two_factor": True})
+    _set_auth_cookies(response, services, tokens)
+    return _build_auth_response(services, tokens, user_doc)
+
+
+@router.post("/passkeys/authentication/options", response_model=PasskeyOptionsResponse)
+async def passkey_authentication_options(
+    payload: PasskeyBeginAuthenticationRequest,
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+) -> PasskeyOptionsResponse:
+    request_meta = request_meta_from_request(request)
+    try:
+        await services.rate_limiter.enforce("login", f"{request_meta['ip']}:{payload.username or 'discoverable'}:passkey")
+    except RateLimitError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many passkey attempts", headers={"Retry-After": str(exc.retry_after)}) from exc
+    rp_id, rp_name, origin = _webauthn_relying_party(request, services)
+    try:
+        options = await services.users.begin_passkey_authentication(
+            username=payload.username,
+            rp_id=rp_id,
+            origin=origin,
+            request_meta=request_meta,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    return PasskeyOptionsResponse.model_validate(options)
+
+
+@router.post("/passkeys/authentication/verify", response_model=AuthTokensResponse)
+async def passkey_authentication_verify(
+    payload: PasskeyFinishAuthenticationRequest,
+    request: Request,
+    response: Response,
+    services: ApplicationServices = Depends(get_services),
+) -> AuthTokensResponse:
+    request_meta = request_meta_from_request(request)
+    try:
+        user, user_doc = await services.users.finish_passkey_authentication(
+            challenge_id=payload.challenge_id,
+            credential=payload.credential,
+            request_meta=request_meta,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    tokens = await services.auth.issue_api_tokens(user, request_meta)
     _set_auth_cookies(response, services, tokens)
     return _build_auth_response(services, tokens, user_doc)
 
@@ -226,6 +287,91 @@ async def me(
     if not user_doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return UserResponse.model_validate(services.users.to_response(user_doc))
+
+
+@router.get("/passkeys", response_model=list[PasskeyResponse])
+async def list_passkeys(
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(get_current_api_user),
+) -> list[PasskeyResponse]:
+    await enforce_api_rate_limit(request, services, user=current_user)
+    return [PasskeyResponse.model_validate(item) for item in await services.users.list_passkeys(current_user)]
+
+
+@router.post("/passkeys/registration/options", response_model=PasskeyOptionsResponse)
+async def passkey_registration_options(
+    payload: PasskeyBeginRegistrationRequest,
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(get_current_api_user),
+) -> PasskeyOptionsResponse:
+    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    rp_id, rp_name, origin = _webauthn_relying_party(request, services)
+    try:
+        options = await services.users.begin_passkey_registration(
+            current_user,
+            current_password=payload.current_password,
+            name=payload.name,
+            rp_id=rp_id,
+            rp_name=rp_name,
+            origin=origin,
+            request_meta=request_meta_from_request(request),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    return PasskeyOptionsResponse.model_validate(options)
+
+
+@router.post("/passkeys/registration/verify", response_model=PasskeyResponse, status_code=status.HTTP_201_CREATED)
+async def passkey_registration_verify(
+    payload: PasskeyFinishRegistrationRequest,
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(get_current_api_user),
+) -> PasskeyResponse:
+    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    try:
+        passkey = await services.users.finish_passkey_registration(
+            current_user,
+            challenge_id=payload.challenge_id,
+            name=payload.name,
+            credential=payload.credential,
+            request_meta=request_meta_from_request(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return PasskeyResponse.model_validate(passkey)
+
+
+@router.put("/passkeys/{passkey_id}", response_model=PasskeyResponse)
+async def rename_passkey(
+    passkey_id: str,
+    payload: PasskeyUpdateRequest,
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(get_current_api_user),
+) -> PasskeyResponse:
+    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    try:
+        passkey = await services.users.rename_passkey(current_user, passkey_id, payload.name, request_meta=request_meta_from_request(request))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return PasskeyResponse.model_validate(passkey)
+
+
+@router.delete("/passkeys/{passkey_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_passkey(
+    passkey_id: str,
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(get_current_api_user),
+) -> None:
+    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    try:
+        await services.users.delete_passkey(current_user, passkey_id, request_meta=request_meta_from_request(request))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get("/2fa/status", response_model=TwoFactorStatusResponse)

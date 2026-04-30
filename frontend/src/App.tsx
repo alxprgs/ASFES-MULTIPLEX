@@ -1,6 +1,7 @@
 import {
   Activity,
   Database,
+  Fingerprint,
   KeyRound,
   Loader2,
   LogOut,
@@ -12,13 +13,14 @@ import {
   ScrollText,
   Shield,
   SlidersHorizontal,
+  Trash2,
   UserCircle,
   Users,
   Wrench,
   X
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, AuditEvent, Bootstrap, Health, Permission, PluginInfo, RuntimeSettings, SystemUpdateResult, ToolInfo, TwoFactorSetup, User, api, setCsrfCookieName } from "./api";
+import { ApiError, AuditEvent, Bootstrap, Health, Passkey, Permission, PluginInfo, RuntimeSettings, SystemUpdateResult, ToolInfo, TwoFactorSetup, User, api, setCsrfCookieName } from "./api";
 
 type View = "overview" | "users" | "plugins" | "tools" | "audit" | "profile";
 type ToastTone = "success" | "error" | "info" | "warning";
@@ -86,6 +88,99 @@ function enabledText(value: unknown, enabled = "включён", disabled = "о�
 
 function textValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function base64UrlToBuffer(value: string): ArrayBuffer {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+  const binary = window.atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes.buffer;
+}
+
+function bufferToBase64Url(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function credentialCreationOptionsFromJson(options: Record<string, unknown>): PublicKeyCredentialCreationOptions {
+  type CredentialDescriptorJson = Omit<PublicKeyCredentialDescriptor, "id"> & { id: string };
+  const value = options as unknown as Omit<PublicKeyCredentialCreationOptions, "challenge" | "user" | "excludeCredentials"> & {
+    challenge: string;
+    user: Omit<PublicKeyCredentialUserEntity, "id"> & { id: string };
+    excludeCredentials?: CredentialDescriptorJson[];
+  };
+  return {
+    ...value,
+    challenge: base64UrlToBuffer(value.challenge),
+    user: {
+      ...value.user,
+      id: base64UrlToBuffer(value.user.id)
+    },
+    excludeCredentials: value.excludeCredentials?.map((item) => ({
+      ...item,
+      id: base64UrlToBuffer(item.id)
+    }))
+  };
+}
+
+function credentialRequestOptionsFromJson(options: Record<string, unknown>): PublicKeyCredentialRequestOptions {
+  type CredentialDescriptorJson = Omit<PublicKeyCredentialDescriptor, "id"> & { id: string };
+  const value = options as unknown as Omit<PublicKeyCredentialRequestOptions, "challenge" | "allowCredentials"> & {
+    challenge: string;
+    allowCredentials?: CredentialDescriptorJson[];
+  };
+  return {
+    ...value,
+    challenge: base64UrlToBuffer(value.challenge),
+    allowCredentials: value.allowCredentials?.map((item) => ({
+      ...item,
+      id: base64UrlToBuffer(item.id)
+    }))
+  };
+}
+
+function publicKeyCredentialToJson(credential: Credential | null): Record<string, unknown> {
+  if (!credential || credential.type !== "public-key") {
+    throw new Error("Passkey was not selected");
+  }
+  const publicKeyCredential = credential as PublicKeyCredential & { authenticatorAttachment?: string | null };
+  const response = publicKeyCredential.response;
+  const base = {
+    id: publicKeyCredential.id,
+    rawId: bufferToBase64Url(publicKeyCredential.rawId),
+    type: publicKeyCredential.type,
+    authenticatorAttachment: publicKeyCredential.authenticatorAttachment ?? undefined,
+    clientExtensionResults: publicKeyCredential.getClientExtensionResults()
+  };
+  if ("attestationObject" in response) {
+    const registration = response as AuthenticatorAttestationResponse & { getTransports?: () => string[] };
+    return {
+      ...base,
+      response: {
+        attestationObject: bufferToBase64Url(registration.attestationObject),
+        clientDataJSON: bufferToBase64Url(registration.clientDataJSON),
+        transports: registration.getTransports?.() || []
+      }
+    };
+  }
+  const authentication = response as AuthenticatorAssertionResponse;
+  return {
+    ...base,
+    response: {
+      authenticatorData: bufferToBase64Url(authentication.authenticatorData),
+      clientDataJSON: bufferToBase64Url(authentication.clientDataJSON),
+      signature: bufferToBase64Url(authentication.signature),
+      userHandle: authentication.userHandle ? bufferToBase64Url(authentication.userHandle) : undefined
+    }
+  };
 }
 
 function ErrorBanner({ message }: { message: string | null }) {
@@ -233,6 +328,7 @@ function LoginView({ onLogin }: { onLogin: (user: User) => void }) {
   const [code, setCode] = useState("");
   const [challenge, setChallenge] = useState<{ token: string; username: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function submit(event: FormEvent) {
@@ -256,6 +352,27 @@ function LoginView({ onLogin }: { onLogin: (user: User) => void }) {
       setError(exc instanceof Error ? exc.message : "Не удалось войти");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function signInWithPasskey() {
+    if (!navigator.credentials) {
+      setError("Passkey не поддерживается этим браузером");
+      return;
+    }
+    setPasskeyBusy(true);
+    setError(null);
+    try {
+      const options = await api.passkeyAuthenticationOptions(username || null);
+      const credential = await navigator.credentials.get({
+        publicKey: credentialRequestOptionsFromJson(options.options)
+      });
+      const result = await api.passkeyAuthenticationVerify(options.challenge_id, publicKeyCredentialToJson(credential));
+      onLogin(result.user);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось войти с passkey");
+    } finally {
+      setPasskeyBusy(false);
     }
   }
 
@@ -302,6 +419,12 @@ function LoginView({ onLogin }: { onLogin: (user: User) => void }) {
           <button className="primary-button" type="submit" disabled={busy || !username || !password || (Boolean(challenge) && !code)}>
             {busy ? "Вход..." : challenge ? "Подтвердить" : "Войти"}
           </button>
+          {!challenge ? (
+            <button className="secondary-button" type="button" disabled={passkeyBusy} onClick={signInWithPasskey}>
+              {passkeyBusy ? <Loader2 size={16} className="spin" /> : <Fingerprint size={16} />}
+              Войти с passkey
+            </button>
+          ) : null}
           {challenge ? (
             <button className="secondary-button" type="button" onClick={() => {
               setChallenge(null);
@@ -703,12 +826,39 @@ function ProfileView({
   const [twoFactorMessage, setTwoFactorMessage] = useState<string | null>(null);
   const [twoFactorError, setTwoFactorError] = useState<string | null>(null);
   const [twoFactorBusy, setTwoFactorBusy] = useState(false);
+  const [passkeys, setPasskeys] = useState<Passkey[]>([]);
+  const [passkeyNames, setPasskeyNames] = useState<Record<string, string>>({});
+  const [newPasskeyName, setNewPasskeyName] = useState("");
+  const [passkeyPassword, setPasskeyPassword] = useState("");
+  const [passkeyMessage, setPasskeyMessage] = useState<string | null>(null);
+  const [passkeyError, setPasskeyError] = useState<string | null>(null);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
 
   useEffect(() => {
     setEmail(user.email || "");
     setTgId(user.tg_id || "");
     setVkId(user.vk_id || "");
   }, [user]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.passkeys()
+      .then((items) => {
+        if (cancelled) {
+          return;
+        }
+        setPasskeys(items);
+        setPasskeyNames(Object.fromEntries(items.map((item) => [item.passkey_id, item.name])));
+      })
+      .catch((exc) => {
+        if (!cancelled) {
+          setPasskeyError(exc instanceof Error ? exc.message : "Не удалось загрузить passkey");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user.user_id]);
 
   async function runTwoFactor(action: () => Promise<void>) {
     setTwoFactorBusy(true);
@@ -721,6 +871,40 @@ function ProfileView({
     } finally {
       setTwoFactorBusy(false);
     }
+  }
+
+  async function runPasskey(action: () => Promise<void>) {
+    setPasskeyBusy(true);
+    setPasskeyError(null);
+    setPasskeyMessage(null);
+    try {
+      await action();
+    } catch (exc) {
+      setPasskeyError(exc instanceof Error ? exc.message : "Не удалось обновить passkey");
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
+
+  async function refreshPasskeys() {
+    const items = await api.passkeys();
+    setPasskeys(items);
+    setPasskeyNames(Object.fromEntries(items.map((item) => [item.passkey_id, item.name])));
+  }
+
+  async function createPasskey() {
+    if (!navigator.credentials) {
+      throw new Error("Passkey не поддерживается этим браузером");
+    }
+    const options = await api.passkeyRegistrationOptions(passkeyPassword, newPasskeyName || null);
+    const credential = await navigator.credentials.create({
+      publicKey: credentialCreationOptionsFromJson(options.options)
+    });
+    await api.passkeyRegistrationVerify(options.challenge_id, newPasskeyName || null, publicKeyCredentialToJson(credential));
+    setNewPasskeyName("");
+    setPasskeyPassword("");
+    setPasskeyMessage("Passkey добавлен");
+    await refreshPasskeys();
   }
 
   return (
@@ -836,6 +1020,75 @@ function ProfileView({
             ) : null}
           </div>
         )}
+      </div>
+      <div className="panel narrow">
+        <div className="panel-head">
+          <div>
+            <h2>Passkey</h2>
+            <p>{passkeys.length ? `${passkeys.length} ключей для входа` : "Windows Hello, Google Password Manager и FIDO2-ключи"}</p>
+          </div>
+          <Badge tone={passkeys.length ? "ok" : "muted"}>{passkeys.length}</Badge>
+        </div>
+        <ErrorBanner message={passkeyError} />
+        {passkeyMessage ? <div className="notice notice-ok">{passkeyMessage}</div> : null}
+        <div className="form-grid">
+          <label>
+            Название
+            <input value={newPasskeyName} onChange={(event) => setNewPasskeyName(event.target.value)} placeholder="Например, Windows Hello" autoComplete="off" />
+          </label>
+          <label>
+            Текущий пароль
+            <input value={passkeyPassword} onChange={(event) => setPasskeyPassword(event.target.value)} type="password" autoComplete="current-password" />
+          </label>
+          <button className="secondary-button" disabled={passkeyBusy || !passkeyPassword} onClick={() => runPasskey(createPasskey)}>
+            {passkeyBusy ? <Loader2 size={16} className="spin" /> : <Fingerprint size={16} />}
+            Добавить passkey
+          </button>
+        </div>
+        <div className="passkey-list">
+          {passkeys.map((item) => (
+            <div className="passkey-row" key={item.passkey_id}>
+              <div>
+                <input
+                  value={passkeyNames[item.passkey_id] ?? item.name}
+                  onChange={(event) => setPasskeyNames((current) => ({ ...current, [item.passkey_id]: event.target.value }))}
+                  aria-label="Название passkey"
+                />
+                <small>
+                  Создан: {formatDate(item.created_at)}
+                  {item.last_used_at ? ` · Последний вход: ${formatDate(item.last_used_at)}` : ""}
+                </small>
+                <small>{[item.authenticator_attachment, item.credential_device_type, item.credential_backed_up ? "синхронизируется" : null, ...item.transports].filter(Boolean).join(" · ") || "без дополнительных данных"}</small>
+              </div>
+              <div className="passkey-actions">
+                <button
+                  className="icon-button"
+                  title="Сохранить название"
+                  disabled={passkeyBusy || (passkeyNames[item.passkey_id] ?? item.name).trim() === item.name}
+                  onClick={() => runPasskey(async () => {
+                    await api.renamePasskey(item.passkey_id, passkeyNames[item.passkey_id] ?? item.name);
+                    setPasskeyMessage("Название passkey обновлено");
+                    await refreshPasskeys();
+                  })}
+                >
+                  <Save size={16} />
+                </button>
+                <button
+                  className="icon-button danger-icon"
+                  title="Удалить passkey"
+                  disabled={passkeyBusy}
+                  onClick={() => runPasskey(async () => {
+                    await api.deletePasskey(item.passkey_id);
+                    setPasskeyMessage("Passkey удалён");
+                    await refreshPasskeys();
+                  })}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );

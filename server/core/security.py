@@ -17,11 +17,11 @@ class SecurityError(Exception):
     pass
 
 
-def _b64url_encode(data: bytes) -> str:
+def b64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
 
 
-def _b64url_decode(data: str) -> bytes:
+def b64url_decode(data: str) -> bytes:
     padding = "=" * (-len(data) % 4)
     return base64.urlsafe_b64decode(f"{data}{padding}")
 
@@ -33,7 +33,7 @@ def now_utc() -> datetime:
 def hash_password(password: str, pepper: str) -> str:
     salt = secrets.token_bytes(16)
     digest = hashlib.scrypt((password + pepper).encode("utf-8"), salt=salt, n=2**14, r=8, p=1)
-    return f"scrypt${_b64url_encode(salt)}${_b64url_encode(digest)}"
+    return f"scrypt${b64url_encode(salt)}${b64url_encode(digest)}"
 
 
 def verify_password(password: str, encoded: str, pepper: str) -> bool:
@@ -43,8 +43,8 @@ def verify_password(password: str, encoded: str, pepper: str) -> bool:
         return False
     if algorithm != "scrypt":
         return False
-    salt = _b64url_decode(salt_b64)
-    expected = _b64url_decode(digest_b64)
+    salt = b64url_decode(salt_b64)
+    expected = b64url_decode(digest_b64)
     actual = hashlib.scrypt((password + pepper).encode("utf-8"), salt=salt, n=2**14, r=8, p=1)
     return hmac.compare_digest(actual, expected)
 
@@ -94,7 +94,7 @@ def build_totp_uri(*, secret: str, issuer: str, account_name: str) -> str:
 
 def build_pkce_challenge(verifier: str) -> str:
     digest = hashlib.sha256(verifier.encode("utf-8")).digest()
-    return _b64url_encode(digest)
+    return b64url_encode(digest)
 
 
 def verify_pkce(verifier: str, challenge: str, method: str) -> bool:
@@ -116,10 +116,10 @@ class TokenBundle:
 
 def encode_jwt(payload: dict[str, Any], secret: str) -> str:
     header = {"alg": "HS256", "typ": "JWT"}
-    encoded_header = _b64url_encode(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    encoded_payload = _b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    encoded_header = b64url_encode(json.dumps(header, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    encoded_payload = b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
     signature = hmac.new(secret.encode("utf-8"), f"{encoded_header}.{encoded_payload}".encode("utf-8"), hashlib.sha256).digest()
-    return f"{encoded_header}.{encoded_payload}.{_b64url_encode(signature)}"
+    return f"{encoded_header}.{encoded_payload}.{b64url_encode(signature)}"
 
 
 def decode_jwt(token: str, secret: str, *, issuer: str, audience: str, token_type: str | None = None) -> dict[str, Any]:
@@ -133,10 +133,10 @@ def decode_jwt(token: str, secret: str, *, issuer: str, audience: str, token_typ
         f"{encoded_header}.{encoded_payload}".encode("utf-8"),
         hashlib.sha256,
     ).digest()
-    if not hmac.compare_digest(_b64url_encode(expected_signature), encoded_signature):
+    if not hmac.compare_digest(b64url_encode(expected_signature), encoded_signature):
         raise SecurityError("Invalid JWT signature")
 
-    payload = json.loads(_b64url_decode(encoded_payload))
+    payload = json.loads(b64url_decode(encoded_payload))
     now = int(time.time())
     if payload.get("iss") != issuer:
         raise SecurityError("Invalid issuer")

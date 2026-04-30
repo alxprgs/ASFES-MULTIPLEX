@@ -70,6 +70,46 @@ class LogoutRequest(BaseModel):
     refresh_token: str
 
 
+class PasskeyBeginRegistrationRequest(BaseModel):
+    current_password: str
+    name: str | None = None
+
+
+class PasskeyFinishRegistrationRequest(BaseModel):
+    challenge_id: str
+    name: str | None = None
+    credential: dict[str, Any]
+
+
+class PasskeyBeginAuthenticationRequest(BaseModel):
+    username: str | None = None
+
+
+class PasskeyFinishAuthenticationRequest(BaseModel):
+    challenge_id: str
+    credential: dict[str, Any]
+
+
+class PasskeyUpdateRequest(BaseModel):
+    name: str
+
+
+class PasskeyResponse(BaseModel):
+    passkey_id: str
+    name: str
+    created_at: str
+    last_used_at: str | None = None
+    transports: list[str] = Field(default_factory=list)
+    authenticator_attachment: str | None = None
+    credential_device_type: str | None = None
+    credential_backed_up: bool = False
+
+
+class PasskeyOptionsResponse(BaseModel):
+    challenge_id: str
+    options: dict[str, Any]
+
+
 class AuthTokensResponse(BaseModel):
     two_factor_required: bool = False
     access_token: str
