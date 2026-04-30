@@ -107,10 +107,10 @@ PLUGIN = PluginDefinition(
         key="ssl",
         name="SSL",
         version="1.0.0",
-        description="Issue, renew and inspect SSL certificates using named server-side profiles.",
+        description="Выпускает, обновляет и проверяет SSL-сертификаты через именованные серверные профили.",
         permissions=[
-            PermissionDefinition(key="ssl.read", description="Read SSL profile metadata and certificate expiry."),
-            PermissionDefinition(key="ssl.write", description="Issue and renew SSL certificates from named profiles."),
+            PermissionDefinition(key="ssl.read", description="Читать метаданные SSL-профилей и срок действия сертификатов."),
+            PermissionDefinition(key="ssl.write", description="Выпускать и обновлять SSL-сертификаты из именованных профилей."),
         ],
         providers=["certbot", "win-acme"],
     ),
@@ -118,8 +118,8 @@ PLUGIN = PluginDefinition(
         "ssl.list_profiles": MCPTool(
             manifest=MCPToolManifest(
                 key="ssl.list_profiles",
-                name="List SSL Profiles",
-                description="List named SSL profiles stored on the server.",
+                name="Список SSL-профилей",
+                description="Показывает именованные SSL-профили, сохранённые на сервере.",
                 input_schema={"type": "object", "properties": {}, "additionalProperties": False},
                 permissions=["ssl.read"],
                 tags=["ssl", "read"],
@@ -130,8 +130,8 @@ PLUGIN = PluginDefinition(
         "ssl.issue_certificate": MCPTool(
             manifest=MCPToolManifest(
                 key="ssl.issue_certificate",
-                name="Issue Certificate",
-                description="Issue or re-issue a certificate using a named SSL profile.",
+                name="Выпустить сертификат",
+                description="Выпускает или перевыпускает сертификат через именованный SSL-профиль.",
                 input_schema={
                     "type": "object",
                     "required": ["profile"],
@@ -149,8 +149,8 @@ PLUGIN = PluginDefinition(
         "ssl.renew_certificate": MCPTool(
             manifest=MCPToolManifest(
                 key="ssl.renew_certificate",
-                name="Renew Certificate",
-                description="Renew certificates using a named SSL profile and the configured provider.",
+                name="Обновить сертификат",
+                description="Обновляет сертификаты через именованный SSL-профиль и настроенный провайдер.",
                 input_schema={
                     "type": "object",
                     "required": ["profile"],
@@ -168,8 +168,8 @@ PLUGIN = PluginDefinition(
         "ssl.check_expiry": MCPTool(
             manifest=MCPToolManifest(
                 key="ssl.check_expiry",
-                name="Check Certificate Expiry",
-                description="Read a certificate from a named profile and report remaining validity.",
+                name="Проверить срок сертификата",
+                description="Читает сертификат из именованного профиля и сообщает оставшийся срок действия.",
                 input_schema={
                     "type": "object",
                     "required": ["profile"],

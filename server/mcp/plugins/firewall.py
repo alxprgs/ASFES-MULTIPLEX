@@ -92,12 +92,12 @@ async def delete_rule(context: ToolExecutionContext, arguments: dict[str, Any]) 
 PLUGIN = PluginDefinition(
     manifest=PluginManifest(
         key="firewall",
-        name="Firewall",
+        name="Файрвол",
         version="1.0.0",
-        description="Inspect and manage local firewall rules with ufw on Linux and netsh on Windows.",
+        description="Просматривает и управляет локальными правилами файрвола через ufw на Linux и netsh на Windows.",
         permissions=[
-            PermissionDefinition(key="firewall.read", description="Read firewall status and rules."),
-            PermissionDefinition(key="firewall.write", description="Enable, disable and modify firewall rules."),
+            PermissionDefinition(key="firewall.read", description="Читать статус и правила файрвола."),
+            PermissionDefinition(key="firewall.write", description="Включать, отключать и изменять правила файрвола."),
         ],
         required_backends=["ufw", "netsh"],
         providers=["ufw", "netsh"],
@@ -106,8 +106,8 @@ PLUGIN = PluginDefinition(
         "firewall.list_rules": MCPTool(
             manifest=MCPToolManifest(
                 key="firewall.list_rules",
-                name="List Firewall Rules",
-                description="Read the current firewall ruleset from the platform backend.",
+                name="Список правил файрвола",
+                description="Читает текущий набор правил файрвола через backend текущей платформы.",
                 input_schema={"type": "object", "properties": {}, "additionalProperties": False},
                 permissions=["firewall.read"],
                 tags=["firewall", "read"],
@@ -121,8 +121,8 @@ PLUGIN = PluginDefinition(
         "firewall.set_enabled": MCPTool(
             manifest=MCPToolManifest(
                 key="firewall.set_enabled",
-                name="Enable Or Disable Firewall",
-                description="Enable or disable the firewall backend on the current host.",
+                name="Включить или отключить файрвол",
+                description="Включает или отключает backend файрвола на текущем хосте.",
                 input_schema={
                     "type": "object",
                     "properties": {"enabled": {"type": "boolean"}},
@@ -140,8 +140,8 @@ PLUGIN = PluginDefinition(
         "firewall.upsert_rule": MCPTool(
             manifest=MCPToolManifest(
                 key="firewall.upsert_rule",
-                name="Create Firewall Rule",
-                description="Create or update a firewall rule for a local port.",
+                name="Создать правило файрвола",
+                description="Создаёт или обновляет правило файрвола для локального порта.",
                 input_schema={
                     "type": "object",
                     "required": ["name", "port"],
@@ -166,8 +166,8 @@ PLUGIN = PluginDefinition(
         "firewall.delete_rule": MCPTool(
             manifest=MCPToolManifest(
                 key="firewall.delete_rule",
-                name="Delete Firewall Rule",
-                description="Delete a firewall rule by managed name on Windows or by rule spec on Linux.",
+                name="Удалить правило файрвола",
+                description="Удаляет правило файрвола по управляемому имени на Windows или по спецификации правила на Linux.",
                 input_schema={
                     "type": "object",
                     "properties": {

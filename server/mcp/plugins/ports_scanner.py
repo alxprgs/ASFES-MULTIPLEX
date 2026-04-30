@@ -64,17 +64,17 @@ async def probe_http(context: ToolExecutionContext, arguments: dict[str, Any]) -
 PLUGIN = PluginDefinition(
     manifest=PluginManifest(
         key="ports_scanner",
-        name="Ports Scanner",
+        name="Сканер портов",
         version="1.0.0",
-        description="Inspect listening ports and probe local or remote service availability.",
-        permissions=[PermissionDefinition(key="ports.read", description="Inspect listening ports and probe service reachability.")],
+        description="Проверяет слушающие порты и доступность локальных или удалённых сервисов.",
+        permissions=[PermissionDefinition(key="ports.read", description="Проверять слушающие порты и доступность сервисов.")],
     ),
     tools={
         "ports_scanner.list_listening_ports": MCPTool(
             manifest=MCPToolManifest(
                 key="ports_scanner.list_listening_ports",
-                name="List Listening Ports",
-                description="List ports currently listening on the local host.",
+                name="Список слушающих портов",
+                description="Показывает порты, которые сейчас слушаются на локальном хосте.",
                 input_schema={"type": "object", "properties": {}, "additionalProperties": False},
                 permissions=["ports.read"],
                 tags=["ports", "read"],
@@ -87,8 +87,8 @@ PLUGIN = PluginDefinition(
         "ports_scanner.probe_tcp": MCPTool(
             manifest=MCPToolManifest(
                 key="ports_scanner.probe_tcp",
-                name="Probe TCP Port",
-                description="Test whether a TCP endpoint accepts a connection.",
+                name="Проверить TCP-порт",
+                description="Проверяет, принимает ли TCP endpoint подключение.",
                 input_schema={
                     "type": "object",
                     "required": ["port"],
@@ -108,8 +108,8 @@ PLUGIN = PluginDefinition(
         "ports_scanner.probe_http": MCPTool(
             manifest=MCPToolManifest(
                 key="ports_scanner.probe_http",
-                name="Probe HTTP Endpoint",
-                description="Send a single HTTP request to verify an endpoint is reachable and responding.",
+                name="Проверить HTTP endpoint",
+                description="Отправляет один HTTP-запрос, чтобы проверить доступность endpoint и наличие ответа.",
                 input_schema={
                     "type": "object",
                     "required": ["url"],

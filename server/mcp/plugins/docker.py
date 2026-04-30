@@ -104,12 +104,12 @@ PLUGIN = PluginDefinition(
         key="docker",
         name="Docker",
         version="1.1.0",
-        description="Manage local Docker containers through guarded MCP tools.",
+        description="Управляет локальными Docker-контейнерами через защищённые MCP-инструменты.",
         permissions=[
-            PermissionDefinition(key="docker.containers.read", description="Read Docker container status, logs and runtime metrics."),
-            PermissionDefinition(key="docker.containers.start", description="Start Docker containers from the MCP server."),
-            PermissionDefinition(key="docker.containers.stop", description="Stop Docker containers from the MCP server."),
-            PermissionDefinition(key="docker.containers.restart", description="Restart Docker containers from the MCP server."),
+            PermissionDefinition(key="docker.containers.read", description="Читать статус, логи и метрики Docker-контейнеров."),
+            PermissionDefinition(key="docker.containers.start", description="Запускать Docker-контейнеры с MCP-сервера."),
+            PermissionDefinition(key="docker.containers.stop", description="Останавливать Docker-контейнеры с MCP-сервера."),
+            PermissionDefinition(key="docker.containers.restart", description="Перезапускать Docker-контейнеры с MCP-сервера."),
         ],
         required_backends=["docker"],
     ),
@@ -117,8 +117,8 @@ PLUGIN = PluginDefinition(
         "docker.list_containers": MCPTool(
             manifest=MCPToolManifest(
                 key="docker.list_containers",
-                name="List Docker Containers",
-                description="Inspect containers visible to the local Docker daemon. Supports listing only running containers or all containers.",
+                name="Список Docker-контейнеров",
+                description="Показывает контейнеры, видимые локальному Docker daemon. Поддерживает вывод только запущенных или всех контейнеров.",
                 input_schema={
                     "type": "object",
                     "properties": {
@@ -141,8 +141,8 @@ PLUGIN = PluginDefinition(
         "docker.inspect_container": MCPTool(
             manifest=MCPToolManifest(
                 key="docker.inspect_container",
-                name="Inspect Docker Container",
-                description="Retrieve the raw Docker inspect payload for a container by name or ID.",
+                name="Инспекция Docker-контейнера",
+                description="Возвращает исходные данные Docker inspect для контейнера по имени или ID.",
                 input_schema={
                     "type": "object",
                     "required": ["container"],
@@ -161,8 +161,8 @@ PLUGIN = PluginDefinition(
         "docker.container_logs": MCPTool(
             manifest=MCPToolManifest(
                 key="docker.container_logs",
-                name="Read Docker Container Logs",
-                description="Read the latest logs from a Docker container without streaming.",
+                name="Читать логи Docker-контейнера",
+                description="Читает последние логи Docker-контейнера без потоковой передачи.",
                 input_schema={
                     "type": "object",
                     "required": ["container"],
@@ -184,8 +184,8 @@ PLUGIN = PluginDefinition(
         "docker.container_stats": MCPTool(
             manifest=MCPToolManifest(
                 key="docker.container_stats",
-                name="Get Docker Container Stats",
-                description="Get a single no-stream Docker stats snapshot for a container.",
+                name="Статистика Docker-контейнера",
+                description="Возвращает одиночный снимок Docker stats для контейнера без потоковой передачи.",
                 input_schema={
                     "type": "object",
                     "required": ["container"],
@@ -204,8 +204,8 @@ PLUGIN = PluginDefinition(
         "docker.start_container": MCPTool(
             manifest=MCPToolManifest(
                 key="docker.start_container",
-                name="Start Docker Container",
-                description="Start a specific Docker container by name or ID.",
+                name="Запустить Docker-контейнер",
+                description="Запускает конкретный Docker-контейнер по имени или ID.",
                 input_schema={
                     "type": "object",
                     "required": ["container"],
@@ -224,8 +224,8 @@ PLUGIN = PluginDefinition(
         "docker.stop_container": MCPTool(
             manifest=MCPToolManifest(
                 key="docker.stop_container",
-                name="Stop Docker Container",
-                description="Stop a specific Docker container by name or ID.",
+                name="Остановить Docker-контейнер",
+                description="Останавливает конкретный Docker-контейнер по имени или ID.",
                 input_schema={
                     "type": "object",
                     "required": ["container"],
@@ -244,8 +244,8 @@ PLUGIN = PluginDefinition(
         "docker.restart_container": MCPTool(
             manifest=MCPToolManifest(
                 key="docker.restart_container",
-                name="Restart Docker Container",
-                description="Restart a specific Docker container by name or ID. Only call this when a container restart is explicitly requested.",
+                name="Перезапустить Docker-контейнер",
+                description="Перезапускает конкретный Docker-контейнер по имени или ID. Вызывайте только при явном запросе на перезапуск контейнера.",
                 input_schema={
                     "type": "object",
                     "required": ["container"],

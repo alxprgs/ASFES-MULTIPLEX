@@ -69,17 +69,17 @@ async def read_docker_logs(context: ToolExecutionContext, arguments: dict[str, A
 PLUGIN = PluginDefinition(
     manifest=PluginManifest(
         key="logs_viewer",
-        name="Logs Viewer",
+        name="Просмотр логов",
         version="1.0.0",
-        description="Read local system logs, managed file logs and Docker container logs.",
-        permissions=[PermissionDefinition(key="logs.read", description="Read local logs from files, system providers and Docker.")],
+        description="Читает локальные системные логи, управляемые файловые логи и логи Docker-контейнеров.",
+        permissions=[PermissionDefinition(key="logs.read", description="Читать локальные логи из файлов, системных провайдеров и Docker.")],
     ),
     tools={
         "logs_viewer.read_file_logs": MCPTool(
             manifest=MCPToolManifest(
                 key="logs_viewer.read_file_logs",
-                name="Read File Logs",
-                description="Tail a managed log file inside the configured log roots.",
+                name="Читать файловые логи",
+                description="Читает конец управляемого log-файла внутри настроенных корней логов.",
                 input_schema={
                     "type": "object",
                     "required": ["path"],
@@ -98,8 +98,8 @@ PLUGIN = PluginDefinition(
         "logs_viewer.read_system_logs": MCPTool(
             manifest=MCPToolManifest(
                 key="logs_viewer.read_system_logs",
-                name="Read System Logs",
-                description="Read system logs from journalctl on Linux or the Windows event log.",
+                name="Читать системные логи",
+                description="Читает системные логи из journalctl на Linux или журнала событий Windows.",
                 input_schema={
                     "type": "object",
                     "properties": {
@@ -120,8 +120,8 @@ PLUGIN = PluginDefinition(
         "logs_viewer.read_docker_logs": MCPTool(
             manifest=MCPToolManifest(
                 key="logs_viewer.read_docker_logs",
-                name="Read Docker Logs",
-                description="Read a bounded set of logs from a Docker container.",
+                name="Читать Docker-логи",
+                description="Читает ограниченный набор логов из Docker-контейнера.",
                 input_schema={
                     "type": "object",
                     "required": ["container"],

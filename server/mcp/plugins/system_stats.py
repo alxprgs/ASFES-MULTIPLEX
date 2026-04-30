@@ -41,18 +41,18 @@ async def get_snapshot(context: ToolExecutionContext, arguments: dict[str, Any])
 PLUGIN = PluginDefinition(
     manifest=PluginManifest(
         key="system_stats",
-        name="System Stats",
+        name="Системная статистика",
         version="1.0.0",
-        description="Read CPU, memory, disk and network metrics from the local host.",
-        permissions=[PermissionDefinition(key="system.stats.read", description="Read host CPU, memory, disk and network metrics.")],
+        description="Читает метрики CPU, памяти, дисков и сети локального хоста.",
+        permissions=[PermissionDefinition(key="system.stats.read", description="Читать метрики CPU, памяти, дисков и сети хоста.")],
         required_backends=["psutil"],
     ),
     tools={
         "system_stats.get_snapshot": MCPTool(
             manifest=MCPToolManifest(
                 key="system_stats.get_snapshot",
-                name="Get System Snapshot",
-                description="Return a point-in-time snapshot of CPU, memory, disk and network metrics for the local host.",
+                name="Снимок системы",
+                description="Возвращает моментальный снимок метрик CPU, памяти, дисков и сети локального хоста.",
                 input_schema={"type": "object", "properties": {}, "additionalProperties": False},
                 permissions=["system.stats.read"],
                 tags=["system", "stats", "read"],

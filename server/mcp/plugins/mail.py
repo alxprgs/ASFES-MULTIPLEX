@@ -20,17 +20,17 @@ async def send_test_email(context: ToolExecutionContext, arguments: dict[str, An
 PLUGIN = PluginDefinition(
     manifest=PluginManifest(
         key="mail",
-        name="Mail",
+        name="Почта",
         version="1.0.0",
-        description="Operational email helpers for SMTP validation and notifications.",
-        permissions=[PermissionDefinition(key="mail.send", description="Send test emails through the configured SMTP service.")],
+        description="Служебные email-инструменты для проверки SMTP и уведомлений.",
+        permissions=[PermissionDefinition(key="mail.send", description="Отправлять тестовые письма через настроенный SMTP-сервис.")],
     ),
     tools={
         "mail.send_test_email": MCPTool(
             manifest=MCPToolManifest(
                 key="mail.send_test_email",
-                name="Send Test Email",
-                description="Use this to send a test email through the configured SMTP transport and verify notification delivery.",
+                name="Отправить тестовое письмо",
+                description="Отправляет тестовое письмо через настроенный SMTP-транспорт и проверяет доставку уведомлений.",
                 input_schema={
                     "type": "object",
                     "required": ["recipient"],

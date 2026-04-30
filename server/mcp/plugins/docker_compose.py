@@ -108,10 +108,10 @@ PLUGIN = PluginDefinition(
         key="docker_compose",
         name="Docker Compose",
         version="1.0.0",
-        description="Manage multi-container compose projects through Docker Compose or docker-compose.",
+        description="Управляет многоконтейнерными compose-проектами через Docker Compose или docker-compose.",
         permissions=[
-            PermissionDefinition(key="docker.compose.read", description="Inspect Docker Compose projects and logs."),
-            PermissionDefinition(key="docker.compose.write", description="Start, stop and restart Docker Compose projects."),
+            PermissionDefinition(key="docker.compose.read", description="Просматривать Docker Compose-проекты и логи."),
+            PermissionDefinition(key="docker.compose.write", description="Запускать, останавливать и перезапускать Docker Compose-проекты."),
         ],
         required_backends=["docker", "docker-compose"],
         providers=["docker compose", "docker-compose"],
@@ -120,15 +120,15 @@ PLUGIN = PluginDefinition(
         "docker_compose.ps": MCPTool(
             manifest=MCPToolManifest(
                 key="docker_compose.ps",
-                name="List Compose Services",
-                description="List containers and services defined for a compose project directory.",
+                name="Список Compose-сервисов",
+                description="Показывает контейнеры и сервисы, определённые для директории compose-проекта.",
                 input_schema={
                     "type": "object",
                     "required": ["project_dir"],
                     "properties": {
-                        "project_dir": {"type": "string", "description": "Managed path to the compose project directory."},
-                        "files": {"type": "array", "items": {"type": "string"}, "description": "Optional compose files."},
-                        "services": {"type": "array", "items": {"type": "string"}, "description": "Optional service names filter."},
+                        "project_dir": {"type": "string", "description": "Управляемый путь к директории compose-проекта."},
+                        "files": {"type": "array", "items": {"type": "string"}, "description": "Необязательные compose-файлы."},
+                        "services": {"type": "array", "items": {"type": "string"}, "description": "Необязательный фильтр по именам сервисов."},
                     },
                     "additionalProperties": False,
                 },
@@ -144,8 +144,8 @@ PLUGIN = PluginDefinition(
         "docker_compose.config": MCPTool(
             manifest=MCPToolManifest(
                 key="docker_compose.config",
-                name="Render Compose Config",
-                description="Render the effective Docker Compose configuration for a project directory.",
+                name="Собрать Compose-конфигурацию",
+                description="Формирует итоговую Docker Compose-конфигурацию для директории проекта.",
                 input_schema={
                     "type": "object",
                     "required": ["project_dir"],
@@ -167,8 +167,8 @@ PLUGIN = PluginDefinition(
         "docker_compose.logs": MCPTool(
             manifest=MCPToolManifest(
                 key="docker_compose.logs",
-                name="Read Compose Logs",
-                description="Read logs from all or selected services in a compose project.",
+                name="Читать Compose-логи",
+                description="Читает логи всех или выбранных сервисов compose-проекта.",
                 input_schema={
                     "type": "object",
                     "required": ["project_dir"],
@@ -192,8 +192,8 @@ PLUGIN = PluginDefinition(
         "docker_compose.up": MCPTool(
             manifest=MCPToolManifest(
                 key="docker_compose.up",
-                name="Compose Up",
-                description="Create or update a compose project and optionally detach.",
+                name="Запустить Compose",
+                description="Создаёт или обновляет compose-проект и при необходимости запускает его в фоне.",
                 input_schema={
                     "type": "object",
                     "required": ["project_dir"],
@@ -217,8 +217,8 @@ PLUGIN = PluginDefinition(
         "docker_compose.down": MCPTool(
             manifest=MCPToolManifest(
                 key="docker_compose.down",
-                name="Compose Down",
-                description="Stop and remove containers for a compose project.",
+                name="Остановить Compose",
+                description="Останавливает и удаляет контейнеры compose-проекта.",
                 input_schema={
                     "type": "object",
                     "required": ["project_dir"],
@@ -240,8 +240,8 @@ PLUGIN = PluginDefinition(
         "docker_compose.restart": MCPTool(
             manifest=MCPToolManifest(
                 key="docker_compose.restart",
-                name="Restart Compose Services",
-                description="Restart all or selected services inside a compose project.",
+                name="Перезапустить Compose-сервисы",
+                description="Перезапускает все или выбранные сервисы внутри compose-проекта.",
                 input_schema={
                     "type": "object",
                     "required": ["project_dir"],

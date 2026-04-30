@@ -51,6 +51,53 @@ async def test_call_tool_redacts_arguments_in_audit(integration_env) -> None:
 
 
 @pytest.mark.asyncio
+async def test_set_plugin_enabled_records_detailed_audit_metadata(integration_env) -> None:
+    services = integration_env["services"]
+    cfg = integration_env["settings"]
+    user_doc = await services.users.get_user_by_username(cfg.root.username)
+    assert user_doc is not None
+    user = services.users.to_principal(user_doc)
+
+    await services.plugins.set_plugin_enabled(
+        "docker",
+        False,
+        actor=user,
+        request_meta={"ip": "127.0.0.1", "user_agent": "pytest"},
+    )
+
+    events = await services.audit.list_events()
+    event = next(item for item in events if item["event_type"] == "mcp.plugin.update" and item["target"]["plugin_key"] == "docker")
+    assert event["metadata"]["enabled"] is False
+    assert event["metadata"]["previous_enabled"] is True
+    assert event["metadata"]["changed"] is True
+    assert event["metadata"]["plugin_name"] == "Docker"
+
+
+@pytest.mark.asyncio
+async def test_set_global_tool_enabled_records_detailed_audit_metadata(integration_env) -> None:
+    services = integration_env["services"]
+    cfg = integration_env["settings"]
+    user_doc = await services.users.get_user_by_username(cfg.root.username)
+    assert user_doc is not None
+    user = services.users.to_principal(user_doc)
+
+    await services.plugins.set_global_tool_enabled(
+        "docker.list_containers",
+        False,
+        actor=user,
+        request_meta={"ip": "127.0.0.1", "user_agent": "pytest"},
+    )
+
+    events = await services.audit.list_events()
+    event = next(item for item in events if item["event_type"] == "mcp.tool.global.update" and item["target"]["tool_key"] == "docker.list_containers")
+    assert event["metadata"]["enabled"] is False
+    assert event["metadata"]["previous_enabled"] is True
+    assert event["metadata"]["changed"] is True
+    assert event["metadata"]["tool_name"] == "Список Docker-контейнеров"
+    assert event["metadata"]["plugin_key"] == "docker"
+
+
+@pytest.mark.asyncio
 async def test_reload_plugins_calls_old_shutdown_before_reload(integration_env, monkeypatch) -> None:
     registry = integration_env["services"].plugins
     order: list[str] = []

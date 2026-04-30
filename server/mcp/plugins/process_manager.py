@@ -85,12 +85,12 @@ async def restart_process(context: ToolExecutionContext, arguments: dict[str, An
 PLUGIN = PluginDefinition(
     manifest=PluginManifest(
         key="process_manager",
-        name="Process Manager",
+        name="Процессы",
         version="1.0.0",
-        description="Inspect and control local operating system processes.",
+        description="Просматривает и управляет локальными процессами операционной системы.",
         permissions=[
-            PermissionDefinition(key="process.read", description="Read local process metadata and runtime metrics."),
-            PermissionDefinition(key="process.write", description="Start, stop and restart local processes."),
+            PermissionDefinition(key="process.read", description="Читать метаданные и runtime-метрики локальных процессов."),
+            PermissionDefinition(key="process.write", description="Запускать, останавливать и перезапускать локальные процессы."),
         ],
         required_backends=["psutil"],
     ),
@@ -98,8 +98,8 @@ PLUGIN = PluginDefinition(
         "process_manager.list_processes": MCPTool(
             manifest=MCPToolManifest(
                 key="process_manager.list_processes",
-                name="List Processes",
-                description="List local processes with optional name filtering and a result limit.",
+                name="Список процессов",
+                description="Показывает локальные процессы с опциональной фильтрацией по имени и лимитом результатов.",
                 input_schema={
                     "type": "object",
                     "properties": {
@@ -119,8 +119,8 @@ PLUGIN = PluginDefinition(
         "process_manager.inspect_process": MCPTool(
             manifest=MCPToolManifest(
                 key="process_manager.inspect_process",
-                name="Inspect Process",
-                description="Read detailed metadata for a local process by PID.",
+                name="Инспекция процесса",
+                description="Читает подробные метаданные локального процесса по PID.",
                 input_schema={
                     "type": "object",
                     "required": ["pid"],
@@ -138,8 +138,8 @@ PLUGIN = PluginDefinition(
         "process_manager.start_process": MCPTool(
             manifest=MCPToolManifest(
                 key="process_manager.start_process",
-                name="Start Process",
-                description="Start a local process with an explicit command array and optional managed working directory.",
+                name="Запустить процесс",
+                description="Запускает локальный процесс с явным массивом команды и опциональной управляемой рабочей директорией.",
                 input_schema={
                     "type": "object",
                     "required": ["command"],
@@ -158,8 +158,8 @@ PLUGIN = PluginDefinition(
         "process_manager.stop_process": MCPTool(
             manifest=MCPToolManifest(
                 key="process_manager.stop_process",
-                name="Stop Process",
-                description="Terminate or kill a local process by PID.",
+                name="Остановить процесс",
+                description="Завершает или принудительно убивает локальный процесс по PID.",
                 input_schema={
                     "type": "object",
                     "required": ["pid"],
@@ -180,8 +180,8 @@ PLUGIN = PluginDefinition(
         "process_manager.restart_process": MCPTool(
             manifest=MCPToolManifest(
                 key="process_manager.restart_process",
-                name="Restart Process",
-                description="Restart a local process by PID using its current command line and working directory.",
+                name="Перезапустить процесс",
+                description="Перезапускает локальный процесс по PID, используя его текущую командную строку и рабочую директорию.",
                 input_schema={
                     "type": "object",
                     "required": ["pid"],

@@ -106,12 +106,12 @@ async def restore_database(context: ToolExecutionContext, arguments: dict[str, A
 PLUGIN = PluginDefinition(
     manifest=PluginManifest(
         key="database_manager",
-        name="Database Manager",
+        name="Базы данных",
         version="1.0.0",
-        description="Check, back up and restore databases using named server-side profiles.",
+        description="Проверяет, резервирует и восстанавливает базы данных через именованные серверные профили.",
         permissions=[
-            PermissionDefinition(key="database.read", description="Read database profile metadata and connection status."),
-            PermissionDefinition(key="database.write", description="Back up and restore databases using named profiles."),
+            PermissionDefinition(key="database.read", description="Читать метаданные профилей баз данных и статус подключения."),
+            PermissionDefinition(key="database.write", description="Создавать резервные копии и восстанавливать базы данных через именованные профили."),
         ],
         providers=["mysql", "postgres"],
     ),
@@ -119,8 +119,8 @@ PLUGIN = PluginDefinition(
         "database_manager.list_profiles": MCPTool(
             manifest=MCPToolManifest(
                 key="database_manager.list_profiles",
-                name="List Database Profiles",
-                description="List named database profiles stored on the server.",
+                name="Список профилей баз данных",
+                description="Показывает именованные профили баз данных, сохранённые на сервере.",
                 input_schema={"type": "object", "properties": {}, "additionalProperties": False},
                 permissions=["database.read"],
                 tags=["database", "read"],
@@ -131,8 +131,8 @@ PLUGIN = PluginDefinition(
         "database_manager.connection_status": MCPTool(
             manifest=MCPToolManifest(
                 key="database_manager.connection_status",
-                name="Database Connection Status",
-                description="Check whether a named database profile is reachable and can execute a simple query.",
+                name="Статус подключения к базе данных",
+                description="Проверяет, доступен ли именованный профиль базы данных и может ли выполнить простой запрос.",
                 input_schema={
                     "type": "object",
                     "required": ["profile"],
@@ -150,8 +150,8 @@ PLUGIN = PluginDefinition(
         "database_manager.backup_database": MCPTool(
             manifest=MCPToolManifest(
                 key="database_manager.backup_database",
-                name="Backup Database",
-                description="Create a database backup using a named profile and write the dump inside managed storage.",
+                name="Создать резервную копию базы данных",
+                description="Создаёт резервную копию базы данных через именованный профиль и сохраняет дамп в управляемом хранилище.",
                 input_schema={
                     "type": "object",
                     "required": ["profile"],
@@ -172,8 +172,8 @@ PLUGIN = PluginDefinition(
         "database_manager.restore_database": MCPTool(
             manifest=MCPToolManifest(
                 key="database_manager.restore_database",
-                name="Restore Database",
-                description="Restore a database from a managed dump file using a named profile.",
+                name="Восстановить базу данных",
+                description="Восстанавливает базу данных из управляемого файла дампа через именованный профиль.",
                 input_schema={
                     "type": "object",
                     "required": ["profile", "dump_path"],

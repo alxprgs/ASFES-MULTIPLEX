@@ -162,12 +162,12 @@ async def run_task(context: ToolExecutionContext, arguments: dict[str, Any]) -> 
 PLUGIN = PluginDefinition(
     manifest=PluginManifest(
         key="scheduler",
-        name="Task Scheduler",
+        name="Планировщик задач",
         version="1.0.0",
-        description="Manage scheduled tasks through crontab on Linux and schtasks on Windows.",
+        description="Управляет запланированными задачами через crontab на Linux и schtasks на Windows.",
         permissions=[
-            PermissionDefinition(key="scheduler.read", description="Read managed scheduled tasks."),
-            PermissionDefinition(key="scheduler.write", description="Create, delete and trigger managed scheduled tasks."),
+            PermissionDefinition(key="scheduler.read", description="Читать управляемые запланированные задачи."),
+            PermissionDefinition(key="scheduler.write", description="Создавать, удалять и запускать управляемые запланированные задачи."),
         ],
         required_backends=["crontab", "schtasks"],
         providers=["crontab", "schtasks"],
@@ -176,8 +176,8 @@ PLUGIN = PluginDefinition(
         "scheduler.list_tasks": MCPTool(
             manifest=MCPToolManifest(
                 key="scheduler.list_tasks",
-                name="List Scheduled Tasks",
-                description="List tasks managed by Multiplex for the current platform.",
+                name="Список запланированных задач",
+                description="Показывает задачи, управляемые Multiplex на текущей платформе.",
                 input_schema={"type": "object", "properties": {}, "additionalProperties": False},
                 permissions=["scheduler.read"],
                 tags=["scheduler", "read"],
@@ -191,8 +191,8 @@ PLUGIN = PluginDefinition(
         "scheduler.upsert_task": MCPTool(
             manifest=MCPToolManifest(
                 key="scheduler.upsert_task",
-                name="Upsert Scheduled Task",
-                description="Create or update a managed scheduled task using a cross-platform schedule contract.",
+                name="Создать или обновить задачу",
+                description="Создаёт или обновляет управляемую запланированную задачу по кроссплатформенному контракту расписания.",
                 input_schema={
                     "type": "object",
                     "required": ["name", "command", "schedule"],
@@ -218,8 +218,8 @@ PLUGIN = PluginDefinition(
         "scheduler.delete_task": MCPTool(
             manifest=MCPToolManifest(
                 key="scheduler.delete_task",
-                name="Delete Scheduled Task",
-                description="Delete a managed scheduled task by name.",
+                name="Удалить запланированную задачу",
+                description="Удаляет управляемую запланированную задачу по имени.",
                 input_schema={
                     "type": "object",
                     "required": ["name"],
@@ -238,8 +238,8 @@ PLUGIN = PluginDefinition(
         "scheduler.run_task": MCPTool(
             manifest=MCPToolManifest(
                 key="scheduler.run_task",
-                name="Run Scheduled Task",
-                description="Run a managed scheduled task immediately.",
+                name="Запустить запланированную задачу",
+                description="Немедленно запускает управляемую запланированную задачу.",
                 input_schema={
                     "type": "object",
                     "required": ["name"],

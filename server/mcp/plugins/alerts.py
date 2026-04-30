@@ -53,20 +53,20 @@ async def send_test_notification(context: ToolExecutionContext, arguments: dict[
 PLUGIN = PluginDefinition(
     manifest=PluginManifest(
         key="alerts",
-        name="Alerts",
+        name="Оповещения",
         version="1.0.0",
-        description="Manage background alert rules and notification delivery for local host signals.",
+        description="Управляет фоновыми правилами оповещений и доставкой уведомлений по сигналам локального хоста.",
         permissions=[
-            PermissionDefinition(key="alerts.read", description="Read alert rules and alert events."),
-            PermissionDefinition(key="alerts.write", description="Create, delete and evaluate alert rules."),
+            PermissionDefinition(key="alerts.read", description="Читать правила оповещений и события оповещений."),
+            PermissionDefinition(key="alerts.write", description="Создавать, удалять и проверять правила оповещений."),
         ],
     ),
     tools={
         "alerts.list_rules": MCPTool(
             manifest=MCPToolManifest(
                 key="alerts.list_rules",
-                name="List Alert Rules",
-                description="List stored alert rules and their recent state.",
+                name="Список правил оповещений",
+                description="Показывает сохранённые правила оповещений и их последнее состояние.",
                 input_schema={"type": "object", "properties": {}, "additionalProperties": False},
                 permissions=["alerts.read"],
                 tags=["alerts", "read"],
@@ -77,8 +77,8 @@ PLUGIN = PluginDefinition(
         "alerts.upsert_rule": MCPTool(
             manifest=MCPToolManifest(
                 key="alerts.upsert_rule",
-                name="Upsert Alert Rule",
-                description="Create or update an alert rule with source, selector, condition, threshold, cooldown and recipients.",
+                name="Создать или обновить правило оповещения",
+                description="Создаёт или обновляет правило оповещения с источником, селектором, условием, порогом, паузой и получателями.",
                 input_schema={
                     "type": "object",
                     "required": ["name", "source", "condition"],
@@ -106,8 +106,8 @@ PLUGIN = PluginDefinition(
         "alerts.delete_rule": MCPTool(
             manifest=MCPToolManifest(
                 key="alerts.delete_rule",
-                name="Delete Alert Rule",
-                description="Delete an alert rule by its rule_id.",
+                name="Удалить правило оповещения",
+                description="Удаляет правило оповещения по rule_id.",
                 input_schema={
                     "type": "object",
                     "required": ["rule_id"],
@@ -123,8 +123,8 @@ PLUGIN = PluginDefinition(
         "alerts.list_events": MCPTool(
             manifest=MCPToolManifest(
                 key="alerts.list_events",
-                name="List Alert Events",
-                description="Read recent alert events in reverse chronological order.",
+                name="Список событий оповещений",
+                description="Показывает последние события оповещений в обратном хронологическом порядке.",
                 input_schema={
                     "type": "object",
                     "properties": {"limit": {"type": "integer"}},
@@ -139,8 +139,8 @@ PLUGIN = PluginDefinition(
         "alerts.evaluate_now": MCPTool(
             manifest=MCPToolManifest(
                 key="alerts.evaluate_now",
-                name="Evaluate Alerts Now",
-                description="Run one immediate pass across all enabled alert rules.",
+                name="Проверить оповещения сейчас",
+                description="Запускает немедленную проверку всех включённых правил оповещений.",
                 input_schema={"type": "object", "properties": {}, "additionalProperties": False},
                 permissions=["alerts.write"],
                 tags=["alerts", "write"],
@@ -151,8 +151,8 @@ PLUGIN = PluginDefinition(
         "alerts.send_test_notification": MCPTool(
             manifest=MCPToolManifest(
                 key="alerts.send_test_notification",
-                name="Send Alert Test Notification",
-                description="Send a test notification email through the configured alerting channel.",
+                name="Отправить тестовое уведомление",
+                description="Отправляет тестовое письмо через настроенный канал оповещений.",
                 input_schema={
                     "type": "object",
                     "required": ["recipients"],

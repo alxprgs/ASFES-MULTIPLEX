@@ -64,10 +64,10 @@ PLUGIN = PluginDefinition(
         key="nginx",
         name="Nginx",
         version="1.0.0",
-        description="Validate, inspect and control local Nginx instances.",
+        description="Проверяет, просматривает и управляет локальными экземплярами Nginx.",
         permissions=[
-            PermissionDefinition(key="nginx.read", description="Read Nginx status and managed config paths."),
-            PermissionDefinition(key="nginx.write", description="Test and control the local Nginx process."),
+            PermissionDefinition(key="nginx.read", description="Читать статус Nginx и управляемые пути конфигурации."),
+            PermissionDefinition(key="nginx.write", description="Проверять и управлять локальным процессом Nginx."),
         ],
         required_backends=["nginx"],
     ),
@@ -75,8 +75,8 @@ PLUGIN = PluginDefinition(
         "nginx.status": MCPTool(
             manifest=MCPToolManifest(
                 key="nginx.status",
-                name="Nginx Status",
-                description="Check whether Nginx appears to be running and validate the configuration.",
+                name="Статус Nginx",
+                description="Проверяет, запущен ли Nginx, и валидирует конфигурацию.",
                 input_schema={
                     "type": "object",
                     "properties": {"config_path": {"type": "string"}},
@@ -93,8 +93,8 @@ PLUGIN = PluginDefinition(
         "nginx.test_config": MCPTool(
             manifest=MCPToolManifest(
                 key="nginx.test_config",
-                name="Test Nginx Config",
-                description="Run nginx -t against the default or an explicitly configured managed config path.",
+                name="Проверить конфигурацию Nginx",
+                description="Запускает nginx -t для стандартного или явно указанного управляемого пути конфигурации.",
                 input_schema={
                     "type": "object",
                     "properties": {"config_path": {"type": "string"}},
@@ -111,8 +111,8 @@ PLUGIN = PluginDefinition(
         "nginx.control": MCPTool(
             manifest=MCPToolManifest(
                 key="nginx.control",
-                name="Control Nginx",
-                description="Start, stop, reload or gracefully quit the local Nginx process.",
+                name="Управление Nginx",
+                description="Запускает, останавливает, перезагружает или мягко завершает локальный процесс Nginx.",
                 input_schema={
                     "type": "object",
                     "required": ["action"],
@@ -133,8 +133,8 @@ PLUGIN = PluginDefinition(
         "nginx.list_paths": MCPTool(
             manifest=MCPToolManifest(
                 key="nginx.list_paths",
-                name="List Nginx Paths",
-                description="List the configured managed Nginx config roots known to the server.",
+                name="Список путей Nginx",
+                description="Показывает настроенные управляемые корни конфигурации Nginx, известные серверу.",
                 input_schema={"type": "object", "properties": {}, "additionalProperties": False},
                 permissions=["nginx.read"],
                 tags=["nginx", "read"],

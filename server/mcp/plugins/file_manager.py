@@ -59,20 +59,20 @@ async def make_directory(context: ToolExecutionContext, arguments: dict[str, Any
 PLUGIN = PluginDefinition(
     manifest=PluginManifest(
         key="file_manager",
-        name="File Manager",
+        name="Файлы",
         version="1.0.0",
-        description="Read and edit files inside configured managed roots.",
+        description="Читает и редактирует файлы внутри настроенных управляемых корней.",
         permissions=[
-            PermissionDefinition(key="files.read", description="Read managed files and directories."),
-            PermissionDefinition(key="files.write", description="Write, move and delete managed files and directories."),
+            PermissionDefinition(key="files.read", description="Читать управляемые файлы и директории."),
+            PermissionDefinition(key="files.write", description="Записывать, перемещать и удалять управляемые файлы и директории."),
         ],
     ),
     tools={
         "file_manager.list_directory": MCPTool(
             manifest=MCPToolManifest(
                 key="file_manager.list_directory",
-                name="List Directory",
-                description="List directory contents within configured managed roots.",
+                name="Список директории",
+                description="Показывает содержимое директории внутри настроенных управляемых корней.",
                 input_schema={
                     "type": "object",
                     "properties": {"path": {"type": "string"}},
@@ -87,8 +87,8 @@ PLUGIN = PluginDefinition(
         "file_manager.read_file": MCPTool(
             manifest=MCPToolManifest(
                 key="file_manager.read_file",
-                name="Read File",
-                description="Read a bounded slice of a managed file with offset and byte limit controls.",
+                name="Читать файл",
+                description="Читает ограниченный фрагмент управляемого файла с настройками смещения и лимита байт.",
                 input_schema={
                     "type": "object",
                     "required": ["path"],
@@ -108,8 +108,8 @@ PLUGIN = PluginDefinition(
         "file_manager.write_file": MCPTool(
             manifest=MCPToolManifest(
                 key="file_manager.write_file",
-                name="Write File",
-                description="Replace the contents of a managed file using an atomic write and optional backup.",
+                name="Записать файл",
+                description="Заменяет содержимое управляемого файла атомарной записью с опциональной резервной копией.",
                 input_schema={
                     "type": "object",
                     "required": ["path", "content"],
@@ -130,8 +130,8 @@ PLUGIN = PluginDefinition(
         "file_manager.append_file": MCPTool(
             manifest=MCPToolManifest(
                 key="file_manager.append_file",
-                name="Append File",
-                description="Append content to a managed file and create a backup if the file already exists.",
+                name="Дополнить файл",
+                description="Добавляет содержимое в управляемый файл и создаёт резервную копию, если файл уже существует.",
                 input_schema={
                     "type": "object",
                     "required": ["path", "content"],
@@ -151,8 +151,8 @@ PLUGIN = PluginDefinition(
         "file_manager.move_path": MCPTool(
             manifest=MCPToolManifest(
                 key="file_manager.move_path",
-                name="Move Path",
-                description="Move or rename a managed file or directory.",
+                name="Переместить путь",
+                description="Перемещает или переименовывает управляемый файл или директорию.",
                 input_schema={
                     "type": "object",
                     "required": ["source", "destination"],
@@ -171,8 +171,8 @@ PLUGIN = PluginDefinition(
         "file_manager.delete_path": MCPTool(
             manifest=MCPToolManifest(
                 key="file_manager.delete_path",
-                name="Delete Path",
-                description="Delete a managed file or, with recursive=true, a managed directory.",
+                name="Удалить путь",
+                description="Удаляет управляемый файл или, при recursive=true, управляемую директорию.",
                 input_schema={
                     "type": "object",
                     "required": ["path"],
@@ -191,8 +191,8 @@ PLUGIN = PluginDefinition(
         "file_manager.make_directory": MCPTool(
             manifest=MCPToolManifest(
                 key="file_manager.make_directory",
-                name="Make Directory",
-                description="Create a managed directory tree if it does not already exist.",
+                name="Создать директорию",
+                description="Создаёт дерево управляемых директорий, если оно ещё не существует.",
                 input_schema={
                     "type": "object",
                     "required": ["path"],

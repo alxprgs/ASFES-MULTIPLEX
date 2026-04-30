@@ -23,14 +23,14 @@ from server.models import MCPTool, PermissionDefinition, PluginDefinition, Runti
 
 LOGGER = get_logger("multiplex.services")
 CORE_PERMISSIONS = {
-    "mcp.enable": "Enable or disable MCP globally for all users.",
-    "mcp.plugin.manage": "Reload and manage local MCP plugins.",
-    "mcp.tool.toggle": "Enable or disable MCP tools globally or per user.",
-    "users.permission.grant": "Grant and revoke explicit permissions for users.",
-    "settings.registration.update": "Toggle self-registration availability.",
-    "settings.redis.update": "Toggle Redis runtime usage.",
-    "audit.read": "Read audit and sensitive operation records.",
-    "oauth.clients.manage": "Create and inspect OAuth clients.",
+    "mcp.enable": "Включать или отключать MCP для всех пользователей.",
+    "mcp.plugin.manage": "Перезагружать и управлять локальными MCP-плагинами.",
+    "mcp.tool.toggle": "Включать или отключать MCP-инструменты глобально или для пользователя.",
+    "users.permission.grant": "Выдавать и отзывать явные права пользователей.",
+    "settings.registration.update": "Включать или отключать самостоятельную регистрацию.",
+    "settings.redis.update": "Включать или отключать использование Redis во время работы.",
+    "audit.read": "Читать аудит и записи чувствительных операций.",
+    "oauth.clients.manage": "Создавать и просматривать OAuth-клиентов.",
 }
 
 
@@ -929,6 +929,9 @@ class PluginRegistry:
     async def set_plugin_enabled(self, plugin_key: str, enabled: bool, *, actor: UserPrincipal, request_meta: dict[str, Any]) -> None:
         if plugin_key not in self.plugins:
             raise LookupError("Plugin not found")
+        current = await self.db.collection(PLUGINS).find_one({"key": plugin_key})
+        previous_enabled = bool(current.get("enabled", True)) if current else None
+        plugin = self.plugins[plugin_key]
         await self.db.collection(PLUGINS).update_one(
             {"key": plugin_key},
             {"$set": {"enabled": enabled, "updated_at": now_utc()}},
@@ -939,7 +942,12 @@ class PluginRegistry:
             actor=actor,
             request_meta=request_meta,
             target={"plugin_key": plugin_key},
-            metadata={"enabled": enabled},
+            metadata={
+                "enabled": enabled,
+                "previous_enabled": previous_enabled,
+                "changed": previous_enabled is None or previous_enabled != enabled,
+                "plugin_name": plugin.manifest.name,
+            },
         )
 
     async def list_plugins(self) -> list[dict[str, Any]]:
@@ -994,8 +1002,12 @@ class PluginRegistry:
         return documents
 
     async def set_global_tool_enabled(self, tool_key: str, enabled: bool, *, actor: UserPrincipal, request_meta: dict[str, Any]) -> None:
-        if self.get_tool(tool_key) is None:
+        tool = self.get_tool(tool_key)
+        if tool is None:
             raise LookupError("Tool not found")
+        plugin = self.get_plugin_for_tool(tool_key)
+        current = await self.db.collection(TOOL_POLICIES).find_one({"tool_key": tool_key, "scope": "global", "subject_id": "*"})
+        previous_enabled = bool(current.get("enabled", True)) if current else None
         await self.db.collection(TOOL_POLICIES).update_one(
             {"tool_key": tool_key, "scope": "global", "subject_id": "*"},
             {
@@ -1009,7 +1021,13 @@ class PluginRegistry:
             actor=actor,
             request_meta=request_meta,
             target={"tool_key": tool_key},
-            metadata={"enabled": enabled},
+            metadata={
+                "enabled": enabled,
+                "previous_enabled": previous_enabled,
+                "changed": previous_enabled is None or previous_enabled != enabled,
+                "tool_name": tool.manifest.name,
+                "plugin_key": plugin.manifest.key if plugin else None,
+            },
         )
 
     async def set_user_tool_enabled(

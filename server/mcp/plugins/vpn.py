@@ -112,10 +112,10 @@ PLUGIN = PluginDefinition(
         key="vpn",
         name="VPN",
         version="1.0.0",
-        description="Manage WireGuard or OpenVPN profiles stored on the server.",
+        description="Управляет профилями WireGuard или OpenVPN, сохранёнными на сервере.",
         permissions=[
-            PermissionDefinition(key="vpn.read", description="Read VPN profile metadata and status."),
-            PermissionDefinition(key="vpn.write", description="Import, remove and control VPN profiles."),
+            PermissionDefinition(key="vpn.read", description="Читать метаданные и статус VPN-профилей."),
+            PermissionDefinition(key="vpn.write", description="Импортировать, удалять и управлять VPN-профилями."),
         ],
         providers=["wireguard", "openvpn"],
     ),
@@ -123,8 +123,8 @@ PLUGIN = PluginDefinition(
         "vpn.list_profiles": MCPTool(
             manifest=MCPToolManifest(
                 key="vpn.list_profiles",
-                name="List VPN Profiles",
-                description="List named VPN profiles stored on the server.",
+                name="Список VPN-профилей",
+                description="Показывает именованные VPN-профили, сохранённые на сервере.",
                 input_schema={"type": "object", "properties": {}, "additionalProperties": False},
                 permissions=["vpn.read"],
                 tags=["vpn", "read"],
@@ -135,8 +135,8 @@ PLUGIN = PluginDefinition(
         "vpn.import_profile": MCPTool(
             manifest=MCPToolManifest(
                 key="vpn.import_profile",
-                name="Import VPN Profile",
-                description="Import a VPN config from managed storage into the server-side VPN profile directory.",
+                name="Импортировать VPN-профиль",
+                description="Импортирует VPN-конфигурацию из управляемого хранилища в серверную директорию VPN-профилей.",
                 input_schema={
                     "type": "object",
                     "required": ["name", "vpn_type", "source_path"],
@@ -157,8 +157,8 @@ PLUGIN = PluginDefinition(
         "vpn.remove_profile": MCPTool(
             manifest=MCPToolManifest(
                 key="vpn.remove_profile",
-                name="Remove VPN Profile",
-                description="Delete a stored VPN profile and its imported config copy.",
+                name="Удалить VPN-профиль",
+                description="Удаляет сохранённый VPN-профиль и импортированную копию конфигурации.",
                 input_schema={
                     "type": "object",
                     "required": ["name"],
@@ -174,8 +174,8 @@ PLUGIN = PluginDefinition(
         "vpn.status": MCPTool(
             manifest=MCPToolManifest(
                 key="vpn.status",
-                name="VPN Status",
-                description="Inspect the runtime status of a named VPN profile.",
+                name="Статус VPN",
+                description="Проверяет runtime-статус именованного VPN-профиля.",
                 input_schema={
                     "type": "object",
                     "required": ["name"],
@@ -193,8 +193,8 @@ PLUGIN = PluginDefinition(
         "vpn.control": MCPTool(
             manifest=MCPToolManifest(
                 key="vpn.control",
-                name="Control VPN",
-                description="Start, stop or restart a named VPN profile.",
+                name="Управление VPN",
+                description="Запускает, останавливает или перезапускает именованный VPN-профиль.",
                 input_schema={
                     "type": "object",
                     "required": ["name", "action"],

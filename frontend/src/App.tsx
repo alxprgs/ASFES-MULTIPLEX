@@ -2,6 +2,7 @@ import {
   Activity,
   Database,
   KeyRound,
+  Loader2,
   LogOut,
   Plug,
   QrCode,
@@ -12,27 +13,63 @@ import {
   SlidersHorizontal,
   UserCircle,
   Users,
-  Wrench
+  Wrench,
+  X
 } from "lucide-react";
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, AuditEvent, Bootstrap, Health, Permission, PluginInfo, RuntimeSettings, ToolInfo, TwoFactorSetup, User, api, setCsrfCookieName } from "./api";
 
 type View = "overview" | "users" | "plugins" | "tools" | "audit" | "profile";
+type ToastTone = "success" | "error" | "info" | "warning";
+
+type Toast = {
+  id: string;
+  tone: ToastTone;
+  title: string;
+  message?: string;
+};
 
 const navItems: Array<{ view: View; label: string; icon: ReactNode }> = [
   { view: "overview", label: "Обзор", icon: <Activity size={18} /> },
   { view: "users", label: "Пользователи", icon: <Users size={18} /> },
   { view: "plugins", label: "Плагины", icon: <Plug size={18} /> },
-  { view: "tools", label: "Tools", icon: <Wrench size={18} /> },
+  { view: "tools", label: "Инструменты", icon: <Wrench size={18} /> },
   { view: "audit", label: "Аудит", icon: <ScrollText size={18} /> },
   { view: "profile", label: "Профиль", icon: <UserCircle size={18} /> }
 ];
+
+const runtimeLabels: Record<"registration_enabled" | "mcp_enabled" | "redis_runtime_enabled", string> = {
+  registration_enabled: "Регистрация",
+  mcp_enabled: "MCP",
+  redis_runtime_enabled: "Redis во время работы"
+};
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("ru-RU", {
     dateStyle: "short",
     timeStyle: "short"
   }).format(new Date(value));
+}
+
+function formatResult(value: string): string {
+  if (value === "success") {
+    return "успех";
+  }
+  if (value === "failure" || value === "error") {
+    return "ошибка";
+  }
+  return value || "неизвестно";
+}
+
+function enabledText(value: unknown, enabled = "включён", disabled = "отключён"): string {
+  if (typeof value !== "boolean") {
+    return "обновлён";
+  }
+  return value ? enabled : disabled;
+}
+
+function textValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 function ErrorBanner({ message }: { message: string | null }) {
@@ -46,21 +83,64 @@ function Badge({ tone, children }: { tone: "ok" | "warn" | "muted" | "danger"; c
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
+function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
+  useEffect(() => {
+    const timer = window.setTimeout(() => onDismiss(toast.id), 5000);
+    return () => window.clearTimeout(timer);
+  }, [onDismiss, toast.id]);
+
+  return (
+    <div className={`toast toast-${toast.tone}`} role={toast.tone === "error" ? "alert" : "status"}>
+      <div>
+        <strong>{toast.title}</strong>
+        {toast.message ? <small>{toast.message}</small> : null}
+      </div>
+      <button type="button" className="toast-close" onClick={() => onDismiss(toast.id)} aria-label="Закрыть уведомление">
+        <X size={16} />
+      </button>
+    </div>
+  );
+}
+
+function ToastViewport({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: string) => void }) {
+  if (!toasts.length) {
+    return null;
+  }
+  return (
+    <div className="toast-viewport" aria-live="polite">
+      {toasts.map((toast) => (
+        <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
+      ))}
+    </div>
+  );
+}
+
 function Toggle({
   checked,
   disabled,
+  busy,
   onChange,
   label
 }: {
   checked: boolean;
   disabled?: boolean;
+  busy?: boolean;
   onChange: (checked: boolean) => void;
   label: string;
 }) {
+  const isDisabled = disabled || busy;
   return (
-    <label className="switch" title={label}>
-      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
-      <span />
+    <label className={`switch ${busy ? "switch-busy" : ""}`} title={label}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={isDisabled}
+        onChange={(event) => onChange(event.target.checked)}
+        aria-label={label}
+      />
+      <span className="switch-track">
+        {busy ? <Loader2 className="switch-spinner" size={13} /> : null}
+      </span>
     </label>
   );
 }
@@ -104,7 +184,7 @@ function LoginView({ onLogin }: { onLogin: (user: User) => void }) {
           <Shield size={28} />
           <div>
             <h1>ASFES Multiplex</h1>
-            <p>Домашний control plane</p>
+            <p>Домашняя панель управления</p>
           </div>
         </div>
         <ErrorBanner message={error} />
@@ -157,11 +237,13 @@ function LoginView({ onLogin }: { onLogin: (user: User) => void }) {
 function OverviewView({
   health,
   runtime,
+  pendingKeys,
   onToggleRuntime,
   onRefresh
 }: {
   health: Health | null;
   runtime: RuntimeSettings | null;
+  pendingKeys: ReadonlySet<string>;
   onToggleRuntime: (key: "registration_enabled" | "mcp_enabled" | "redis_runtime_enabled", value: boolean) => void;
   onRefresh: () => void;
 }) {
@@ -171,7 +253,7 @@ function OverviewView({
         <div className="panel-head">
           <div>
             <h2>Состояние сервиса</h2>
-            <p>MongoDB, Redis и MCP runtime</p>
+            <p>MongoDB, Redis и MCP во время работы</p>
           </div>
           <button className="icon-button" onClick={onRefresh} title="Обновить">
             <RefreshCw size={18} />
@@ -180,23 +262,23 @@ function OverviewView({
         <div className="metrics-grid">
           <div className="metric">
             <span>API</span>
-            <strong>{health?.status || "unknown"}</strong>
-            <Badge tone={health?.status === "ok" ? "ok" : "warn"}>{health?.status === "ok" ? "OK" : "DEGRADED"}</Badge>
+            <strong>{health?.status || "неизвестно"}</strong>
+            <Badge tone={health?.status === "ok" ? "ok" : "warn"}>{health?.status === "ok" ? "OK" : "ПРОВЕРИТЬ"}</Badge>
           </div>
           <div className="metric">
             <span>MongoDB</span>
-            <strong>{health?.mongodb || "unknown"}</strong>
-            <Badge tone={health?.mongodb === "ok" ? "ok" : "danger"}>{health?.mongodb || "unknown"}</Badge>
+            <strong>{health?.mongodb || "неизвестно"}</strong>
+            <Badge tone={health?.mongodb === "ok" ? "ok" : "danger"}>{health?.mongodb === "ok" ? "OK" : health?.mongodb || "неизвестно"}</Badge>
           </div>
           <div className="metric">
             <span>Redis</span>
-            <strong>{health?.redis || runtime?.redis_mode || "unknown"}</strong>
-            <Badge tone={health?.redis === "enabled" ? "ok" : "muted"}>{health?.redis || "disabled"}</Badge>
+            <strong>{health?.redis || runtime?.redis_mode || "неизвестно"}</strong>
+            <Badge tone={health?.redis === "enabled" ? "ok" : "muted"}>{health?.redis === "enabled" ? "включён" : "отключён"}</Badge>
           </div>
           <div className="metric">
             <span>MCP</span>
-            <strong>{runtime?.mcp_enabled ? "enabled" : "disabled"}</strong>
-            <Badge tone={runtime?.mcp_enabled ? "ok" : "warn"}>{runtime?.mcp_enabled ? "ON" : "OFF"}</Badge>
+            <strong>{runtime?.mcp_enabled ? "включён" : "отключён"}</strong>
+            <Badge tone={runtime?.mcp_enabled ? "ok" : "warn"}>{runtime?.mcp_enabled ? "ВКЛ" : "ВЫКЛ"}</Badge>
           </div>
         </div>
       </div>
@@ -208,21 +290,36 @@ function OverviewView({
               <strong>Регистрация</strong>
               <span>Самостоятельное создание аккаунтов</span>
             </div>
-            <Toggle checked={Boolean(runtime?.registration_enabled)} onChange={(value) => onToggleRuntime("registration_enabled", value)} label="Регистрация" />
+            <Toggle
+              checked={Boolean(runtime?.registration_enabled)}
+              busy={pendingKeys.has("runtime:registration_enabled")}
+              onChange={(value) => onToggleRuntime("registration_enabled", value)}
+              label="Регистрация"
+            />
           </div>
           <div className="setting-row">
             <div>
               <strong>MCP</strong>
-              <span>Доступ клиентов к MCP tools</span>
+              <span>Доступ клиентов к MCP-инструментам</span>
             </div>
-            <Toggle checked={Boolean(runtime?.mcp_enabled)} onChange={(value) => onToggleRuntime("mcp_enabled", value)} label="MCP" />
+            <Toggle
+              checked={Boolean(runtime?.mcp_enabled)}
+              busy={pendingKeys.has("runtime:mcp_enabled")}
+              onChange={(value) => onToggleRuntime("mcp_enabled", value)}
+              label="MCP"
+            />
           </div>
           <div className="setting-row">
             <div>
-              <strong>Redis runtime</strong>
-              <span>Rate limit через Redis</span>
+              <strong>Redis во время работы</strong>
+              <span>Ограничение частоты через Redis</span>
             </div>
-            <Toggle checked={Boolean(runtime?.redis_runtime_enabled)} onChange={(value) => onToggleRuntime("redis_runtime_enabled", value)} label="Redis runtime" />
+            <Toggle
+              checked={Boolean(runtime?.redis_runtime_enabled)}
+              busy={pendingKeys.has("runtime:redis_runtime_enabled")}
+              onChange={(value) => onToggleRuntime("redis_runtime_enabled", value)}
+              label="Redis во время работы"
+            />
           </div>
         </div>
       </div>
@@ -253,17 +350,17 @@ function UsersView({
       <div className="panel">
         <h2>Пользователи</h2>
         <div className="list">
-          {users.map((user) => (
+          {users.map((item) => (
             <button
-              key={user.user_id}
-              className={`list-row ${selectedUser?.user_id === user.user_id ? "selected" : ""}`}
-              onClick={() => setSelectedId(user.user_id)}
+              key={item.user_id}
+              className={`list-row ${selectedUser?.user_id === item.user_id ? "selected" : ""}`}
+              onClick={() => setSelectedId(item.user_id)}
             >
               <span>
-                <strong>{user.username}</strong>
-                <small>{user.email || "email не задан"}</small>
+                <strong>{item.username}</strong>
+                <small>{item.email || "email не задан"}</small>
               </span>
-              {user.is_root ? <Badge tone="ok">root</Badge> : <Badge tone="muted">{user.permissions.length}</Badge>}
+              {item.is_root ? <Badge tone="ok">root</Badge> : <Badge tone="muted">{item.permissions.length}</Badge>}
             </button>
           ))}
         </div>
@@ -303,10 +400,12 @@ function UsersView({
 
 function PluginsView({
   plugins,
+  pendingKeys,
   onToggle,
   onReload
 }: {
   plugins: PluginInfo[];
+  pendingKeys: ReadonlySet<string>;
   onToggle: (plugin: PluginInfo, enabled: boolean) => void;
   onReload: () => void;
 }) {
@@ -317,9 +416,9 @@ function PluginsView({
           <h2>Плагины</h2>
           <p>{plugins.length} модулей MCP</p>
         </div>
-        <button className="secondary-button" onClick={onReload}>
-          <RefreshCw size={16} />
-          Reload
+        <button className="secondary-button" onClick={onReload} disabled={pendingKeys.has("plugins:reload")}>
+          <RefreshCw size={16} className={pendingKeys.has("plugins:reload") ? "spin" : ""} />
+          Перезагрузить
         </button>
       </div>
       <div className="table">
@@ -329,9 +428,14 @@ function PluginsView({
               <strong>{plugin.name}</strong>
               <small>{plugin.description}</small>
             </div>
-            <Badge tone={plugin.available ? "ok" : "warn"}>{plugin.available ? "available" : "limited"}</Badge>
-            <span>{plugin.tool_keys.length} tools</span>
-            <Toggle checked={plugin.enabled} onChange={(value) => onToggle(plugin, value)} label={`Плагин ${plugin.name}`} />
+            <Badge tone={plugin.available ? "ok" : "warn"}>{plugin.available ? "доступен" : "ограничен"}</Badge>
+            <span>{plugin.tool_keys.length} инструментов</span>
+            <Toggle
+              checked={plugin.enabled}
+              busy={pendingKeys.has(`plugin:${plugin.key}`)}
+              onChange={(value) => onToggle(plugin, value)}
+              label={`Плагин ${plugin.name}`}
+            />
           </div>
         ))}
       </div>
@@ -339,7 +443,15 @@ function PluginsView({
   );
 }
 
-function ToolsView({ tools, onToggle }: { tools: ToolInfo[]; onToggle: (tool: ToolInfo, enabled: boolean) => void }) {
+function ToolsView({
+  tools,
+  pendingKeys,
+  onToggle
+}: {
+  tools: ToolInfo[];
+  pendingKeys: ReadonlySet<string>;
+  onToggle: (tool: ToolInfo, enabled: boolean) => void;
+}) {
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<"all" | "read" | "write">("all");
   const filtered = tools.filter((tool) => {
@@ -353,7 +465,7 @@ function ToolsView({ tools, onToggle }: { tools: ToolInfo[]; onToggle: (tool: To
     <section className="panel">
       <div className="panel-head">
         <div>
-          <h2>MCP tools</h2>
+          <h2>MCP-инструменты</h2>
           <p>{filtered.length} из {tools.length}</p>
         </div>
         <div className="toolbar">
@@ -361,7 +473,7 @@ function ToolsView({ tools, onToggle }: { tools: ToolInfo[]; onToggle: (tool: To
           <div className="segmented">
             {(["all", "read", "write"] as const).map((item) => (
               <button key={item} className={mode === item ? "active" : ""} onClick={() => setMode(item)}>
-                {item === "all" ? "Все" : item === "read" ? "Read" : "Write"}
+                {item === "all" ? "Все" : item === "read" ? "Чтение" : "Запись"}
               </button>
             ))}
           </div>
@@ -374,9 +486,14 @@ function ToolsView({ tools, onToggle }: { tools: ToolInfo[]; onToggle: (tool: To
               <strong>{tool.name}</strong>
               <small>{tool.key}</small>
             </div>
-            <Badge tone={tool.read_only ? "ok" : "warn"}>{tool.read_only ? "read" : "write"}</Badge>
-            <Badge tone={tool.available ? "ok" : "danger"}>{tool.available ? tool.plugin_key : "unavailable"}</Badge>
-            <Toggle checked={tool.global_enabled} onChange={(value) => onToggle(tool, value)} label={`Tool ${tool.name}`} />
+            <Badge tone={tool.read_only ? "ok" : "warn"}>{tool.read_only ? "чтение" : "запись"}</Badge>
+            <Badge tone={tool.available ? "ok" : "danger"}>{tool.available ? tool.plugin_key : "недоступен"}</Badge>
+            <Toggle
+              checked={tool.global_enabled}
+              busy={pendingKeys.has(`tool:${tool.key}`)}
+              onChange={(value) => onToggle(tool, value)}
+              label={`Инструмент ${tool.name}`}
+            />
           </div>
         ))}
       </div>
@@ -384,20 +501,86 @@ function ToolsView({ tools, onToggle }: { tools: ToolInfo[]; onToggle: (tool: To
   );
 }
 
-function AuditView({ events }: { events: AuditEvent[] }) {
+function formatAuditEvent(event: AuditEvent, plugins: PluginInfo[], tools: ToolInfo[]): { title: string; detail: string } {
+  const targetPluginKey = textValue(event.target.plugin_key);
+  const targetToolKey = textValue(event.target.tool_key);
+  const plugin = targetPluginKey ? plugins.find((item) => item.key === targetPluginKey) : null;
+  const tool = targetToolKey ? tools.find((item) => item.key === targetToolKey) : null;
+  const pluginName = textValue(event.metadata.plugin_name) || plugin?.name || targetPluginKey || "плагин";
+  const toolName = textValue(event.metadata.tool_name) || tool?.name || targetToolKey || "инструмент";
+
+  switch (event.event_type) {
+    case "mcp.plugin.update":
+      return {
+        title: `Плагин «${pluginName}» ${enabledText(event.metadata.enabled)}`,
+        detail: event.metadata.changed === false ? "Состояние уже было таким" : "Состояние плагина обновлено"
+      };
+    case "mcp.tool.global.update":
+      return {
+        title: `Инструмент «${toolName}» ${enabledText(event.metadata.enabled)}`,
+        detail: `Глобальное состояние инструмента обновлено${textValue(event.metadata.plugin_key) ? ` · ${event.metadata.plugin_key}` : ""}`
+      };
+    case "mcp.plugins.reload":
+      return { title: "Плагины MCP перезагружены", detail: "Реестр плагинов перечитан сервером" };
+    case "mcp.tool.call":
+      return { title: `Инструмент «${toolName}» вызван`, detail: targetToolKey || "MCP-вызов" };
+    case "settings.registration.update":
+      return { title: `Регистрация ${enabledText(event.metadata.enabled, "включена", "отключена")}`, detail: "Настройка самостоятельной регистрации обновлена" };
+    case "settings.mcp.update":
+      return { title: `MCP ${enabledText(event.metadata.enabled)}`, detail: "Глобальная настройка MCP обновлена" };
+    case "settings.redis.update":
+      return { title: `Redis во время работы ${enabledText(event.metadata.enabled)}`, detail: "Настройка Redis во время работы обновлена" };
+    case "users.permission.mutate":
+      return { title: "Права пользователя обновлены", detail: textValue(event.target.user_id) || event.event_type };
+    case "account.profile.update":
+      return { title: "Профиль обновлён", detail: textValue(event.target.user_id) || event.event_type };
+    case "account.2fa.setup":
+      return { title: "Настройка 2FA начата", detail: textValue(event.target.user_id) || event.event_type };
+    case "account.2fa.enable":
+      return { title: "2FA включена", detail: textValue(event.target.user_id) || event.event_type };
+    case "account.2fa.disable":
+      return { title: "2FA отключена", detail: textValue(event.target.user_id) || event.event_type };
+    case "auth.login":
+      return { title: "Вход выполнен", detail: textValue(event.target.user_id) || event.event_type };
+    case "auth.logout":
+      return { title: "Выход выполнен", detail: textValue(event.target.user_id) || event.event_type };
+    case "auth.login.failed":
+      return { title: "Неудачная попытка входа", detail: textValue(event.target.username) || event.event_type };
+    case "auth.login.2fa_required":
+      return { title: "Запрошен код 2FA", detail: textValue(event.target.user_id) || event.event_type };
+    case "auth.login.2fa_failed":
+      return { title: "Ошибка проверки 2FA", detail: textValue(event.target.user_id) || event.event_type };
+    case "oauth.client.create":
+      return { title: "OAuth-клиент создан", detail: textValue(event.target.client_id) || event.event_type };
+    case "oauth.client.dynamic_register":
+      return { title: "OAuth-клиент зарегистрирован динамически", detail: textValue(event.target.client_id) || event.event_type };
+    case "oauth.authorize":
+      return { title: "OAuth-авторизация создана", detail: textValue(event.target.client_id) || event.event_type };
+    case "oauth.token.issue":
+      return { title: "OAuth-токен выпущен", detail: textValue(event.target.client_id) || event.event_type };
+    default:
+      return { title: "Событие аудита", detail: `Код события: ${event.event_type}` };
+  }
+}
+
+function AuditView({ events, plugins, tools }: { events: AuditEvent[]; plugins: PluginInfo[]; tools: ToolInfo[] }) {
   return (
     <section className="panel">
       <h2>Аудит</h2>
       <div className="timeline">
-        {events.map((event) => (
-          <div className="timeline-row" key={event.event_id}>
-            <span />
-            <div>
-              <strong>{event.event_type}</strong>
-              <small>{formatDate(event.created_at)} · {event.actor_username || "system"} · {event.result}</small>
+        {events.map((event) => {
+          const formatted = formatAuditEvent(event, plugins, tools);
+          return (
+            <div className="timeline-row" key={event.event_id}>
+              <span />
+              <div>
+                <strong>{formatted.title}</strong>
+                <small>{formatDate(event.created_at)} · {event.actor_username || "система"} · {formatResult(event.result)}</small>
+                <small>{formatted.detail}</small>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
@@ -471,7 +654,7 @@ function ProfileView({
             <h2>Двухэтапная аутентификация</h2>
             <p>{user.two_factor_enabled ? "Включена для входа и MCP OAuth" : "Защитите вход и подключение MCP-клиентов"}</p>
           </div>
-          <Badge tone={user.two_factor_enabled ? "ok" : "warn"}>{user.two_factor_enabled ? "ON" : "OFF"}</Badge>
+          <Badge tone={user.two_factor_enabled ? "ok" : "warn"}>{user.two_factor_enabled ? "ВКЛ" : "ВЫКЛ"}</Badge>
         </div>
         <ErrorBanner message={twoFactorError} />
         {twoFactorMessage ? <div className="notice notice-ok">{twoFactorMessage}</div> : null}
@@ -573,8 +756,31 @@ export function App() {
   const [view, setView] = useState<View>("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
+  const pendingActionsRef = useRef<Set<string>>(new Set());
 
   const title = useMemo(() => navItems.find((item) => item.view === view)?.label || "Обзор", [view]);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((items) => items.filter((item) => item.id !== id));
+  }, []);
+
+  const pushToast = useCallback((tone: ToastTone, title: string, message?: string) => {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setToasts((items) => [...items, { id, tone, title, message }].slice(-5));
+  }, []);
+
+  function setActionPending(key: string, pending: boolean) {
+    const next = new Set(pendingActionsRef.current);
+    if (pending) {
+      next.add(key);
+    } else {
+      next.delete(key);
+    }
+    pendingActionsRef.current = next;
+    setPendingActions(next);
+  }
 
   async function loadBootstrap() {
     setLoading(true);
@@ -589,7 +795,9 @@ export function App() {
         await loadAll();
       }
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Не удалось загрузить bootstrap");
+      const message = exc instanceof Error ? exc.message : "Не удалось загрузить bootstrap";
+      setError(message);
+      pushToast("error", "Ошибка загрузки", message);
     } finally {
       setLoading(false);
     }
@@ -618,13 +826,25 @@ export function App() {
     void loadBootstrap();
   }, []);
 
-  async function runAction(action: () => Promise<void>) {
+  async function runAction(action: () => Promise<void>, options: { pendingKey?: string; errorTitle?: string } = {}) {
+    const { pendingKey, errorTitle = "Операция не выполнена" } = options;
+    if (pendingKey && pendingActionsRef.current.has(pendingKey)) {
+      return;
+    }
     setError(null);
+    if (pendingKey) {
+      setActionPending(pendingKey, true);
+    }
     try {
       await action();
     } catch (exc) {
       const message = exc instanceof ApiError || exc instanceof Error ? exc.message : "Операция не выполнена";
       setError(message);
+      pushToast("error", errorTitle, message);
+    } finally {
+      if (pendingKey) {
+        setActionPending(pendingKey, false);
+      }
     }
   }
 
@@ -633,14 +853,20 @@ export function App() {
   }
 
   if (!user) {
-    return <LoginView onLogin={(nextUser) => {
-      setUser(nextUser);
-      void loadAll();
-    }} />;
+    return (
+      <>
+        <ToastViewport toasts={toasts} onDismiss={dismissToast} />
+        <LoginView onLogin={(nextUser) => {
+          setUser(nextUser);
+          void loadAll();
+        }} />
+      </>
+    );
   }
 
   return (
     <div className="app-shell">
+      <ToastViewport toasts={toasts} onDismiss={dismissToast} />
       <aside className="sidebar">
         <div className="brand">
           <Shield size={24} />
@@ -662,6 +888,7 @@ export function App() {
           onClick={() => runAction(async () => {
             await api.logout();
             setUser(null);
+            pushToast("success", "Выход выполнен");
           })}
         >
           <LogOut size={18} />
@@ -672,13 +899,13 @@ export function App() {
         <header className="topbar">
           <div>
             <h1>{title}</h1>
-            <p>{user.username} · {user.is_root ? "root" : `${user.permissions.length} permissions`}</p>
+            <p>{user.username} · {user.is_root ? "root" : `${user.permissions.length} прав`}</p>
           </div>
           <div className="status-strip">
             <Database size={18} />
             <span>{health?.mongodb || "mongo"}</span>
             <SlidersHorizontal size={18} />
-            <span>{runtime?.mcp_enabled ? "MCP on" : "MCP off"}</span>
+            <span>{runtime?.mcp_enabled ? "MCP включён" : "MCP отключён"}</span>
           </div>
         </header>
         <ErrorBanner message={error} />
@@ -686,14 +913,16 @@ export function App() {
           <OverviewView
             health={health}
             runtime={runtime}
-            onRefresh={() => runAction(loadAll)}
+            pendingKeys={pendingActions}
+            onRefresh={() => runAction(loadAll, { pendingKey: "app:refresh", errorTitle: "Не удалось обновить данные" })}
             onToggleRuntime={(key, value) =>
               runAction(async () => {
                 const nextRuntime =
                   key === "registration_enabled" ? await api.setRegistration(value) : key === "mcp_enabled" ? await api.setMcp(value) : await api.setRedis(value);
                 setRuntime(nextRuntime);
                 await loadAll();
-              })
+                pushToast("success", `Настройка «${runtimeLabels[key]}» ${value ? "включена" : "отключена"}`);
+              }, { pendingKey: `runtime:${key}`, errorTitle: "Не удалось переключить настройку" })
             }
           />
         ) : null}
@@ -705,38 +934,46 @@ export function App() {
               runAction(async () => {
                 const updated = await api.mutatePermissions(targetUser.user_id, [permission], enabled ? "grant" : "revoke");
                 setUsers((items) => items.map((item) => (item.user_id === updated.user_id ? updated : item)));
-              })
+                await loadAll();
+                pushToast("success", `Право «${permission}» ${enabled ? "выдано" : "отозвано"}`);
+              }, { pendingKey: `permission:${targetUser.user_id}:${permission}`, errorTitle: "Не удалось обновить права" })
             }
           />
         ) : null}
         {view === "plugins" ? (
           <PluginsView
             plugins={plugins}
+            pendingKeys={pendingActions}
             onReload={() => runAction(async () => {
-              await api.reloadPlugins();
+              const result = await api.reloadPlugins();
               await loadAll();
-            })}
+              pushToast("success", "Плагины перезагружены", `Обновлено: ${result.reloaded.length}`);
+            }, { pendingKey: "plugins:reload", errorTitle: "Не удалось перезагрузить плагины" })}
             onToggle={(plugin, enabled) =>
               runAction(async () => {
                 const updated = await api.togglePlugin(plugin.key, enabled);
                 setPlugins((items) => items.map((item) => (item.key === updated.key ? updated : item)));
                 await loadAll();
-              })
+                pushToast("success", `Плагин «${updated.name}» ${enabled ? "включён" : "отключён"}`);
+              }, { pendingKey: `plugin:${plugin.key}`, errorTitle: "Не удалось переключить плагин" })
             }
           />
         ) : null}
         {view === "tools" ? (
           <ToolsView
             tools={tools}
+            pendingKeys={pendingActions}
             onToggle={(tool, enabled) =>
               runAction(async () => {
                 const updated = await api.toggleTool(tool.key, enabled);
                 setTools((items) => items.map((item) => (item.key === updated.key ? updated : item)));
-              })
+                await loadAll();
+                pushToast("success", `Инструмент «${updated.name}» ${enabled ? "включён" : "отключён"}`);
+              }, { pendingKey: `tool:${tool.key}`, errorTitle: "Не удалось переключить инструмент" })
             }
           />
         ) : null}
-        {view === "audit" ? <AuditView events={events} /> : null}
+        {view === "audit" ? <AuditView events={events} plugins={plugins} tools={tools} /> : null}
         {view === "profile" ? (
           <ProfileView
             user={user}
@@ -745,7 +982,9 @@ export function App() {
               runAction(async () => {
                 const updated = await api.profile(payload);
                 setUser(updated);
-              })
+                await loadAll();
+                pushToast("success", "Профиль сохранён");
+              }, { pendingKey: "profile:save", errorTitle: "Не удалось сохранить профиль" })
             }
           />
         ) : null}
