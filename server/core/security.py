@@ -89,10 +89,7 @@ def verify_totp_code(secret: str, code: str, *, window: int = 1, period: int = 3
 
 def build_totp_uri(*, secret: str, issuer: str, account_name: str) -> str:
     label = f"{issuer}:{account_name}"
-    return (
-        f"otpauth://totp/{quote(label)}"
-        f"?secret={quote(secret)}&issuer={quote(issuer)}&algorithm=SHA1&digits=6&period=30"
-    )
+    return f"otpauth://totp/{quote(label)}?secret={quote(secret)}&issuer={quote(issuer)}"
 
 
 def build_pkce_challenge(verifier: str) -> str:

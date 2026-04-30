@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from server.core.qr import qr_svg
+from server.core.qr import _reed_solomon_generator, qr_svg
 from server.core.security import build_pkce_challenge, create_jwt, decode_jwt, hash_password, totp_code, verify_password, verify_pkce
 
 
@@ -49,3 +49,7 @@ def test_qr_svg_is_local_svg() -> None:
     svg = qr_svg("otpauth://totp/ASFES:root?secret=ABC&issuer=ASFES")
     assert svg.startswith("<svg")
     assert "<rect" in svg
+
+
+def test_qr_reed_solomon_generator_matches_qr_spec_vector() -> None:
+    assert _reed_solomon_generator(7) == [127, 122, 154, 164, 11, 68, 117]

@@ -25,10 +25,12 @@ def _gf_mul(left: int, right: int) -> int:
 def _reed_solomon_generator(degree: int) -> list[int]:
     result = [1]
     for index in range(degree):
-        result = [_gf_mul(coef, _EXP[index]) for coef in result] + [0]
-        for item in range(len(result) - 1):
-            result[item + 1] ^= result[item]
-    return result[:-1]
+        next_result = [0] * (len(result) + 1)
+        for item, coefficient in enumerate(result):
+            next_result[item] ^= coefficient
+            next_result[item + 1] ^= _gf_mul(coefficient, _EXP[index])
+        result = next_result
+    return result[1:]
 
 
 def _reed_solomon_remainder(data: list[int], degree: int) -> list[int]:
@@ -38,7 +40,8 @@ def _reed_solomon_remainder(data: list[int], degree: int) -> list[int]:
         factor = byte ^ result.pop(0)
         result.append(0)
         for index, coefficient in enumerate(generator):
-            result[index] ^= _gf_mul(coefficient, factor)
+            if factor:
+                result[index] ^= _gf_mul(coefficient, factor)
     return result
 
 
