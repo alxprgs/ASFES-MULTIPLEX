@@ -299,7 +299,21 @@ async def well_known_authorization_server_for_issuer(
     issuer_path: str,
     services: ApplicationServices = Depends(get_services),
 ) -> dict[str, object]:
-    if issuer_path.rstrip("/") != services.settings.oauth.issuer_path.rstrip("/"):
+    metadata_paths = {
+        services.settings.oauth.issuer_path.rstrip("/"),
+        services.settings.mcp_path.rstrip("/"),
+    }
+    if issuer_path.rstrip("/") not in metadata_paths:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Authorization server metadata not found")
+    return services.oauth.authorization_server_metadata()
+
+
+@well_known_router.get("{resource_path:path}/.well-known/oauth-authorization-server")
+async def well_known_authorization_server_under_resource(
+    resource_path: str,
+    services: ApplicationServices = Depends(get_services),
+) -> dict[str, object]:
+    if resource_path.rstrip("/") != services.settings.mcp_path.rstrip("/"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Authorization server metadata not found")
     return services.oauth.authorization_server_metadata()
 

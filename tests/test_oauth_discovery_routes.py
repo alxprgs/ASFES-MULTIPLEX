@@ -55,5 +55,13 @@ def test_oauth_well_known_metadata_routes_without_runtime_services() -> None:
     assert issuer_metadata.status_code == 200
     assert issuer_metadata.json()["issuer"] == cfg.oauth_issuer
 
+    mcp_path_metadata = client.get("/.well-known/oauth-authorization-server/mcp")
+    assert mcp_path_metadata.status_code == 200
+    assert mcp_path_metadata.json()["authorization_endpoint"] == cfg.authorization_endpoint
+
+    resource_nested_metadata = client.get("/mcp/.well-known/oauth-authorization-server")
+    assert resource_nested_metadata.status_code == 200
+    assert resource_nested_metadata.json()["token_endpoint"] == cfg.token_endpoint
+
     missing = client.get("/.well-known/oauth-authorization-server/other")
     assert missing.status_code == 404

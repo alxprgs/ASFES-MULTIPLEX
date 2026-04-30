@@ -247,6 +247,14 @@ async def test_oauth_metadata_includes_resource_scopes_and_path_aware_issuer(int
     assert issuer_metadata.status_code == 200
     assert issuer_metadata.json()["issuer"] == cfg.oauth_issuer
 
+    mcp_path_metadata = await client.get("/.well-known/oauth-authorization-server/mcp")
+    assert mcp_path_metadata.status_code == 200
+    assert mcp_path_metadata.json()["authorization_endpoint"] == cfg.authorization_endpoint
+
+    resource_nested_metadata = await client.get("/mcp/.well-known/oauth-authorization-server")
+    assert resource_nested_metadata.status_code == 200
+    assert resource_nested_metadata.json()["token_endpoint"] == cfg.token_endpoint
+
     missing = await client.get("/.well-known/oauth-authorization-server/other")
     assert missing.status_code == 404
 
