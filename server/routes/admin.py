@@ -221,11 +221,6 @@ async def run_system_update(
             "truncated": result.truncated,
         },
     )
-    if result.returncode != 0:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=result.stderr.strip() or result.stdout.strip() or "update.sh failed",
-        )
     return SystemUpdateResponse.model_validate(result.to_dict())
 
 

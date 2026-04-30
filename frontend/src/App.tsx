@@ -18,7 +18,7 @@ import {
   X
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, AuditEvent, Bootstrap, Health, Permission, PluginInfo, RuntimeSettings, ToolInfo, TwoFactorSetup, User, api, setCsrfCookieName } from "./api";
+import { ApiError, AuditEvent, Bootstrap, Health, Permission, PluginInfo, RuntimeSettings, SystemUpdateResult, ToolInfo, TwoFactorSetup, User, api, setCsrfCookieName } from "./api";
 
 type View = "overview" | "users" | "plugins" | "tools" | "audit" | "profile";
 type ToastTone = "success" | "error" | "info" | "warning";
@@ -36,6 +36,13 @@ type Confirmation = {
   confirmLabel: string;
   tone?: "default" | "danger";
   onConfirm: () => void;
+};
+
+type UpdateLogState = {
+  open: boolean;
+  running: boolean;
+  result: SystemUpdateResult | null;
+  error: string | null;
 };
 
 const navItems: Array<{ view: View; label: string; icon: ReactNode }> = [
@@ -146,6 +153,43 @@ function ConfirmDialog({ confirmation, onCancel }: { confirmation: Confirmation 
             }}
           >
             {confirmation.confirmLabel}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function UpdateLogDialog({ state, onClose }: { state: UpdateLogState; onClose: () => void }) {
+  if (!state.open) {
+    return null;
+  }
+  const command = state.result?.command.join(" ") || "scripts/update.sh";
+  const stdout = state.result?.stdout.trim() || (state.running ? "Ожидаю вывод update.sh..." : "");
+  const stderr = state.result?.stderr.trim() || "";
+  const canClose = !state.running;
+  return (
+    <div className="confirm-backdrop" role="presentation">
+      <section className="update-log-dialog" role="dialog" aria-modal="true" aria-labelledby="update-log-title">
+        <div className="update-log-head">
+          <div>
+            <h2 id="update-log-title">Логи обновления</h2>
+            <p>{state.running ? "Обновление выполняется. Полный вывод появится здесь после завершения команды." : `Код выхода: ${state.result?.returncode ?? "-"}`}</p>
+          </div>
+          {state.running ? <Loader2 className="spin" size={22} /> : null}
+        </div>
+        <div className="update-log-meta">
+          <span>Команда</span>
+          <code>{command}</code>
+        </div>
+        <pre className="update-log-output">{[
+          stdout ? `$ stdout\n${stdout}` : "",
+          stderr ? `$ stderr\n${stderr}` : "",
+          state.error ? `$ error\n${state.error}` : ""
+        ].filter(Boolean).join("\n\n") || "Вывод пуст."}</pre>
+        <div className="confirm-actions">
+          <button type="button" className="secondary-button" onClick={onClose} disabled={!canClose}>
+            Закрыть
           </button>
         </div>
       </section>
@@ -812,6 +856,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [updateLog, setUpdateLog] = useState<UpdateLogState>({ open: false, running: false, result: null, error: null });
   const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
   const pendingActionsRef = useRef<Set<string>>(new Set());
 
@@ -908,14 +953,37 @@ export function App() {
       title: "Обновить приложение?",
       message: "Будет выполнен git fetch, git pull, установка зависимостей, сборка фронтенда и перезапуск сервиса.",
       confirmLabel: "Обновить",
-      onConfirm: () =>
-        void runAction(async () => {
-          const result = await api.runSystemUpdate();
-          await loadAll();
-          const detail = result.stdout.trim().split("\n").slice(-2).join(" · ");
-          pushToast("success", "Обновление завершено", detail || `Код выхода: ${result.returncode}`);
-        }, { pendingKey: "system:update", errorTitle: "Не удалось обновить приложение" })
+      onConfirm: () => void runUpdateWithLog()
     });
+  }
+
+  async function runUpdateWithLog() {
+    if (pendingActionsRef.current.has("system:update")) {
+      return;
+    }
+    setError(null);
+    setActionPending("system:update", true);
+    setUpdateLog({ open: true, running: true, result: null, error: null });
+    try {
+      const result = await api.runSystemUpdate();
+      setUpdateLog({ open: true, running: false, result, error: null });
+      const detail = result.stdout.trim().split("\n").slice(-2).join(" · ") || result.stderr.trim().split("\n").slice(-2).join(" · ");
+      if (result.returncode === 0) {
+        pushToast("success", "Обновление завершено", detail || `Код выхода: ${result.returncode}`);
+        void loadAll();
+      } else {
+        const message = detail || `Код выхода: ${result.returncode}`;
+        setError(message);
+        pushToast("error", "Обновление завершилось с ошибкой", message);
+      }
+    } catch (exc) {
+      const message = exc instanceof ApiError || exc instanceof Error ? exc.message : "Не удалось обновить приложение";
+      setError(message);
+      setUpdateLog({ open: true, running: false, result: null, error: message });
+      pushToast("error", "Не удалось обновить приложение", message);
+    } finally {
+      setActionPending("system:update", false);
+    }
   }
 
   function requestRestart() {
@@ -942,6 +1010,7 @@ export function App() {
       <>
         <ToastViewport toasts={toasts} onDismiss={dismissToast} />
         <ConfirmDialog confirmation={confirmation} onCancel={() => setConfirmation(null)} />
+        <UpdateLogDialog state={updateLog} onClose={() => setUpdateLog((current) => ({ ...current, open: false }))} />
         <LoginView onLogin={(nextUser) => {
           setUser(nextUser);
           void loadAll();
@@ -954,6 +1023,7 @@ export function App() {
     <div className="app-shell">
       <ToastViewport toasts={toasts} onDismiss={dismissToast} />
       <ConfirmDialog confirmation={confirmation} onCancel={() => setConfirmation(null)} />
+      <UpdateLogDialog state={updateLog} onClose={() => setUpdateLog((current) => ({ ...current, open: false }))} />
       <aside className="sidebar">
         <div className="brand">
           <Shield size={24} />

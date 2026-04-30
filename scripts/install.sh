@@ -24,6 +24,37 @@ fi
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 SOURCE_DIR="$(cd -- "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
 
+node_runtime_supported() {
+  command -v node >/dev/null 2>&1 || return 1
+  command -v npm >/dev/null 2>&1 || return 1
+  [[ "$(node -e "const [major, minor] = process.versions.node.split('.').map(Number); process.stdout.write((major === 20 && minor >= 19) || major >= 22 ? 'yes' : 'no')")" == "yes" ]]
+}
+
+ensure_node_runtime() {
+  if node_runtime_supported; then
+    echo "Node.js подходит: $(node --version), npm $(npm --version)"
+    return
+  fi
+  echo "Устанавливаю Node.js 22 для сборки frontend..."
+  apt-get update
+  apt-get install -y ca-certificates curl gnupg
+  install -d -m 0755 /etc/apt/keyrings
+  rm -f /etc/apt/keyrings/nodesource.gpg
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" >/etc/apt/sources.list.d/nodesource.list
+  apt-get update
+  apt-get install -y nodejs
+  echo "Node.js установлен: $(node --version), npm $(npm --version)"
+}
+
+configure_build_environment() {
+  mkdir -p "${DATA_DIR}/runtime/npm-cache" "${DATA_DIR}/runtime/build-home"
+  export PIP_DISABLE_PIP_VERSION_CHECK=1
+  export NPM_CONFIG_CACHE="${DATA_DIR}/runtime/npm-cache"
+  export npm_config_cache="${DATA_DIR}/runtime/npm-cache"
+  export HOME="${DATA_DIR}/runtime/build-home"
+}
+
 read -rp "MongoDB URI [mongodb://127.0.0.1:27017]: " MONGO_URI
 MONGO_URI="${MONGO_URI:-mongodb://127.0.0.1:27017}"
 
@@ -72,7 +103,7 @@ PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-${DEFAULT_PUBLIC_URL}}"
 
 echo "Устанавливаю системные зависимости..."
 apt-get update
-apt-get install -y python3 python3-venv python3-pip nodejs npm rsync sudo git
+apt-get install -y python3 python3-venv python3-pip rsync sudo git ca-certificates curl gnupg
 
 if ! id -u "${APP_USER}" >/dev/null 2>&1; then
   useradd --system --home "${DATA_DIR}" --shell /usr/sbin/nologin "${APP_USER}"
@@ -89,6 +120,8 @@ rsync -a --delete \
   --exclude "pytest-cache-files-*" \
   "${SOURCE_DIR}/" "${INSTALL_DIR}/"
 
+configure_build_environment
+ensure_node_runtime
 python3 -m venv "${INSTALL_DIR}/.venv"
 "${INSTALL_DIR}/.venv/bin/python" -m pip install --upgrade pip
 "${INSTALL_DIR}/.venv/bin/python" -m pip install -r "${INSTALL_DIR}/requirements.txt"

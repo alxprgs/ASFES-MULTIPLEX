@@ -372,6 +372,60 @@ input:focus {
   justify-content: flex-end;
 }
 
+.update-log-dialog {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(23, 33, 38, 0.28);
+  display: grid;
+  gap: 14px;
+  max-height: min(760px, calc(100vh - 36px));
+  max-width: 920px;
+  padding: 20px;
+  width: min(920px, 100%);
+}
+
+.update-log-head {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.update-log-meta {
+  background: #f8fafb;
+  border: 1px solid #dfe6ea;
+  border-radius: 6px;
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+}
+
+.update-log-meta span {
+  color: #697782;
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.update-log-meta code {
+  color: #1f2937;
+  overflow-wrap: anywhere;
+}
+
+.update-log-output {
+  background: #172126;
+  border-radius: 8px;
+  color: #eef6f0;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  max-height: min(460px, 52vh);
+  overflow: auto;
+  padding: 14px;
+  white-space: pre-wrap;
+}
+
 .page-grid {
   display: grid;
   gap: 18px;
