@@ -131,6 +131,11 @@ export class ApiError extends Error {
 }
 
 let csrfCookieName = "multiplex_csrf";
+let sessionRefreshPromise: Promise<void> | null = null;
+
+type ApiFetchInit = RequestInit & {
+  skipAuthRefresh?: boolean;
+};
 
 export function setCsrfCookieName(name: string) {
   csrfCookieName = name;
@@ -142,10 +147,34 @@ function getCookie(name: string): string | null {
   return item ? decodeURIComponent(item.slice(prefix.length)) : null;
 }
 
-async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const method = (init.method || "GET").toUpperCase();
-  const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) {
+function shouldRefreshSession(path: string, response: Response, skipAuthRefresh: boolean, retrying: boolean): boolean {
+  if (skipAuthRefresh || retrying || response.status !== 401) {
+    return false;
+  }
+  if (path === "/auth/refresh" || path === "/auth/register" || path.startsWith("/auth/login") || path.startsWith("/auth/passkeys/authentication")) {
+    return false;
+  }
+  return true;
+}
+
+async function refreshSessionOnce(): Promise<void> {
+  sessionRefreshPromise ??= apiFetch<{ user: User }>("/auth/refresh", {
+    method: "POST",
+    skipAuthRefresh: true
+  }).then(() => undefined);
+
+  try {
+    await sessionRefreshPromise;
+  } finally {
+    sessionRefreshPromise = null;
+  }
+}
+
+async function apiFetch<T>(path: string, init: ApiFetchInit = {}, retrying = false): Promise<T> {
+  const { skipAuthRefresh = false, ...requestInit } = init;
+  const method = (requestInit.method || "GET").toUpperCase();
+  const headers = new Headers(requestInit.headers);
+  if (requestInit.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
@@ -156,11 +185,16 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   const response = await fetch(`/api${path}`, {
-    ...init,
+    ...requestInit,
     method,
     headers,
     credentials: "include"
   });
+
+  if (shouldRefreshSession(path, response, skipAuthRefresh, retrying)) {
+    await refreshSessionOnce();
+    return apiFetch<T>(path, init, true);
+  }
 
   if (!response.ok) {
     let detail = response.statusText;

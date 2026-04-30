@@ -1142,9 +1142,17 @@ export function App() {
       const data = await api.bootstrap();
       setCsrfCookieName(data.csrf_cookie_name);
       setBootstrap(data);
-      setUser(data.user);
       setRuntime(data.runtime);
-      if (data.user) {
+      let activeUser = data.user;
+      if (!activeUser) {
+        try {
+          const refreshed = await api.refresh();
+          activeUser = refreshed.user;
+        } catch {
+        }
+      }
+      setUser(activeUser);
+      if (activeUser) {
         await loadAll();
       }
     } catch (exc) {
