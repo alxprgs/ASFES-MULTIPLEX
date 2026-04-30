@@ -195,6 +195,37 @@ class SystemUpdateResponse(BaseModel):
     duration_ms: int = 0
 
 
+class SystemUpdateOptions(BaseModel):
+    stages: list[str] = Field(default_factory=list)
+    force_stages: list[str] = Field(default_factory=list)
+
+
+class SystemUpdateSessionStartResponse(BaseModel):
+    session_id: str
+
+
+class SystemUpdateStageResponse(BaseModel):
+    key: str
+    title: str
+    status: str = "pending"
+    needed: bool = False
+    forced: bool = False
+    detail: str | None = None
+    returncode: int | None = None
+
+
+class SystemUpdateSessionResponse(BaseModel):
+    session_id: str
+    kind: str
+    status: str
+    stages: list[SystemUpdateStageResponse] = Field(default_factory=list)
+    result: SystemUpdateResponse | None = None
+    error: str | None = None
+    requires_restart: bool = False
+    created_at: str
+    updated_at: str
+
+
 class BootstrapResponse(BaseModel):
     app_name: str
     app_version: str

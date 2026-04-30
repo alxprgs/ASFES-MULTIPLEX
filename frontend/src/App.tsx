@@ -5,6 +5,7 @@ import {
   KeyRound,
   Loader2,
   LogOut,
+  MoreHorizontal,
   Plug,
   Power,
   QrCode,
@@ -20,7 +21,7 @@ import {
   X
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, AuditEvent, Bootstrap, Health, MCPConnectedService, Passkey, Permission, PluginInfo, RuntimeSettings, SystemUpdateResult, ToolInfo, TwoFactorSetup, User, api, setCsrfCookieName } from "./api";
+import { ApiError, AuditEvent, Bootstrap, Health, MCPConnectedService, Passkey, Permission, PluginInfo, RuntimeSettings, SystemUpdateResult, SystemUpdateSession, SystemUpdateStage, ToolInfo, TwoFactorSetup, User, api, setCsrfCookieName } from "./api";
 
 type View = "overview" | "users" | "plugins" | "tools" | "services" | "audit" | "profile";
 type ToastTone = "success" | "error" | "info" | "warning";
@@ -40,11 +41,20 @@ type Confirmation = {
   onConfirm: () => void;
 };
 
-type UpdateLogState = {
+type UpdateStageKey = "code" | "python" | "frontend" | "restart";
+
+type UpdateFlowState = {
   open: boolean;
   running: boolean;
+  checking: boolean;
+  session: SystemUpdateSession | null;
+  logs: string[];
   result: SystemUpdateResult | null;
   error: string | null;
+  forceStages: Record<UpdateStageKey, boolean>;
+  optionsOpen: boolean;
+  escortingRestart: boolean;
+  restartMessage: string | null;
 };
 
 const navItems: Array<{ view: View; label: string; icon: ReactNode }> = [
@@ -256,7 +266,7 @@ function ConfirmDialog({ confirmation, onCancel }: { confirmation: Confirmation 
   );
 }
 
-function UpdateLogDialog({ state, onClose }: { state: UpdateLogState; onClose: () => void }) {
+function UpdateLogDialog({ state, onClose }: { state: UpdateFlowState; onClose: () => void }) {
   if (!state.open) {
     return null;
   }
@@ -286,6 +296,120 @@ function UpdateLogDialog({ state, onClose }: { state: UpdateLogState; onClose: (
         <div className="confirm-actions">
           <button type="button" className="secondary-button" onClick={onClose} disabled={!canClose}>
             Закрыть
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+const updateStageKeys: UpdateStageKey[] = ["code", "python", "frontend", "restart"];
+
+function stageTone(stage: SystemUpdateStage): "ok" | "warn" | "danger" | "muted" {
+  if (stage.status === "success") {
+    return stage.needed || stage.forced ? "ok" : "muted";
+  }
+  if (stage.status === "error") {
+    return "danger";
+  }
+  if (stage.status === "running") {
+    return "warn";
+  }
+  return "muted";
+}
+
+function forceLabel(stage: UpdateStageKey): string {
+  if (stage === "code") {
+    return "Принудительно обновить код";
+  }
+  if (stage === "python") {
+    return "Принудительно обновить Python-зависимости";
+  }
+  if (stage === "frontend") {
+    return "Принудительно собрать frontend";
+  }
+  return "Принудительно перезапустить сервис";
+}
+
+function UpdateControlDialog({
+  state,
+  onClose,
+  onCheck,
+  onRun,
+  onForceChange,
+  onToggleOptions
+}: {
+  state: UpdateFlowState;
+  onClose: () => void;
+  onCheck: () => void;
+  onRun: () => void;
+  onForceChange: (stage: UpdateStageKey, enabled: boolean) => void;
+  onToggleOptions: () => void;
+}) {
+  if (!state.open) {
+    return null;
+  }
+  const stages = state.session?.stages || [];
+  const selectedStages = stages.filter((stage) => stage.needed || state.forceStages[stage.key as UpdateStageKey]);
+  const canRun = !state.running && !state.checking && (selectedStages.length > 0 || Object.values(state.forceStages).some(Boolean));
+  const canClose = !state.running && !state.checking && !state.escortingRestart;
+  const consoleOutput = state.logs.join("\n") || (state.running || state.checking ? "Ожидаю вывод команды..." : "Вывод пуст.");
+  return (
+    <div className="confirm-backdrop" role="presentation">
+      <section className="update-log-dialog" role="dialog" aria-modal="true" aria-labelledby="update-log-title">
+        <div className="update-log-head update-control-head">
+          <button type="button" className="icon-button" onClick={onToggleOptions} title="Дополнительные параметры">
+            <MoreHorizontal size={18} />
+          </button>
+          <div>
+            <h2 id="update-log-title">Обновления</h2>
+            <p>{state.escortingRestart ? state.restartMessage || "Сервис загружается..." : state.running || state.checking ? "Команды выполняются, вывод появляется в реальном времени." : `Статус: ${state.session?.status || "ожидает проверки"}`}</p>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} disabled={!canClose} title="Закрыть">
+            <X size={18} />
+          </button>
+        </div>
+        {state.optionsOpen ? (
+          <div className="update-options">
+            {updateStageKeys.map((stage) => (
+              <label key={stage}>
+                <input
+                  type="checkbox"
+                  checked={state.forceStages[stage]}
+                  onChange={(event) => onForceChange(stage, event.target.checked)}
+                  disabled={state.running || state.checking}
+                />
+                <span>{forceLabel(stage)}</span>
+              </label>
+            ))}
+          </div>
+        ) : null}
+        <div className="update-stage-grid">
+          {stages.length ? stages.map((stage) => (
+            <div className="update-stage" key={stage.key}>
+              <div>
+                <strong>{stage.title}</strong>
+                <span>{stage.detail || (stage.status === "pending" ? "Ожидает проверки" : stage.status)}</span>
+              </div>
+              <Badge tone={stageTone(stage)}>{stage.forced ? "ФОРС" : stage.needed ? "НУЖНО" : stage.status === "running" ? "ИДЁТ" : stage.status === "error" ? "ОШИБКА" : "OK"}</Badge>
+            </div>
+          )) : (
+            <div className="update-empty">Нажмите проверку, чтобы увидеть доступные обновления.</div>
+          )}
+        </div>
+        <pre className="update-log-output">{[
+          consoleOutput,
+          state.error ? `$ error\n${state.error}` : "",
+          state.result ? `$ result\nКод выхода: ${state.result.returncode}` : ""
+        ].filter(Boolean).join("\n\n")}</pre>
+        <div className="confirm-actions">
+          <button type="button" className="secondary-button" onClick={onCheck} disabled={state.running || state.checking}>
+            {state.checking ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+            Проверить обновления
+          </button>
+          <button type="button" className="primary-button" onClick={onRun} disabled={!canRun}>
+            {state.running || state.escortingRestart ? <Loader2 className="spin" size={16} /> : <Power size={16} />}
+            Запустить
           </button>
         </div>
       </section>
@@ -1145,7 +1269,19 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
-  const [updateLog, setUpdateLog] = useState<UpdateLogState>({ open: false, running: false, result: null, error: null });
+  const [updateLog, setUpdateLog] = useState<UpdateFlowState>({
+    open: false,
+    running: false,
+    checking: false,
+    session: null,
+    logs: [],
+    result: null,
+    error: null,
+    forceStages: { code: false, python: false, frontend: false, restart: false },
+    optionsOpen: false,
+    escortingRestart: false,
+    restartMessage: null
+  });
   const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
   const pendingActionsRef = useRef<Set<string>>(new Set());
 
@@ -1262,10 +1398,10 @@ export function App() {
     }
     setError(null);
     setActionPending("system:update", true);
-    setUpdateLog({ open: true, running: true, result: null, error: null });
+    setUpdateLog((current) => ({ ...current, open: true, running: true, result: null, error: null }));
     try {
       const result = await api.runSystemUpdate();
-      setUpdateLog({ open: true, running: false, result, error: null });
+      setUpdateLog((current) => ({ ...current, open: true, running: false, result, error: null }));
       const detail = result.stdout.trim().split("\n").slice(-2).join(" · ") || result.stderr.trim().split("\n").slice(-2).join(" · ");
       if (result.returncode === 0) {
         pushToast("success", "Обновление завершено", detail || `Код выхода: ${result.returncode}`);
@@ -1278,11 +1414,136 @@ export function App() {
     } catch (exc) {
       const message = exc instanceof ApiError || exc instanceof Error ? exc.message : "Не удалось обновить приложение";
       setError(message);
-      setUpdateLog({ open: true, running: false, result: null, error: message });
+      setUpdateLog((current) => ({ ...current, open: true, running: false, result: null, error: message }));
       pushToast("error", "Не удалось обновить приложение", message);
     } finally {
       setActionPending("system:update", false);
     }
+  }
+
+  function openUpdateDialog() {
+    setUpdateLog((current) => ({ ...current, open: true, error: null }));
+  }
+
+  function attachUpdateEvents(sessionId: string, mode: "check" | "run") {
+    const source = new EventSource(api.systemUpdateEventsUrl(sessionId));
+    const appendLog = (line: string) => setUpdateLog((current) => ({ ...current, logs: [...current.logs, line].slice(-800) }));
+    source.addEventListener("log", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as { stream: string; line: string };
+      appendLog(`[${payload.stream}] ${payload.line}`);
+    });
+    source.addEventListener("stage", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as { stage: SystemUpdateStage };
+      setUpdateLog((current) => current.session ? ({
+        ...current,
+        session: {
+          ...current.session,
+          stages: current.session.stages.map((stage) => stage.key === payload.stage.key ? payload.stage : stage)
+        }
+      }) : current);
+    });
+    source.addEventListener("status", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as { status: string; session: SystemUpdateSession };
+      setUpdateLog((current) => ({
+        ...current,
+        session: payload.session,
+        checking: mode === "check" && payload.status === "running",
+        running: mode === "run" && payload.status === "running"
+      }));
+      if (payload.status === "success" || payload.status === "error") {
+        source.close();
+        setActionPending("system:update", false);
+      }
+    });
+    source.addEventListener("result", (event) => {
+      const payload = JSON.parse((event as MessageEvent).data) as { result: SystemUpdateResult; requires_restart: boolean };
+      setUpdateLog((current) => ({ ...current, result: payload.result, running: false, checking: false }));
+      if (payload.requires_restart) {
+        void escortRestart();
+      } else {
+        pushToast("success", "Обновление завершено", `Код выхода: ${payload.result.returncode}`);
+        void loadAll();
+      }
+    });
+    source.addEventListener("error", (event) => {
+      const data = (event as MessageEvent).data;
+      if (!data) {
+        return;
+      }
+      const payload = JSON.parse(data) as { message: string; result?: SystemUpdateResult };
+      setUpdateLog((current) => ({ ...current, error: payload.message, result: payload.result || current.result, running: false, checking: false }));
+      pushToast("error", mode === "check" ? "Проверка обновлений не выполнена" : "Обновление завершилось с ошибкой", payload.message);
+      source.close();
+      setActionPending("system:update", false);
+    });
+  }
+
+  async function runUpdateCheck() {
+    if (pendingActionsRef.current.has("system:update")) {
+      return;
+    }
+    setError(null);
+    setActionPending("system:update", true);
+    setUpdateLog((current) => ({ ...current, open: true, checking: true, running: false, logs: [], result: null, error: null, session: null }));
+    try {
+      const { session_id: sessionId } = await api.checkSystemUpdate();
+      const session = await api.systemUpdateSession(sessionId);
+      setUpdateLog((current) => ({ ...current, session }));
+      attachUpdateEvents(sessionId, "check");
+    } catch (exc) {
+      const message = exc instanceof ApiError || exc instanceof Error ? exc.message : "Не удалось проверить обновления";
+      setError(message);
+      setUpdateLog((current) => ({ ...current, checking: false, running: false, error: message }));
+      pushToast("error", "Не удалось проверить обновления", message);
+      setActionPending("system:update", false);
+    }
+  }
+
+  async function runManagedUpdate() {
+    if (pendingActionsRef.current.has("system:update")) {
+      return;
+    }
+    const sessionStages = updateLog.session?.stages || [];
+    const stages = updateStageKeys.filter((stage) => updateLog.forceStages[stage] || sessionStages.some((item) => item.key === stage && item.needed));
+    setError(null);
+    setActionPending("system:update", true);
+    setUpdateLog((current) => ({ ...current, open: true, running: true, checking: false, logs: [], result: null, error: null }));
+    try {
+      const { session_id: sessionId } = await api.runSystemUpdateSession(stages, updateStageKeys.filter((stage) => updateLog.forceStages[stage]));
+      const session = await api.systemUpdateSession(sessionId);
+      setUpdateLog((current) => ({ ...current, session }));
+      attachUpdateEvents(sessionId, "run");
+    } catch (exc) {
+      const message = exc instanceof ApiError || exc instanceof Error ? exc.message : "Не удалось обновить приложение";
+      setError(message);
+      setUpdateLog((current) => ({ ...current, running: false, checking: false, error: message }));
+      pushToast("error", "Не удалось обновить приложение", message);
+      setActionPending("system:update", false);
+    }
+  }
+
+  async function escortRestart() {
+    setUpdateLog((current) => ({ ...current, escortingRestart: true, restartMessage: "Сервис перезапускается..." }));
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, Math.min(1000 + attempt * 250, 4000)));
+      try {
+        await api.health();
+        setUpdateLog((current) => ({ ...current, restartMessage: "Сервис доступен, проверяю сессию..." }));
+        const nextBootstrap = await api.bootstrap();
+        setCsrfCookieName(nextBootstrap.csrf_cookie_name);
+        if (nextBootstrap.user) {
+          setUser(nextBootstrap.user);
+          setView("overview");
+          window.location.assign("/");
+        } else {
+          setUser(null);
+        }
+        return;
+      } catch {
+        setUpdateLog((current) => ({ ...current, restartMessage: "Ожидаю healthcheck сервиса..." }));
+      }
+    }
+    setUpdateLog((current) => ({ ...current, escortingRestart: false, restartMessage: "Сервис не ответил вовремя" }));
   }
 
   function requestRestart() {
@@ -1296,6 +1557,8 @@ export function App() {
           const result = await api.runSystemRestart();
           const detail = result.stdout.trim().split("\n").slice(-2).join(" · ");
           pushToast("success", "Перезапуск запланирован", detail || `Код выхода: ${result.returncode}`);
+          setUpdateLog((current) => ({ ...current, open: true, result, logs: detail ? [detail] : current.logs }));
+          void escortRestart();
         }, { pendingKey: "system:restart", errorTitle: "Не удалось перезапустить приложение" })
     });
   }
@@ -1309,7 +1572,14 @@ export function App() {
       <>
         <ToastViewport toasts={toasts} onDismiss={dismissToast} />
         <ConfirmDialog confirmation={confirmation} onCancel={() => setConfirmation(null)} />
-        <UpdateLogDialog state={updateLog} onClose={() => setUpdateLog((current) => ({ ...current, open: false }))} />
+        <UpdateControlDialog
+          state={updateLog}
+          onClose={() => setUpdateLog((current) => ({ ...current, open: false }))}
+          onCheck={() => void runUpdateCheck()}
+          onRun={() => void runManagedUpdate()}
+          onForceChange={(stage, enabled) => setUpdateLog((current) => ({ ...current, forceStages: { ...current.forceStages, [stage]: enabled } }))}
+          onToggleOptions={() => setUpdateLog((current) => ({ ...current, optionsOpen: !current.optionsOpen }))}
+        />
         <LoginView onLogin={(nextUser) => {
           setUser(nextUser);
           void loadAll();
@@ -1322,7 +1592,14 @@ export function App() {
     <div className="app-shell">
       <ToastViewport toasts={toasts} onDismiss={dismissToast} />
       <ConfirmDialog confirmation={confirmation} onCancel={() => setConfirmation(null)} />
-      <UpdateLogDialog state={updateLog} onClose={() => setUpdateLog((current) => ({ ...current, open: false }))} />
+      <UpdateControlDialog
+        state={updateLog}
+        onClose={() => setUpdateLog((current) => ({ ...current, open: false }))}
+        onCheck={() => void runUpdateCheck()}
+        onRun={() => void runManagedUpdate()}
+        onForceChange={(stage, enabled) => setUpdateLog((current) => ({ ...current, forceStages: { ...current.forceStages, [stage]: enabled } }))}
+        onToggleOptions={() => setUpdateLog((current) => ({ ...current, optionsOpen: !current.optionsOpen }))}
+      />
       <aside className="sidebar">
         <div className="brand">
           <Shield size={24} />
@@ -1380,7 +1657,7 @@ export function App() {
                 pushToast("success", `Настройка «${runtimeLabels[key]}» ${value ? "включена" : "отключена"}`);
               }, { pendingKey: `runtime:${key}`, errorTitle: "Не удалось переключить настройку" })
             }
-            onConfirmUpdate={requestUpdate}
+            onConfirmUpdate={openUpdateDialog}
             onRunRestart={requestRestart}
           />
         ) : null}

@@ -27,6 +27,7 @@ from server.core.ratelimit import RateLimitPolicy, RateLimiter
 from server.core.security import TokenBundle, b64url_decode, b64url_encode, build_totp_uri, create_jwt, decode_jwt, generate_totp_secret, hash_password, now_utc, random_token, sha256_text, verify_password, verify_pkce, verify_totp_code
 from server.host_ops import HostOpsService
 from server.models import MCPTool, PermissionDefinition, PluginDefinition, RuntimeAvailability, ToolExecutionContext, UserPrincipal
+from server.update_manager import UpdateManager
 
 
 LOGGER = get_logger("multiplex.services")
@@ -1658,6 +1659,7 @@ class ApplicationServices:
     auth: AuthService
     oauth: OAuthService
     plugins: PluginRegistry
+    updates: UpdateManager
     verifier_task: asyncio.Task[Any] | None = None
 
 
@@ -1700,6 +1702,7 @@ async def build_application_services(settings: Settings, logger_manager: Integri
     oauth = OAuthService(db, settings, users, audit)
     alerts = AlertingService(db, host_ops, mailer, settings.host_ops.alert_poll_interval_seconds)
     plugins = PluginRegistry(db, settings, permissions, audit, settings_service, rate_limiter)
+    updates = UpdateManager(settings)
 
     services = ApplicationServices(
         settings=settings,
@@ -1716,6 +1719,7 @@ async def build_application_services(settings: Settings, logger_manager: Integri
         auth=auth,
         oauth=oauth,
         plugins=plugins,
+        updates=updates,
     )
     plugins.attach_services(services)
     await users.ensure_root_user()

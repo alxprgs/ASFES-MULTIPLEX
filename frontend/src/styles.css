@@ -391,6 +391,65 @@ input:focus {
   justify-content: space-between;
 }
 
+.update-control-head {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.update-options {
+  border: 1px solid #dfe6ea;
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.update-options label {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.update-stage-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.update-stage,
+.update-empty {
+  align-items: center;
+  background: #f8fafb;
+  border: 1px solid #dfe6ea;
+  border-radius: 6px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 70px;
+  padding: 12px;
+}
+
+.update-stage div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.update-stage span,
+.update-empty {
+  color: #697782;
+  font-size: 13px;
+}
+
+.update-stage strong,
+.update-stage span {
+  overflow-wrap: anywhere;
+}
+
+.update-empty {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+}
+
 .update-log-meta {
   background: #f8fafb;
   border: 1px solid #dfe6ea;

@@ -71,6 +71,28 @@ export type SystemUpdateResult = {
   duration_ms: number;
 };
 
+export type SystemUpdateStage = {
+  key: string;
+  title: string;
+  status: string;
+  needed: boolean;
+  forced: boolean;
+  detail: string | null;
+  returncode: number | null;
+};
+
+export type SystemUpdateSession = {
+  session_id: string;
+  kind: string;
+  status: string;
+  stages: SystemUpdateStage[];
+  result: SystemUpdateResult | null;
+  error: string | null;
+  requires_restart: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Permission = {
   key: string;
   description: string;
@@ -337,6 +359,17 @@ export const api = {
     apiFetch<SystemUpdateResult>("/system/update", {
       method: "POST"
     }),
+  checkSystemUpdate: () =>
+    apiFetch<{ session_id: string }>("/system/update/check", {
+      method: "POST"
+    }),
+  runSystemUpdateSession: (stages: string[], forceStages: string[]) =>
+    apiFetch<{ session_id: string }>("/system/update/run", {
+      method: "POST",
+      body: JSON.stringify({ stages, force_stages: forceStages })
+    }),
+  systemUpdateSession: (sessionId: string) => apiFetch<SystemUpdateSession>(`/system/update/sessions/${encodeURIComponent(sessionId)}`),
+  systemUpdateEventsUrl: (sessionId: string) => `/api/system/update/sessions/${encodeURIComponent(sessionId)}/events`,
   runSystemRestart: () =>
     apiFetch<SystemUpdateResult>("/system/restart", {
       method: "POST"

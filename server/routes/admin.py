@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import json
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 
 from server.core.config import BASE_DIR
 from server.core.database import TOOL_POLICIES
 from server.core.deps import enforce_api_rate_limit, get_current_api_user, get_optional_api_user, get_services, require_permission
-from server.models import AuditEventListResponse, AuditEventResponse, BootstrapResponse, MCPConnectedServiceResponse, PermissionDefinition, PermissionMutationRequest, PluginInfoResponse, PluginReloadRequest, ProfileUpdateRequest, RuntimeSettingsResponse, SystemUpdateResponse, ToggleRequest, ToolInfoResponse, UserResponse, UserToolPolicyResponse, UserPrincipal
+from server.models import AuditEventListResponse, AuditEventResponse, BootstrapResponse, MCPConnectedServiceResponse, PermissionDefinition, PermissionMutationRequest, PluginInfoResponse, PluginReloadRequest, ProfileUpdateRequest, RuntimeSettingsResponse, SystemUpdateOptions, SystemUpdateResponse, SystemUpdateSessionResponse, SystemUpdateSessionStartResponse, ToggleRequest, ToolInfoResponse, UserResponse, UserToolPolicyResponse, UserPrincipal
 from server.services import ApplicationServices, request_meta_from_request
 
 
@@ -35,6 +39,46 @@ def _system_script_failure_detail(result) -> str:
     if "sudo" in lowered or "password" in lowered or "permission" in lowered or "разреш" in lowered or "прав" in lowered:
         return "Системное действие недоступно: настройте sudo/system-разрешения для update/restart вручную."
     return output or "Системный скрипт завершился с ошибкой"
+
+
+async def _audit_update_session(
+    services: ApplicationServices,
+    event_type: str,
+    current_user: UserPrincipal,
+    request_meta: dict,
+    session_id: str,
+) -> None:
+    session = services.updates.get_session(session_id)
+    if session is None or session.task is None:
+        return
+    with contextlib.suppress(Exception):
+        await session.task
+    result = session.result
+    await services.audit.record(
+        event_type,
+        actor=current_user,
+        request_meta=request_meta,
+        target={"session_id": session_id},
+        result="success" if session.status == "success" else "error",
+        metadata={
+            "kind": session.kind,
+            "stages": [stage.key for stage in session.stages.values() if stage.needed or stage.forced],
+            "returncode": result.returncode if result else None,
+            "duration_ms": result.duration_ms if result else None,
+            "requires_restart": session.requires_restart,
+            "error": session.error,
+        },
+    )
+
+
+async def _wait_update_result(session) -> SystemUpdateResponse:
+    if session.task is not None:
+        await session.task
+    if session.result is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=session.error or "Update session did not produce a result")
+    if session.status != "success":
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=_system_script_failure_detail(session.result))
+    return SystemUpdateResponse.model_validate(session.result.to_dict())
 
 
 @router.get("/bootstrap", response_model=BootstrapResponse)
@@ -193,6 +237,71 @@ async def set_redis_settings(
     return _runtime_response(services, runtime)
 
 
+@router.post("/system/update/check", response_model=SystemUpdateSessionStartResponse)
+async def check_system_update(
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(require_permission("system.update")),
+) -> SystemUpdateSessionStartResponse:
+    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    try:
+        session = await services.updates.start_check()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return SystemUpdateSessionStartResponse(session_id=session.session_id)
+
+
+@router.post("/system/update/run", response_model=SystemUpdateSessionStartResponse)
+async def run_system_update_session(
+    payload: SystemUpdateOptions,
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(require_permission("system.update")),
+) -> SystemUpdateSessionStartResponse:
+    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    try:
+        session = await services.updates.start_update(payload.stages, payload.force_stages)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    asyncio.create_task(_audit_update_session(services, "system.update", current_user, request_meta_from_request(request), session.session_id))
+    return SystemUpdateSessionStartResponse(session_id=session.session_id)
+
+
+@router.get("/system/update/sessions/{session_id}", response_model=SystemUpdateSessionResponse)
+async def get_system_update_session(
+    session_id: str,
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(require_permission("system.update")),
+) -> SystemUpdateSessionResponse:
+    await enforce_api_rate_limit(request, services, user=current_user)
+    session = services.updates.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Update session not found")
+    return SystemUpdateSessionResponse.model_validate(session.to_dict())
+
+
+@router.get("/system/update/sessions/{session_id}/events")
+async def stream_system_update_session(
+    session_id: str,
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(require_permission("system.update")),
+) -> StreamingResponse:
+    await enforce_api_rate_limit(request, services, user=current_user)
+    session = services.updates.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Update session not found")
+
+    async def event_stream():
+        async for event in services.updates.events(session):
+            yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @router.post("/system/update", response_model=SystemUpdateResponse)
 async def run_system_update(
     request: Request,
@@ -200,38 +309,12 @@ async def run_system_update(
     current_user: UserPrincipal = Depends(require_permission("system.update")),
 ) -> SystemUpdateResponse:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
-    script_path = BASE_DIR / "scripts" / "update.sh"
-    if not script_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="update.sh not found")
-    command = _system_script_command(str(script_path))
     try:
-        result = await services.host_ops.run(command, cwd=BASE_DIR, timeout_seconds=900)
-    except Exception as exc:
-        await services.audit.record(
-            "system.update",
-            actor=current_user,
-            request_meta=request_meta_from_request(request),
-            target={"script": str(script_path)},
-            result="error",
-            metadata={"error": str(exc)},
-        )
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-    audit_result = "success" if result.returncode == 0 else "error"
-    await services.audit.record(
-        "system.update",
-        actor=current_user,
-        request_meta=request_meta_from_request(request),
-        target={"script": str(script_path)},
-        result=audit_result,
-        metadata={
-            "returncode": result.returncode,
-            "duration_ms": result.duration_ms,
-            "truncated": result.truncated,
-        },
-    )
-    if result.returncode != 0:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=_system_script_failure_detail(result))
-    return SystemUpdateResponse.model_validate(result.to_dict())
+        session = await services.updates.start_update(["code", "python", "frontend", "restart"], ["code", "python", "frontend", "restart"])
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await _audit_update_session(services, "system.update", current_user, request_meta_from_request(request), session.session_id)
+    return await _wait_update_result(session)
 
 
 @router.post("/system/restart", response_model=SystemUpdateResponse)
@@ -241,41 +324,12 @@ async def run_system_restart(
     current_user: UserPrincipal = Depends(require_permission("system.restart")),
 ) -> SystemUpdateResponse:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
-    script_path = BASE_DIR / "scripts" / "restart.sh"
-    if not script_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="restart.sh not found")
-    command = _system_script_command(str(script_path))
     try:
-        result = await services.host_ops.run(command, cwd=BASE_DIR, timeout_seconds=60)
-    except Exception as exc:
-        await services.audit.record(
-            "system.restart",
-            actor=current_user,
-            request_meta=request_meta_from_request(request),
-            target={"script": str(script_path)},
-            result="error",
-            metadata={"error": str(exc)},
-        )
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-    audit_result = "success" if result.returncode == 0 else "error"
-    await services.audit.record(
-        "system.restart",
-        actor=current_user,
-        request_meta=request_meta_from_request(request),
-        target={"script": str(script_path)},
-        result=audit_result,
-        metadata={
-            "returncode": result.returncode,
-            "duration_ms": result.duration_ms,
-            "truncated": result.truncated,
-        },
-    )
-    if result.returncode != 0:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=_system_script_failure_detail(result),
-        )
-    return SystemUpdateResponse.model_validate(result.to_dict())
+        session = await services.updates.start_restart()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await _audit_update_session(services, "system.restart", current_user, request_meta_from_request(request), session.session_id)
+    return await _wait_update_result(session)
 
 
 @router.get("/audit/logs", response_model=AuditEventListResponse)
