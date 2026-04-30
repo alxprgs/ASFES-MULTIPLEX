@@ -205,6 +205,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def finalize_paths(self) -> "Settings":
+        self.app.version = read_project_version()
         self.app.frontend_dist = self.app.frontend_dist if self.app.frontend_dist.is_absolute() else BASE_DIR / self.app.frontend_dist
         self.logging.directory = self.logging.directory if self.logging.directory.is_absolute() else BASE_DIR / self.logging.directory
         self.logging.sqlite_path = (

@@ -14,9 +14,11 @@ def test_app_version_defaults_to_pyproject() -> None:
     assert cfg.app.version == project_data["project"]["version"]
 
 
-def test_app_version_can_be_overridden_by_environment(monkeypatch) -> None:
+def test_app_version_ignores_legacy_environment_override(monkeypatch) -> None:
     monkeypatch.setenv("APP__VERSION", "9.8.7")
+    with (BASE_DIR / "pyproject.toml").open("rb") as pyproject_file:
+        project_data = tomllib.load(pyproject_file)
 
     cfg = Settings(_env_file=None)
 
-    assert cfg.app.version == "9.8.7"
+    assert cfg.app.version == project_data["project"]["version"]
