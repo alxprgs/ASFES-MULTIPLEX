@@ -22,9 +22,16 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   exit 1
 fi
 
+if [[ -d "${SOURCE_DIR}/.git" ]]; then
+  echo "Обновляю исходный репозиторий: git fetch && git pull --ff-only"
+  git -c "safe.directory=${SOURCE_DIR}" -C "${SOURCE_DIR}" fetch --all --prune
+  git -c "safe.directory=${SOURCE_DIR}" -C "${SOURCE_DIR}" pull --ff-only
+else
+  echo "Git-репозиторий в ${SOURCE_DIR} не найден, пропускаю git fetch/pull"
+fi
+
 mkdir -p "${INSTALL_DIR}"
 rsync -a --delete \
-  --exclude ".git" \
   --exclude ".venv" \
   --exclude ".env" \
   --exclude "frontend/node_modules" \

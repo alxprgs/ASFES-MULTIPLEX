@@ -38,6 +38,15 @@ export type Health = {
   mcp_enabled: boolean;
 };
 
+export type SystemUpdateResult = {
+  command: string[];
+  returncode: number;
+  stdout: string;
+  stderr: string;
+  truncated: boolean;
+  duration_ms: number;
+};
+
 export type Permission = {
   key: string;
   description: string;
@@ -218,6 +227,10 @@ export const api = {
     apiFetch<RuntimeSettings>("/settings/redis", {
       method: "PUT",
       body: JSON.stringify({ enabled })
+    }),
+  runSystemUpdate: () =>
+    apiFetch<SystemUpdateResult>("/system/update", {
+      method: "POST"
     }),
   plugins: () => apiFetch<PluginInfo[]>("/mcp/plugins"),
   togglePlugin: (pluginKey: string, enabled: boolean) =>

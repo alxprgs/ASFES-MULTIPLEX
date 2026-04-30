@@ -460,6 +460,11 @@ input:focus {
   padding: 12px;
 }
 
+.update-button {
+  margin-top: 14px;
+  width: 100%;
+}
+
 .setting-row span,
 .list-row small,
 .permission-row small,

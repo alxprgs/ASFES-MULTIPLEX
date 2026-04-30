@@ -380,9 +380,10 @@ async def test_two_factor_protects_api_login_and_mcp_oauth_authorize(integration
 
 
 @pytest.mark.asyncio
-async def test_admin_users_and_plugin_toggle(integration_env) -> None:
+async def test_admin_users_plugin_toggle_and_system_update(integration_env, monkeypatch) -> None:
     client = integration_env["client"]
     cfg = integration_env["settings"]
+    services = integration_env["services"]
 
     login = await client.post(
         "/api/auth/login",
@@ -402,3 +403,26 @@ async def test_admin_users_and_plugin_toggle(integration_env) -> None:
     enabled = await client.put("/api/mcp/plugins/docker", headers=headers, json={"enabled": True})
     assert enabled.status_code == 200
     assert enabled.json()["enabled"] is True
+
+    async def fake_update(command, **kwargs):
+        return type("Result", (), {
+            "command": command,
+            "returncode": 0,
+            "stdout": "updated",
+            "stderr": "",
+            "truncated": False,
+            "duration_ms": 10,
+            "to_dict": lambda self: {
+                "command": self.command,
+                "returncode": self.returncode,
+                "stdout": self.stdout,
+                "stderr": self.stderr,
+                "truncated": self.truncated,
+                "duration_ms": self.duration_ms,
+            },
+        })()
+
+    monkeypatch.setattr(services.host_ops, "run", fake_update)
+    update = await client.post("/api/system/update", headers=headers)
+    assert update.status_code == 200
+    assert update.json()["stdout"] == "updated"

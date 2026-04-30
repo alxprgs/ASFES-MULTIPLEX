@@ -9,6 +9,7 @@ DATA_DIR="/var/lib/asfes-multiplex"
 LOG_DIR="/var/log/asfes-multiplex"
 ENV_FILE="${CONFIG_DIR}/multiplex.env"
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+SUDOERS_FILE="/etc/sudoers.d/${SERVICE_NAME}-update"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Запустите установщик от root: sudo bash scripts/install.sh"
@@ -71,7 +72,7 @@ PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-${DEFAULT_PUBLIC_URL}}"
 
 echo "Устанавливаю системные зависимости..."
 apt-get update
-apt-get install -y python3 python3-venv python3-pip nodejs npm rsync
+apt-get install -y python3 python3-venv python3-pip nodejs npm rsync sudo git
 
 if ! id -u "${APP_USER}" >/dev/null 2>&1; then
   useradd --system --home "${DATA_DIR}" --shell /usr/sbin/nologin "${APP_USER}"
@@ -79,7 +80,6 @@ fi
 
 mkdir -p "${INSTALL_DIR}" "${CONFIG_DIR}" "${DATA_DIR}" "${DATA_DIR}/runtime" "${DATA_DIR}/data" "${LOG_DIR}"
 rsync -a --delete \
-  --exclude ".git" \
   --exclude ".venv" \
   --exclude ".env" \
   --exclude "frontend/node_modules" \
@@ -199,6 +199,11 @@ chmod 600 "${ENV_FILE}"
 chown -R "${APP_USER}:${APP_USER}" "${INSTALL_DIR}" "${DATA_DIR}" "${LOG_DIR}"
 chown root:"${APP_USER}" "${ENV_FILE}"
 
+cat >"${SUDOERS_FILE}" <<EOF
+${APP_USER} ALL=(root) NOPASSWD: /bin/bash ${INSTALL_DIR}/scripts/update.sh
+EOF
+chmod 440 "${SUDOERS_FILE}"
+
 echo "Проверяю подключение к MongoDB..."
 MONGO__URI="${MONGO_URI}" "${INSTALL_DIR}/.venv/bin/python" - <<'PY'
 import os
@@ -224,7 +229,7 @@ EnvironmentFile=${ENV_FILE}
 ExecStart=${INSTALL_DIR}/.venv/bin/python ${INSTALL_DIR}/run.py
 Restart=on-failure
 RestartSec=5
-NoNewPrivileges=true
+NoNewPrivileges=false
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=full

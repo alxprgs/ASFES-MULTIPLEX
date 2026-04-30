@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from server.core.config import BASE_DIR
 from server.core.database import TOOL_POLICIES
 from server.core.deps import enforce_api_rate_limit, get_current_api_user, get_optional_api_user, get_services, require_permission
-from server.models import AuditEventListResponse, AuditEventResponse, BootstrapResponse, PermissionDefinition, PermissionMutationRequest, PluginInfoResponse, PluginReloadRequest, ProfileUpdateRequest, RuntimeSettingsResponse, ToggleRequest, ToolInfoResponse, UserResponse, UserToolPolicyResponse, UserPrincipal
+from server.models import AuditEventListResponse, AuditEventResponse, BootstrapResponse, PermissionDefinition, PermissionMutationRequest, PluginInfoResponse, PluginReloadRequest, ProfileUpdateRequest, RuntimeSettingsResponse, SystemUpdateResponse, ToggleRequest, ToolInfoResponse, UserResponse, UserToolPolicyResponse, UserPrincipal
 from server.services import ApplicationServices, request_meta_from_request
 
 
@@ -174,6 +177,52 @@ async def set_redis_settings(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return _runtime_response(services, runtime)
+
+
+@router.post("/system/update", response_model=SystemUpdateResponse)
+async def run_system_update(
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(require_permission("system.update")),
+) -> SystemUpdateResponse:
+    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    script_path = BASE_DIR / "scripts" / "update.sh"
+    if not script_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="update.sh not found")
+    command = ["bash", str(script_path)]
+    if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() != 0:
+        command = ["sudo", "-n", "/bin/bash", str(script_path)]
+    try:
+        result = await services.host_ops.run(command, cwd=BASE_DIR, timeout_seconds=900)
+    except Exception as exc:
+        await services.audit.record(
+            "system.update",
+            actor=current_user,
+            request_meta=request_meta_from_request(request),
+            target={"script": str(script_path)},
+            result="error",
+            metadata={"error": str(exc)},
+        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+    audit_result = "success" if result.returncode == 0 else "error"
+    await services.audit.record(
+        "system.update",
+        actor=current_user,
+        request_meta=request_meta_from_request(request),
+        target={"script": str(script_path)},
+        result=audit_result,
+        metadata={
+            "returncode": result.returncode,
+            "duration_ms": result.duration_ms,
+            "truncated": result.truncated,
+        },
+    )
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.stderr.strip() or result.stdout.strip() or "update.sh failed",
+        )
+    return SystemUpdateResponse.model_validate(result.to_dict())
 
 
 @router.get("/audit/logs", response_model=AuditEventListResponse)

@@ -141,6 +141,15 @@ class RuntimeSettingsResponse(BaseModel):
     redis_mode: str
 
 
+class SystemUpdateResponse(BaseModel):
+    command: list[str]
+    returncode: int
+    stdout: str
+    stderr: str
+    truncated: bool = False
+    duration_ms: int = 0
+
+
 class BootstrapResponse(BaseModel):
     app_name: str
     app_version: str
