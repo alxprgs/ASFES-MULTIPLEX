@@ -670,11 +670,11 @@ function AuditView({ events, plugins, tools }: { events: AuditEvent[]; plugins: 
           const formatted = formatAuditEvent(event, plugins, tools);
           return (
             <div className="timeline-row" key={event.event_id}>
-              <span />
-              <div>
-                <strong>{formatted.title}</strong>
-                <small>{formatDate(event.created_at)} · {event.actor_username || "система"} · {formatResult(event.result)}</small>
-                <small>{formatted.detail}</small>
+              <span className="timeline-dot" />
+              <div className="timeline-content">
+                <strong className="timeline-title">{formatted.title}</strong>
+                <small className="timeline-meta">{formatDate(event.created_at)} · {event.actor_username || "система"} · {formatResult(event.result)}</small>
+                <small className="timeline-detail">{formatted.detail}</small>
               </div>
             </div>
           );

@@ -65,6 +65,7 @@ ensure_node_runtime() {
 configure_build_environment() {
   mkdir -p "${DATA_DIR}/runtime/npm-cache" "${DATA_DIR}/runtime/build-home"
   export PIP_DISABLE_PIP_VERSION_CHECK=1
+  export PIP_NO_CACHE_DIR=1
   export NPM_CONFIG_CACHE="${DATA_DIR}/runtime/npm-cache"
   export npm_config_cache="${DATA_DIR}/runtime/npm-cache"
   export HOME="${DATA_DIR}/runtime/build-home"

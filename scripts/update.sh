@@ -50,6 +50,7 @@ ensure_node_runtime() {
 configure_build_environment() {
   mkdir -p "${DATA_DIR}/runtime/npm-cache" "${DATA_DIR}/runtime/build-home"
   export PIP_DISABLE_PIP_VERSION_CHECK=1
+  export PIP_NO_CACHE_DIR=1
   export NPM_CONFIG_CACHE="${DATA_DIR}/runtime/npm-cache"
   export npm_config_cache="${DATA_DIR}/runtime/npm-cache"
   export HOME="${DATA_DIR}/runtime/build-home"
@@ -104,8 +105,6 @@ else
   npm --prefix "${INSTALL_DIR}/frontend" install
 fi
 npm --prefix "${INSTALL_DIR}/frontend" run build
-
-sed -i '/^APP__VERSION=/d' "${ENV_FILE}"
 
 chown -R "${APP_USER}:${APP_USER}" "${INSTALL_DIR}" "${DATA_DIR}" "${LOG_DIR}"
 nohup bash -c "sleep 1; systemctl restart '${SERVICE_NAME}'" >/dev/null 2>&1 &

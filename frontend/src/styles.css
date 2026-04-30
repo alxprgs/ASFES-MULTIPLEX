@@ -554,7 +554,9 @@ input:focus {
 .setting-row span,
 .list-row small,
 .permission-row small,
-.table-row small {
+.table-row small,
+.timeline-meta,
+.timeline-detail {
   display: block;
   margin-top: 3px;
 }
@@ -706,16 +708,39 @@ input:focus {
 }
 
 .timeline-row {
+  align-items: start;
   background: #f8fafb;
   grid-template-columns: auto 1fr;
   padding: 12px;
 }
 
-.timeline-row > span {
+.timeline-dot {
   background: #d8852f;
   border-radius: 50%;
+  flex: 0 0 auto;
   height: 10px;
+  margin-top: 6px;
   width: 10px;
+}
+
+.timeline-content {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.timeline-title {
+  color: #1f2937;
+  line-height: 1.35;
+}
+
+.timeline-meta,
+.timeline-detail {
+  line-height: 1.45;
+}
+
+.timeline-detail {
+  color: #47545d;
 }
 
 .security-note {
