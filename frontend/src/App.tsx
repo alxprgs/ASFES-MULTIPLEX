@@ -1,8 +1,10 @@
 import {
   Activity,
   Database,
+  KeyRound,
   LogOut,
   Plug,
+  QrCode,
   RefreshCw,
   Save,
   ScrollText,
@@ -13,7 +15,7 @@ import {
   Wrench
 } from "lucide-react";
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
-import { ApiError, AuditEvent, Bootstrap, Health, Permission, PluginInfo, RuntimeSettings, ToolInfo, User, api, setCsrfCookieName } from "./api";
+import { ApiError, AuditEvent, Bootstrap, Health, Permission, PluginInfo, RuntimeSettings, ToolInfo, TwoFactorSetup, User, api, setCsrfCookieName } from "./api";
 
 type View = "overview" | "users" | "plugins" | "tools" | "audit" | "profile";
 
@@ -66,6 +68,8 @@ function Toggle({
 function LoginView({ onLogin }: { onLogin: (user: User) => void }) {
   const [username, setUsername] = useState("root");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [challenge, setChallenge] = useState<{ token: string; username: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,7 +78,17 @@ function LoginView({ onLogin }: { onLogin: (user: User) => void }) {
     setBusy(true);
     setError(null);
     try {
+      if (challenge) {
+        const result = await api.login2fa(challenge.token, code);
+        onLogin(result.user);
+        return;
+      }
       const result = await api.login(username, password);
+      if (result.two_factor_required) {
+        setChallenge({ token: result.challenge_token, username: result.username });
+        setCode("");
+        return;
+      }
       onLogin(result.user);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Не удалось войти");
@@ -95,22 +109,45 @@ function LoginView({ onLogin }: { onLogin: (user: User) => void }) {
         </div>
         <ErrorBanner message={error} />
         <form onSubmit={submit} className="form-grid">
-          <label>
-            Логин
-            <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
-          </label>
-          <label>
-            Пароль
-            <input
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              type="password"
-              autoComplete="current-password"
-            />
-          </label>
-          <button className="primary-button" type="submit" disabled={busy || !username || !password}>
-            {busy ? "Вход..." : "Войти"}
+          {challenge ? (
+            <>
+              <div className="security-note">
+                <KeyRound size={18} />
+                <span>Введите код из приложения-аутентификатора для {challenge.username}</span>
+              </div>
+              <label>
+                Код 2FA
+                <input value={code} onChange={(event) => setCode(event.target.value)} inputMode="numeric" autoComplete="one-time-code" autoFocus />
+              </label>
+            </>
+          ) : (
+            <>
+              <label>
+                Логин
+                <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
+              </label>
+              <label>
+                Пароль
+                <input
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  type="password"
+                  autoComplete="current-password"
+                />
+              </label>
+            </>
+          )}
+          <button className="primary-button" type="submit" disabled={busy || !username || !password || (Boolean(challenge) && !code)}>
+            {busy ? "Вход..." : challenge ? "Подтвердить" : "Войти"}
           </button>
+          {challenge ? (
+            <button className="secondary-button" type="button" onClick={() => {
+              setChallenge(null);
+              setCode("");
+            }}>
+              Назад
+            </button>
+          ) : null}
         </form>
       </section>
     </main>
@@ -366,10 +403,25 @@ function AuditView({ events }: { events: AuditEvent[] }) {
   );
 }
 
-function ProfileView({ user, onSave }: { user: User; onSave: (payload: { email: string | null; tg_id: string | null; vk_id: string | null }) => void }) {
+function ProfileView({
+  user,
+  onSave,
+  onUserUpdate
+}: {
+  user: User;
+  onSave: (payload: { email: string | null; tg_id: string | null; vk_id: string | null }) => void;
+  onUserUpdate: (user: User) => void;
+}) {
   const [email, setEmail] = useState(user.email || "");
   const [tgId, setTgId] = useState(user.tg_id || "");
   const [vkId, setVkId] = useState(user.vk_id || "");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [twoFactorCode, setTwoFactorCode] = useState("");
+  const [setup, setSetup] = useState<TwoFactorSetup | null>(null);
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [twoFactorMessage, setTwoFactorMessage] = useState<string | null>(null);
+  const [twoFactorError, setTwoFactorError] = useState<string | null>(null);
+  const [twoFactorBusy, setTwoFactorBusy] = useState(false);
 
   useEffect(() => {
     setEmail(user.email || "");
@@ -377,26 +429,132 @@ function ProfileView({ user, onSave }: { user: User; onSave: (payload: { email: 
     setVkId(user.vk_id || "");
   }, [user]);
 
+  async function runTwoFactor(action: () => Promise<void>) {
+    setTwoFactorBusy(true);
+    setTwoFactorError(null);
+    setTwoFactorMessage(null);
+    try {
+      await action();
+    } catch (exc) {
+      setTwoFactorError(exc instanceof Error ? exc.message : "Не удалось обновить 2FA");
+    } finally {
+      setTwoFactorBusy(false);
+    }
+  }
+
   return (
-    <section className="panel narrow">
-      <h2>Профиль</h2>
-      <div className="form-grid">
-        <label>
-          Email
-          <input value={email} onChange={(event) => setEmail(event.target.value)} />
-        </label>
-        <label>
-          Telegram ID
-          <input value={tgId} onChange={(event) => setTgId(event.target.value)} />
-        </label>
-        <label>
-          VK ID
-          <input value={vkId} onChange={(event) => setVkId(event.target.value)} />
-        </label>
-        <button className="primary-button" onClick={() => onSave({ email: email || null, tg_id: tgId || null, vk_id: vkId || null })}>
-          <Save size={16} />
-          Сохранить
-        </button>
+    <section className="profile-grid">
+      <div className="panel narrow">
+        <h2>Профиль</h2>
+        <div className="form-grid">
+          <label>
+            Email
+            <input value={email} onChange={(event) => setEmail(event.target.value)} />
+          </label>
+          <label>
+            Telegram ID
+            <input value={tgId} onChange={(event) => setTgId(event.target.value)} />
+          </label>
+          <label>
+            VK ID
+            <input value={vkId} onChange={(event) => setVkId(event.target.value)} />
+          </label>
+          <button className="primary-button" onClick={() => onSave({ email: email || null, tg_id: tgId || null, vk_id: vkId || null })}>
+            <Save size={16} />
+            Сохранить
+          </button>
+        </div>
+      </div>
+      <div className="panel narrow">
+        <div className="panel-head">
+          <div>
+            <h2>Двухэтапная аутентификация</h2>
+            <p>{user.two_factor_enabled ? "Включена для входа и MCP OAuth" : "Защитите вход и подключение MCP-клиентов"}</p>
+          </div>
+          <Badge tone={user.two_factor_enabled ? "ok" : "warn"}>{user.two_factor_enabled ? "ON" : "OFF"}</Badge>
+        </div>
+        <ErrorBanner message={twoFactorError} />
+        {twoFactorMessage ? <div className="notice notice-ok">{twoFactorMessage}</div> : null}
+        {recoveryCodes.length ? (
+          <div className="recovery-grid">
+            {recoveryCodes.map((item) => <code key={item}>{item}</code>)}
+          </div>
+        ) : null}
+        {user.two_factor_enabled ? (
+          <div className="form-grid">
+            <div className="security-note">
+              <KeyRound size={18} />
+              <span>MCP-подключение через OAuth будет дополнительно спрашивать код аутентификатора.</span>
+            </div>
+            <label>
+              Код 2FA или резервный код
+              <input value={twoFactorCode} onChange={(event) => setTwoFactorCode(event.target.value)} inputMode="numeric" autoComplete="one-time-code" />
+            </label>
+            <button
+              className="secondary-button danger-button"
+              disabled={twoFactorBusy || !twoFactorCode}
+              onClick={() => runTwoFactor(async () => {
+                const updated = await api.twoFactorDisable(twoFactorCode);
+                onUserUpdate(updated);
+                setTwoFactorCode("");
+                setSetup(null);
+                setRecoveryCodes([]);
+                setTwoFactorMessage("2FA отключена");
+              })}
+            >
+              Отключить 2FA
+            </button>
+          </div>
+        ) : (
+          <div className="form-grid">
+            <label>
+              Текущий пароль
+              <input value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} type="password" autoComplete="current-password" />
+            </label>
+            <button
+              className="secondary-button"
+              disabled={twoFactorBusy || !currentPassword}
+              onClick={() => runTwoFactor(async () => {
+                const nextSetup = await api.twoFactorSetup(currentPassword);
+                setSetup(nextSetup);
+                setTwoFactorCode("");
+                setRecoveryCodes([]);
+                setTwoFactorMessage("Отсканируйте QR-код и подтвердите одноразовый код");
+              })}
+            >
+              <QrCode size={16} />
+              Создать QR-код
+            </button>
+            {setup ? (
+              <div className="two-factor-setup">
+                <img alt="QR-код для 2FA" src={`data:image/svg+xml;utf8,${encodeURIComponent(setup.qr_svg)}`} />
+                <div>
+                  <small>Ключ для ручного ввода</small>
+                  <code>{setup.secret}</code>
+                </div>
+                <label>
+                  Код из приложения
+                  <input value={twoFactorCode} onChange={(event) => setTwoFactorCode(event.target.value)} inputMode="numeric" autoComplete="one-time-code" />
+                </label>
+                <button
+                  className="primary-button"
+                  disabled={twoFactorBusy || !twoFactorCode}
+                  onClick={() => runTwoFactor(async () => {
+                    const result = await api.twoFactorEnable(twoFactorCode);
+                    onUserUpdate(result.user);
+                    setRecoveryCodes(result.recovery_codes);
+                    setTwoFactorCode("");
+                    setCurrentPassword("");
+                    setSetup(null);
+                    setTwoFactorMessage("2FA включена. Сохраните резервные коды.");
+                  })}
+                >
+                  Включить 2FA
+                </button>
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -582,6 +740,7 @@ export function App() {
         {view === "profile" ? (
           <ProfileView
             user={user}
+            onUserUpdate={setUser}
             onSave={(payload) =>
               runAction(async () => {
                 const updated = await api.profile(payload);

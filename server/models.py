@@ -32,6 +32,7 @@ class UserResponse(BaseModel):
     email: EmailStr | None = None
     tg_id: str | None = None
     vk_id: str | None = None
+    two_factor_enabled: bool = False
     created_at: str
     updated_at: str
 
@@ -46,6 +47,11 @@ class HealthResponse(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class LoginTwoFactorRequest(BaseModel):
+    challenge_token: str
+    code: str
 
 
 class RegisterRequest(BaseModel):
@@ -65,11 +71,48 @@ class LogoutRequest(BaseModel):
 
 
 class AuthTokensResponse(BaseModel):
+    two_factor_required: bool = False
     access_token: str
     refresh_token: str
     token_type: str = "Bearer"
     expires_in: int
     user: UserResponse
+
+
+class TwoFactorChallengeResponse(BaseModel):
+    two_factor_required: bool = True
+    challenge_token: str
+    expires_in: int
+    user_id: str
+    username: str
+
+
+class TwoFactorStatusResponse(BaseModel):
+    enabled: bool
+    pending: bool = False
+
+
+class TwoFactorSetupRequest(BaseModel):
+    current_password: str
+
+
+class TwoFactorSetupResponse(BaseModel):
+    secret: str
+    otpauth_uri: str
+    qr_svg: str
+
+
+class TwoFactorEnableRequest(BaseModel):
+    code: str
+
+
+class TwoFactorEnableResponse(BaseModel):
+    user: UserResponse
+    recovery_codes: list[str]
+
+
+class TwoFactorDisableRequest(BaseModel):
+    code: str
 
 
 class RegistrationStatusResponse(BaseModel):

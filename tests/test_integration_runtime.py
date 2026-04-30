@@ -8,7 +8,7 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 
 from server.core.database import SETTINGS
-from server.core.security import build_pkce_challenge
+from server.core.security import build_pkce_challenge, totp_code
 
 
 @pytest.mark.asyncio
@@ -298,6 +298,85 @@ async def test_cookie_auth_csrf_and_bearer_compatibility(integration_env) -> Non
     assert logout.status_code == 204
     assert not client.cookies.get(cfg.access_cookie_name)
     assert await services.settings_service.get_runtime_settings()
+
+
+@pytest.mark.asyncio
+async def test_two_factor_protects_api_login_and_mcp_oauth_authorize(integration_env) -> None:
+    client = integration_env["client"]
+    cfg = integration_env["settings"]
+
+    login = await client.post(
+        "/api/auth/login",
+        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+    )
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    setup = await client.post(
+        "/api/auth/2fa/setup",
+        headers=headers,
+        json={"current_password": cfg.root.password.get_secret_value()},
+    )
+    assert setup.status_code == 200
+    secret = setup.json()["secret"]
+    assert setup.json()["qr_svg"].startswith("<svg")
+
+    enable = await client.post("/api/auth/2fa/enable", headers=headers, json={"code": totp_code(secret)})
+    assert enable.status_code == 200
+    assert enable.json()["user"]["two_factor_enabled"] is True
+    assert len(enable.json()["recovery_codes"]) == 8
+
+    challenged = await client.post(
+        "/api/auth/login",
+        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+    )
+    assert challenged.status_code == 200
+    assert challenged.json()["two_factor_required"] is True
+    assert "access_token" not in challenged.json()
+
+    denied = await client.post("/api/auth/login/2fa", json={"challenge_token": challenged.json()["challenge_token"], "code": "000000"})
+    assert denied.status_code == 401
+
+    completed = await client.post("/api/auth/login/2fa", json={"challenge_token": challenged.json()["challenge_token"], "code": totp_code(secret)})
+    assert completed.status_code == 200
+    assert completed.json()["user"]["two_factor_enabled"] is True
+
+    oauth_client = await client.post(
+        "/api/oauth/clients",
+        headers=headers,
+        json={
+            "name": "2FA MCP Client",
+            "redirect_uris": ["https://example.test/callback"],
+            "allowed_scopes": ["mcp"],
+        },
+    )
+    assert oauth_client.status_code == 201
+    oauth_client_id = oauth_client.json()["client_id"]
+    verifier = "two-factor-pkce-verifier-123456789"
+    challenge = build_pkce_challenge(verifier)
+    authorize_payload = {
+        "response_type": "code",
+        "client_id": oauth_client_id,
+        "redirect_uri": "https://example.test/callback",
+        "scope": "mcp",
+        "state": "two-factor",
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "username": cfg.root.username,
+        "password": cfg.root.password.get_secret_value(),
+        "approve": "true",
+    }
+
+    oauth_denied = await client.post("/api/oauth/authorize", data=authorize_payload, follow_redirects=False)
+    assert oauth_denied.status_code == 200
+    assert "Invalid authenticator code" in oauth_denied.text
+
+    oauth_allowed = await client.post(
+        "/api/oauth/authorize",
+        data={**authorize_payload, "totp_code": totp_code(secret)},
+        follow_redirects=False,
+    )
+    assert oauth_allowed.status_code == 302
 
 
 @pytest.mark.asyncio

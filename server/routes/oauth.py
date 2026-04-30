@@ -49,6 +49,8 @@ def _render_authorize_form(client_name: str, values: dict[str, str], error: str 
             <input name="username" type="text" required style="width:100%;padding:.75rem;margin:.4rem 0 1rem;" />
             <label>Password</label><br />
             <input name="password" type="password" required style="width:100%;padding:.75rem;margin:.4rem 0 1rem;" />
+            <label>Authenticator code</label><br />
+            <input name="totp_code" type="text" inputmode="numeric" autocomplete="one-time-code" style="width:100%;padding:.75rem;margin:.4rem 0 1rem;" />
             <button type="submit" name="approve" value="true" style="padding:.8rem 1.2rem;">Approve</button>
             <button type="submit" name="approve" value="false" style="padding:.8rem 1.2rem;margin-left:.5rem;">Deny</button>
           </form>
@@ -117,6 +119,7 @@ async def oauth_authorize_post(request: Request, services: ApplicationServices =
     code_challenge_method = str(form.get("code_challenge_method", "S256"))
     username = str(form.get("username", ""))
     password = str(form.get("password", ""))
+    totp_code = str(form.get("totp_code", ""))
     approve = str(form.get("approve", "false")).lower() == "true"
 
     try:
@@ -146,6 +149,23 @@ async def oauth_authorize_post(request: Request, services: ApplicationServices =
                 "code_challenge_method": code_challenge_method,
             },
             error="Invalid credentials",
+        )
+    user_doc = await services.users.get_user_by_id(user.user_id)
+    if not user_doc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User does not exist")
+    if services.users.two_factor_enabled(user_doc) and not await services.users.verify_second_factor(user_doc, totp_code):
+        return _render_authorize_form(
+            client["name"],
+            {
+                "response_type": response_type,
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "scope": scope,
+                "state": state,
+                "code_challenge": code_challenge,
+                "code_challenge_method": code_challenge_method,
+            },
+            error="Invalid authenticator code",
         )
 
     code = await services.oauth.create_authorization_code(

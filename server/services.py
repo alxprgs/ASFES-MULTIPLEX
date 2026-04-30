@@ -14,8 +14,9 @@ from server.alerting import AlertingService
 from server.core.config import Settings
 from server.core.database import AUDIT_EVENTS, OAUTH_CLIENTS, OAUTH_CODES, PLUGINS, REFRESH_TOKENS, SETTINGS, TOOL_POLICIES, USERS, DatabaseManager
 from server.core.logging import IntegrityLogManager, Mailer, get_logger
+from server.core.qr import qr_svg
 from server.core.ratelimit import RateLimitPolicy, RateLimiter
-from server.core.security import TokenBundle, create_jwt, decode_jwt, hash_password, now_utc, random_token, sha256_text, verify_password, verify_pkce
+from server.core.security import TokenBundle, build_totp_uri, create_jwt, decode_jwt, generate_totp_secret, hash_password, now_utc, random_token, sha256_text, verify_password, verify_pkce, verify_totp_code
 from server.host_ops import HostOpsService
 from server.models import MCPTool, PermissionDefinition, PluginDefinition, RuntimeAvailability, ToolExecutionContext, UserPrincipal
 
@@ -256,6 +257,7 @@ class UserService:
             "email": str(self.settings.root.email),
             "tg_id": current.get("tg_id") if current else None,
             "vk_id": current.get("vk_id") if current else None,
+            "two_factor": current.get("two_factor", {"enabled": False}) if current else {"enabled": False},
             "created_at": created_at,
             "updated_at": now_utc(),
         }
@@ -297,6 +299,7 @@ class UserService:
             "email": email,
             "tg_id": tg_id,
             "vk_id": vk_id,
+            "two_factor": {"enabled": False},
             "created_at": created_at,
             "updated_at": created_at,
         }
@@ -317,6 +320,107 @@ class UserService:
         if not verify_password(password, user["password_hash"], pepper):
             return None
         return self.to_principal(user)
+
+    async def verify_password_for_user(self, user: UserPrincipal, password: str) -> bool:
+        document = await self.get_user_by_id(user.user_id)
+        if not document:
+            return False
+        pepper = self.settings.security.password_pepper.get_secret_value()
+        return verify_password(password, document["password_hash"], pepper)
+
+    def two_factor_enabled(self, document: dict[str, Any]) -> bool:
+        return bool(document.get("two_factor", {}).get("enabled"))
+
+    async def begin_two_factor_setup(self, user: UserPrincipal, *, request_meta: dict[str, Any]) -> dict[str, str]:
+        secret = generate_totp_secret()
+        issuer = "ASFES"
+        otpauth_uri = build_totp_uri(secret=secret, issuer=issuer, account_name=user.user_id)
+        await self.db.collection(USERS).update_one(
+            {"_id": user.user_id},
+            {"$set": {"two_factor.pending_secret": secret, "two_factor.pending_at": now_utc(), "updated_at": now_utc()}},
+        )
+        await self.audit.record(
+            "account.2fa.setup",
+            actor=user,
+            request_meta=request_meta,
+            target={"user_id": user.user_id},
+        )
+        return {"secret": secret, "otpauth_uri": otpauth_uri, "qr_svg": qr_svg(otpauth_uri)}
+
+    async def enable_two_factor(self, user: UserPrincipal, code: str, *, request_meta: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+        document = await self.get_user_by_id(user.user_id)
+        if not document:
+            raise LookupError("User not found")
+        secret = document.get("two_factor", {}).get("pending_secret")
+        if not secret:
+            raise ValueError("Two-factor setup has not been started")
+        if not verify_totp_code(secret, code):
+            raise ValueError("Invalid two-factor code")
+        recovery_codes = [random_token(8).replace("-", "").replace("_", "")[:10].upper() for _ in range(8)]
+        await self.db.collection(USERS).update_one(
+            {"_id": user.user_id},
+            {
+                "$set": {
+                    "two_factor": {
+                        "enabled": True,
+                        "secret": secret,
+                        "enabled_at": now_utc(),
+                        "recovery_code_hashes": [sha256_text(item) for item in recovery_codes],
+                    },
+                    "updated_at": now_utc(),
+                },
+            },
+        )
+        updated = await self.get_user_by_id(user.user_id)
+        assert updated is not None
+        await self.audit.record(
+            "account.2fa.enable",
+            actor=user,
+            request_meta=request_meta,
+            target={"user_id": user.user_id},
+        )
+        return updated, recovery_codes
+
+    async def disable_two_factor(self, user: UserPrincipal, code: str, *, request_meta: dict[str, Any]) -> dict[str, Any]:
+        document = await self.get_user_by_id(user.user_id)
+        if not document:
+            raise LookupError("User not found")
+        if not self.two_factor_enabled(document):
+            return document
+        if not await self.verify_second_factor(document, code, consume_recovery=False):
+            raise ValueError("Invalid two-factor code")
+        await self.db.collection(USERS).update_one(
+            {"_id": user.user_id},
+            {"$set": {"two_factor": {"enabled": False}, "updated_at": now_utc()}},
+        )
+        updated = await self.get_user_by_id(user.user_id)
+        assert updated is not None
+        await self.audit.record(
+            "account.2fa.disable",
+            actor=user,
+            request_meta=request_meta,
+            target={"user_id": user.user_id},
+        )
+        return updated
+
+    async def verify_second_factor(self, document: dict[str, Any], code: str, *, consume_recovery: bool = True) -> bool:
+        two_factor = document.get("two_factor", {})
+        if not two_factor.get("enabled"):
+            return True
+        secret = two_factor.get("secret")
+        if secret and verify_totp_code(secret, code):
+            return True
+        code_hash = sha256_text(code.strip().upper())
+        recovery_hashes = list(two_factor.get("recovery_code_hashes", []))
+        if code_hash not in recovery_hashes:
+            return False
+        if consume_recovery:
+            recovery_hashes.remove(code_hash)
+            await self.db.collection(USERS).update_one(
+                {"_id": document["_id"]},
+                {"$set": {"two_factor.recovery_code_hashes": recovery_hashes, "updated_at": now_utc()}},
+            )
+        return True
 
     async def update_profile(
         self,
@@ -403,6 +507,7 @@ class UserService:
             "email": principal.email,
             "tg_id": principal.tg_id,
             "vk_id": principal.vk_id,
+            "two_factor_enabled": self.two_factor_enabled(document),
             "created_at": serialize_datetime(document.get("created_at")),
             "updated_at": serialize_datetime(document.get("updated_at")),
         }
@@ -439,6 +544,26 @@ class AuthService:
             }
         )
         return TokenBundle(access_token=access_token, refresh_token=refresh_token, expires_in=self.settings.security.access_token_ttl_minutes * 60)
+
+    def issue_2fa_challenge(self, user: UserPrincipal) -> str:
+        return create_jwt(
+            subject=user.user_id,
+            secret=self.settings.security.api_jwt_secret.get_secret_value(),
+            issuer=self.settings.security_issuer,
+            audience=self.settings.security.api_audience,
+            token_type="api_2fa_challenge",
+            ttl=timedelta(minutes=5),
+            extra={"username": user.username},
+        )
+
+    def verify_2fa_challenge(self, token: str) -> dict[str, Any]:
+        return decode_jwt(
+            token,
+            self.settings.security.api_jwt_secret.get_secret_value(),
+            issuer=self.settings.security_issuer,
+            audience=self.settings.security.api_audience,
+            token_type="api_2fa_challenge",
+        )
 
     async def refresh_api_tokens(self, refresh_token: str, request_meta: dict[str, Any]) -> TokenBundle:
         token_hash = sha256_text(refresh_token)

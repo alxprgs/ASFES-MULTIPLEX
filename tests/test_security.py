@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from server.core.security import build_pkce_challenge, create_jwt, decode_jwt, hash_password, verify_password, verify_pkce
+from server.core.qr import qr_svg
+from server.core.security import build_pkce_challenge, create_jwt, decode_jwt, hash_password, totp_code, verify_password, verify_pkce
 
 
 def test_password_hash_roundtrip() -> None:
@@ -37,3 +38,14 @@ def test_jwt_roundtrip() -> None:
     )
     assert payload["sub"] == "user_1"
     assert payload["username"] == "root"
+
+
+def test_totp_matches_rfc_vector() -> None:
+    secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+    assert totp_code(secret, for_time=59, digits=8) == "94287082"
+
+
+def test_qr_svg_is_local_svg() -> None:
+    svg = qr_svg("otpauth://totp/ASFES:root?secret=ABC&issuer=ASFES")
+    assert svg.startswith("<svg")
+    assert "<rect" in svg

@@ -165,6 +165,11 @@ input:focus {
   font-weight: 700;
 }
 
+.danger-button {
+  background: #fff1f2;
+  color: #be123c;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 260px 1fr;
@@ -257,6 +262,12 @@ input:focus {
   color: #9f1239;
 }
 
+.notice-ok {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
 .page-grid {
   display: grid;
   gap: 18px;
@@ -270,6 +281,12 @@ input:focus {
 
 .panel.narrow {
   max-width: 560px;
+}
+
+.profile-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 560px));
 }
 
 .span-2 {
@@ -506,6 +523,53 @@ input:focus {
   width: 10px;
 }
 
+.security-note {
+  align-items: center;
+  background: #f8fafb;
+  border: 1px solid #dfe6ea;
+  border-radius: 8px;
+  color: #34424c;
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+}
+
+.two-factor-setup {
+  border: 1px solid #dfe6ea;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.two-factor-setup img {
+  background: white;
+  border: 1px solid #dfe6ea;
+  border-radius: 8px;
+  height: 210px;
+  padding: 10px;
+  width: 210px;
+}
+
+.two-factor-setup code,
+.recovery-grid code {
+  background: #172126;
+  border-radius: 6px;
+  color: white;
+  display: inline-flex;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 13px;
+  padding: 8px 10px;
+  width: fit-content;
+}
+
+.recovery-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 14px;
+}
+
 @media (max-width: 1040px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -524,6 +588,7 @@ input:focus {
   }
 
   .page-grid,
+  .profile-grid,
   .metrics-grid,
   .permission-grid {
     grid-template-columns: 1fr;

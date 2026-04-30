@@ -5,10 +5,12 @@ import hashlib
 import hmac
 import json
 import secrets
+import struct
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import quote
 
 
 class SecurityError(Exception):
@@ -53,6 +55,44 @@ def sha256_text(value: str) -> str:
 
 def random_token(length: int = 48) -> str:
     return secrets.token_urlsafe(length)
+
+
+def generate_totp_secret(length: int = 20) -> str:
+    return base64.b32encode(secrets.token_bytes(length)).decode("ascii").rstrip("=")
+
+
+def _decode_totp_secret(secret: str) -> bytes:
+    normalized = secret.replace(" ", "").upper()
+    padding = "=" * (-len(normalized) % 8)
+    return base64.b32decode(f"{normalized}{padding}", casefold=True)
+
+
+def totp_code(secret: str, *, for_time: int | None = None, period: int = 30, digits: int = 6) -> str:
+    counter = int((for_time or time.time()) // period)
+    digest = hmac.new(_decode_totp_secret(secret), struct.pack(">Q", counter), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    value = struct.unpack(">I", digest[offset : offset + 4])[0] & 0x7FFFFFFF
+    return str(value % (10**digits)).zfill(digits)
+
+
+def verify_totp_code(secret: str, code: str, *, window: int = 1, period: int = 30, digits: int = 6) -> bool:
+    normalized = "".join(ch for ch in code if ch.isdigit())
+    if len(normalized) != digits:
+        return False
+    current_time = int(time.time())
+    for offset in range(-window, window + 1):
+        expected = totp_code(secret, for_time=current_time + offset * period, period=period, digits=digits)
+        if hmac.compare_digest(expected, normalized):
+            return True
+    return False
+
+
+def build_totp_uri(*, secret: str, issuer: str, account_name: str) -> str:
+    label = f"{issuer}:{account_name}"
+    return (
+        f"otpauth://totp/{quote(label)}"
+        f"?secret={quote(secret)}&issuer={quote(issuer)}&algorithm=SHA1&digits=6&period=30"
+    )
 
 
 def build_pkce_challenge(verifier: str) -> str:

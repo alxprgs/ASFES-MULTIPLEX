@@ -5,7 +5,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, 
 from server.core.deps import enforce_api_rate_limit, enforce_csrf_for_cookie_auth, get_current_api_user, get_optional_api_user, get_services
 from server.core.ratelimit import RateLimitError
 from server.core.security import random_token
-from server.models import AuthTokensResponse, LoginRequest, LogoutRequest, ProfileUpdateRequest, RefreshRequest, RegisterRequest, RegistrationStatusResponse, UserResponse, UserPrincipal
+from server.models import AuthTokensResponse, LoginRequest, LoginTwoFactorRequest, LogoutRequest, RefreshRequest, RegisterRequest, RegistrationStatusResponse, TwoFactorChallengeResponse, TwoFactorDisableRequest, TwoFactorEnableRequest, TwoFactorEnableResponse, TwoFactorSetupRequest, TwoFactorSetupResponse, TwoFactorStatusResponse, UserResponse, UserPrincipal
 from server.services import ApplicationServices, request_meta_from_request
 
 
@@ -67,7 +67,7 @@ def _clear_auth_cookies(response: Response, services: ApplicationServices) -> No
         response.delete_cookie(cookie_name, path="/", secure=secure, samesite=same_site)
 
 
-@router.post("/login", response_model=AuthTokensResponse)
+@router.post("/login", response_model=AuthTokensResponse | TwoFactorChallengeResponse)
 async def login(
     payload: LoginRequest,
     request: Request,
@@ -89,10 +89,53 @@ async def login(
             result="denied",
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
-    tokens = await services.auth.issue_api_tokens(user, request_meta)
-    await services.audit.record("auth.login", actor=user, request_meta=request_meta, target={"user_id": user.user_id})
     user_doc = await services.users.get_user_by_id(user.user_id)
     assert user_doc is not None
+    if services.users.two_factor_enabled(user_doc):
+        await services.audit.record("auth.login.2fa_required", actor=user, request_meta=request_meta, target={"user_id": user.user_id})
+        return TwoFactorChallengeResponse(
+            challenge_token=services.auth.issue_2fa_challenge(user),
+            expires_in=300,
+            user_id=user.user_id,
+            username=user.username,
+        )
+    tokens = await services.auth.issue_api_tokens(user, request_meta)
+    await services.audit.record("auth.login", actor=user, request_meta=request_meta, target={"user_id": user.user_id})
+    _set_auth_cookies(response, services, tokens)
+    return _build_auth_response(services, tokens, user_doc)
+
+
+@router.post("/login/2fa", response_model=AuthTokensResponse)
+async def login_two_factor(
+    payload: LoginTwoFactorRequest,
+    request: Request,
+    response: Response,
+    services: ApplicationServices = Depends(get_services),
+) -> AuthTokensResponse:
+    request_meta = request_meta_from_request(request)
+    try:
+        challenge = services.auth.verify_2fa_challenge(payload.challenge_token)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Two-factor challenge is invalid or expired") from exc
+    try:
+        await services.rate_limiter.enforce("login", f"{request_meta['ip']}:{challenge['sub']}:2fa")
+    except RateLimitError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many two-factor attempts", headers={"Retry-After": str(exc.retry_after)}) from exc
+    user_doc = await services.users.get_user_by_id(challenge["sub"])
+    if not user_doc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User does not exist")
+    if not await services.users.verify_second_factor(user_doc, payload.code):
+        await services.audit.record(
+            "auth.login.2fa_failed",
+            actor=services.users.to_principal(user_doc),
+            request_meta=request_meta,
+            target={"user_id": user_doc["_id"]},
+            result="denied",
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid two-factor code")
+    user = services.users.to_principal(user_doc)
+    tokens = await services.auth.issue_api_tokens(user, request_meta)
+    await services.audit.record("auth.login", actor=user, request_meta=request_meta, target={"user_id": user.user_id}, metadata={"two_factor": True})
     _set_auth_cookies(response, services, tokens)
     return _build_auth_response(services, tokens, user_doc)
 
@@ -182,4 +225,66 @@ async def me(
     user_doc = await services.users.get_user_by_id(current_user.user_id)
     if not user_doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return UserResponse.model_validate(services.users.to_response(user_doc))
+
+
+@router.get("/2fa/status", response_model=TwoFactorStatusResponse)
+async def two_factor_status(
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(get_current_api_user),
+) -> TwoFactorStatusResponse:
+    await enforce_api_rate_limit(request, services, user=current_user)
+    user_doc = await services.users.get_user_by_id(current_user.user_id)
+    if not user_doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    two_factor = user_doc.get("two_factor", {})
+    return TwoFactorStatusResponse(enabled=bool(two_factor.get("enabled")), pending=bool(two_factor.get("pending_secret")))
+
+
+@router.post("/2fa/setup", response_model=TwoFactorSetupResponse)
+async def two_factor_setup(
+    payload: TwoFactorSetupRequest,
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(get_current_api_user),
+) -> TwoFactorSetupResponse:
+    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    if not await services.users.verify_password_for_user(current_user, payload.current_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is invalid")
+    setup = await services.users.begin_two_factor_setup(current_user, request_meta=request_meta_from_request(request))
+    return TwoFactorSetupResponse.model_validate(setup)
+
+
+@router.post("/2fa/enable", response_model=TwoFactorEnableResponse)
+async def two_factor_enable(
+    payload: TwoFactorEnableRequest,
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(get_current_api_user),
+) -> TwoFactorEnableResponse:
+    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    try:
+        user_doc, recovery_codes = await services.users.enable_two_factor(current_user, payload.code, request_meta=request_meta_from_request(request))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return TwoFactorEnableResponse(user=UserResponse.model_validate(services.users.to_response(user_doc)), recovery_codes=recovery_codes)
+
+
+@router.post("/2fa/disable", response_model=UserResponse)
+async def two_factor_disable(
+    payload: TwoFactorDisableRequest,
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(get_current_api_user),
+) -> UserResponse:
+    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    try:
+        user_doc = await services.users.disable_two_factor(current_user, payload.code, request_meta=request_meta_from_request(request))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return UserResponse.model_validate(services.users.to_response(user_doc))
