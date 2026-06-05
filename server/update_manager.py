@@ -92,8 +92,11 @@ class UpdateManager:
         return await self._start_session("check", self._run_check)
 
     async def start_update(self, stages: list[str], force_stages: list[str]) -> UpdateSession:
-        normalized_stages = self._normalize_stages(stages or ["code", "python", "frontend", "restart"])
+        if not stages:
+            raise ValueError("Update stages are required")
+        normalized_stages = self._normalize_stages(stages)
         normalized_force = self._normalize_stages(force_stages)
+        normalized_stages = self._with_required_restart(normalized_stages, normalized_force)
         return await self._start_session("update", self._run_update, normalized_stages, normalized_force, block_active=True)
 
     async def start_restart(self) -> UpdateSession:
@@ -156,17 +159,29 @@ class UpdateManager:
                 normalized.append(stage)
         return normalized
 
+    def _with_required_restart(self, stages: list[str], force_stages: list[str]) -> list[str]:
+        if "restart" in stages:
+            return stages
+        if "restart" in force_stages or any(stage in stages for stage in ("code", "python")):
+            return [*stages, "restart"]
+        return stages
+
     async def _run_check(self, session: UpdateSession) -> None:
         await self._set_status(session, "running")
         try:
-            code_needed = await self._check_code(session)
-            python_needed = await self._check_python(session)
-            frontend_needed = await self._check_frontend(session)
+            git_state = await self._check_code(session)
+            code_needed = git_state["needed"]
+            python_needed, frontend_needed = await asyncio.gather(
+                self._check_python(session),
+                self._check_frontend(session, git_state["changed_files"]),
+            )
             session.stages["code"].needed = code_needed
             session.stages["python"].needed = python_needed
             session.stages["frontend"].needed = frontend_needed
-            session.stages["restart"].needed = any([code_needed, python_needed, frontend_needed])
-            session.requires_restart = session.stages["restart"].needed
+            session.stages["restart"].status = "success"
+            session.stages["restart"].needed = False
+            session.stages["restart"].detail = "Перезапуск будет предложен только при запуске обновления"
+            session.requires_restart = False
             await self._set_status(session, "success")
         except Exception as exc:
             session.error = str(exc)
@@ -242,7 +257,7 @@ class UpdateManager:
         state.status = "success"
         await self._emit(session, "stage", {"stage": state.to_dict()})
 
-    async def _check_code(self, session: UpdateSession) -> bool:
+    async def _check_code(self, session: UpdateSession) -> dict[str, Any]:
         state = session.stages["code"]
         state.status = "running"
         await self._emit(session, "stage", {"stage": state.to_dict()})
@@ -250,37 +265,57 @@ class UpdateManager:
             state.status = "success"
             state.detail = "Git-репозиторий не найден"
             await self._emit(session, "stage", {"stage": state.to_dict()})
-            return False
-        await self._run_command(session, self._git_command("fetch", "--all", "--prune"), cwd=BASE_DIR, timeout_seconds=180)
-        upstream = await self._run_command(session, self._git_command("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"), cwd=BASE_DIR, timeout_seconds=30, success_codes={0, 128})
+            return {"needed": False, "changed_files": []}
+        await self._run_command(session, self._git_command("fetch", "--all", "--prune"), cwd=BASE_DIR, timeout_seconds=180, emit_logs=False)
+        upstream = await self._run_command(
+            session,
+            self._git_command("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"),
+            cwd=BASE_DIR,
+            timeout_seconds=30,
+            success_codes={0, 128},
+            emit_logs=False,
+        )
         if upstream.returncode != 0:
             state.status = "success"
             state.detail = "Upstream-ветка не настроена"
             await self._emit(session, "stage", {"stage": state.to_dict()})
-            return False
-        diff = await self._run_command(session, self._git_command("rev-list", "--count", "HEAD..@{u}"), cwd=BASE_DIR, timeout_seconds=30)
+            return {"needed": False, "changed_files": []}
+        diff = await self._run_command(session, self._git_command("rev-list", "--count", "HEAD..@{u}"), cwd=BASE_DIR, timeout_seconds=30, emit_logs=False)
+        changed = await self._run_command(session, self._git_command("diff", "--name-only", "HEAD..@{u}"), cwd=BASE_DIR, timeout_seconds=30, emit_logs=False)
+        changed_files = [line.strip() for line in changed.stdout.splitlines() if line.strip()]
         needed = int((diff.stdout.strip() or "0").splitlines()[-1]) > 0
         state.status = "success"
         state.detail = "Доступны изменения кода" if needed else "Код актуален"
         await self._emit(session, "stage", {"stage": state.to_dict()})
-        return needed
+        return {"needed": needed, "changed_files": changed_files}
 
     async def _check_python(self, session: UpdateSession) -> bool:
         state = session.stages["python"]
         state.status = "running"
         await self._emit(session, "stage", {"stage": state.to_dict()})
-        result = await self._run_command(session, [sys.executable, "-m", "pip", "list", "--outdated", "--format=json"], cwd=BASE_DIR, timeout_seconds=120, success_codes={0})
+        python_bin = self._python_bin()
+        requirements = INSTALL_DIR / "requirements.txt" if os.name != "nt" else BASE_DIR / "requirements.txt"
+        result = await self._run_command(
+            session,
+            [str(python_bin), "-m", "pip", "install", "--dry-run", "--report", "-", "-r", str(requirements)],
+            cwd=BASE_DIR,
+            timeout_seconds=180,
+            success_codes={0},
+            emit_logs=False,
+        )
         try:
-            packages = json.loads(result.stdout or "[]")
+            report = self._extract_pip_report(result.stdout)
         except json.JSONDecodeError:
-            packages = []
-        needed = bool(packages)
+            report = {}
+        installs = report.get("install") if isinstance(report, dict) else []
+        install_count = len(installs) if isinstance(installs, list) else 0
+        needed = install_count > 0
         state.status = "success"
-        state.detail = f"Устаревших пакетов: {len(packages)}" if needed else "Python-зависимости актуальны"
+        state.detail = f"Python-пакетов к установке: {install_count}" if needed else "Python-зависимости актуальны"
         await self._emit(session, "stage", {"stage": state.to_dict()})
         return needed
 
-    async def _check_frontend(self, session: UpdateSession) -> bool:
+    async def _check_frontend(self, session: UpdateSession, changed_files: list[str] | None = None) -> bool:
         state = session.stages["frontend"]
         state.status = "running"
         await self._emit(session, "stage", {"stage": state.to_dict()})
@@ -290,16 +325,17 @@ class UpdateManager:
             state.detail = "npm не найден"
             await self._emit(session, "stage", {"stage": state.to_dict()})
             return False
-        result = await self._run_command(session, [npm, "outdated", "--json"], cwd=BASE_DIR / "frontend", timeout_seconds=120, success_codes={0, 1})
+        result = await self._run_command(session, [npm, "outdated", "--json"], cwd=BASE_DIR / "frontend", timeout_seconds=120, success_codes={0, 1}, emit_logs=False)
         try:
             packages = json.loads(result.stdout or "{}")
         except json.JSONDecodeError:
             packages = {}
-        changed_frontend = await self._frontend_changed()
-        needed = bool(packages) or changed_frontend
+        actionable_packages = self._actionable_npm_packages(packages)
+        changed_frontend = self._frontend_changed(changed_files or [])
+        needed = bool(actionable_packages) or changed_frontend
         state.status = "success"
-        if packages:
-            state.detail = f"Устаревших npm-пакетов: {len(packages)}"
+        if actionable_packages:
+            state.detail = f"npm-пакетов к установке: {len(actionable_packages)}"
         elif changed_frontend:
             state.detail = "Есть изменения frontend-кода для сборки"
         else:
@@ -307,13 +343,30 @@ class UpdateManager:
         await self._emit(session, "stage", {"stage": state.to_dict()})
         return needed
 
-    async def _frontend_changed(self) -> bool:
-        if not (BASE_DIR / ".git").exists():
-            return False
-        result = await self._run_command_silent(self._git_command("diff", "--name-only", "HEAD..@{u}"), cwd=BASE_DIR, timeout_seconds=30)
-        if result.returncode != 0:
-            return False
-        return any(line.startswith("frontend/") or line == "package-lock.json" for line in result.stdout.splitlines())
+    def _frontend_changed(self, changed_files: list[str]) -> bool:
+        return any(line.startswith("frontend/") or line in {"package-lock.json", "frontend/package-lock.json"} for line in changed_files)
+
+    def _actionable_npm_packages(self, packages: Any) -> dict[str, Any]:
+        if not isinstance(packages, dict):
+            return {}
+        return {
+            name: info
+            for name, info in packages.items()
+            if isinstance(info, dict) and info.get("wanted") and info.get("current") and info.get("wanted") != info.get("current")
+        }
+
+    def _extract_pip_report(self, stdout: str) -> dict[str, Any]:
+        decoder = json.JSONDecoder()
+        text = stdout.lstrip()
+        while text:
+            try:
+                value, _ = decoder.raw_decode(text)
+            except json.JSONDecodeError:
+                lines = text.splitlines()
+                text = "\n".join(lines[1:]).lstrip() if len(lines) > 1 else ""
+                continue
+            return value if isinstance(value, dict) else {}
+        return {}
 
     def _code_commands(self) -> list[tuple[list[str], Path, int]]:
         commands: list[tuple[list[str], Path, int]] = []
@@ -327,7 +380,7 @@ class UpdateManager:
         return commands
 
     def _python_commands(self) -> list[tuple[list[str], Path, int]]:
-        python_bin = INSTALL_DIR / ".venv" / "bin" / "python" if os.name != "nt" else Path(sys.executable)
+        python_bin = self._python_bin()
         if os.name != "nt":
             create_venv = f"test -x '{python_bin}' || python3 -m venv '{INSTALL_DIR / '.venv'}'"
             return [
@@ -379,6 +432,9 @@ class UpdateManager:
             return ["sudo", "-n", "/bin/bash", "-lc", script]
         return ["/bin/bash", "-lc", script]
 
+    def _python_bin(self) -> Path:
+        return INSTALL_DIR / ".venv" / "bin" / "python" if os.name != "nt" else Path(sys.executable)
+
     def _executable(self, alias: str) -> str | None:
         return shutil.which(alias)
 
@@ -390,12 +446,14 @@ class UpdateManager:
         cwd: Path,
         timeout_seconds: int,
         success_codes: set[int] | None = None,
+        emit_logs: bool = True,
     ) -> CommandResult:
         success_codes = success_codes or {0}
         started = time.monotonic()
         stdout_parts: list[str] = []
         stderr_parts: list[str] = []
-        await self._emit(session, "log", {"stream": "system", "line": f"$ {' '.join(command)}"})
+        if emit_logs:
+            await self._emit(session, "log", {"stream": "system", "line": f"$ {' '.join(command)}"})
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -415,7 +473,8 @@ class UpdateManager:
                     return
                 text = line.decode("utf-8", errors="replace")
                 target.append(text)
-                await self._emit(session, "log", {"stream": name, "line": text.rstrip("\n")})
+                if emit_logs:
+                    await self._emit(session, "log", {"stream": name, "line": text.rstrip("\n")})
 
         try:
             await asyncio.wait_for(asyncio.gather(read_stream(process.stdout, "stdout", stdout_parts), read_stream(process.stderr, "stderr", stderr_parts), process.wait()), timeout=timeout_seconds)
