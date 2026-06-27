@@ -45,6 +45,13 @@ def make_test_settings():
     cfg.host_ops.vpn_profiles_directory = workspace / "profiles" / "vpn"
     cfg.host_ops.ssl_profiles_directory = workspace / "profiles" / "ssl"
     cfg.host_ops.nginx_config_paths = [workspace / "managed" / "nginx"]
+    
+    # Disable rate limits for integration testing
+    cfg.rate_limits.rest_write_limit = 1000
+    cfg.rate_limits.rest_read_limit = 1000
+    cfg.rate_limits.login_limit = 1000
+    cfg.rate_limits.oauth_token_limit = 1000
+    
     return cfg, workspace
 
 

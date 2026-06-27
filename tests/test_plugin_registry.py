@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from server.models import MCPToolManifest, PluginDefinition, PluginManifest, RuntimeAvailability
+from server.models import PluginDefinition, PluginManifest, RuntimeAvailability
 
 
 @pytest.mark.asyncio

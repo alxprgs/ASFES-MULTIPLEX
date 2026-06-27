@@ -20,6 +20,7 @@ ALERT_RULES = "alert_rules"
 ALERT_EVENTS = "alert_events"
 PASSKEYS = "passkeys"
 PASSKEY_CHALLENGES = "passkey_challenges"
+API_KEYS = "api_keys"
 
 
 class DatabaseManager:
@@ -149,5 +150,15 @@ class DatabaseManager:
             [
                 IndexModel([("created_at", ASCENDING)]),
                 IndexModel([("rule_id", ASCENDING), ("created_at", ASCENDING)]),
+            ]
+        )
+
+        api_keys = self.collection(API_KEYS)
+        await api_keys.create_indexes(
+            [
+                IndexModel([("token_hash", ASCENDING)], unique=True),
+                IndexModel([("user_id", ASCENDING)]),
+                IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0, partialFilterExpression={"expires_at": {"$type": "date"}}),
+                IndexModel([("is_active", ASCENDING)]),
             ]
         )

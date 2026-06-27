@@ -18,10 +18,12 @@ import {
   UserCircle,
   Users,
   Wrench,
-  X
+  X,
+  Copy,
+  Check
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, AuditEvent, Bootstrap, Health, MCPConnectedService, Passkey, Permission, PluginInfo, RuntimeSettings, SystemUpdateResult, SystemUpdateSession, SystemUpdateStage, ToolInfo, TwoFactorSetup, User, api, setCsrfCookieName } from "./api";
+import { ApiError, AuditEvent, Bootstrap, Health, MCPConnectedService, Passkey, Permission, PluginInfo, RuntimeSettings, SystemUpdateResult, SystemUpdateSession, SystemUpdateStage, ToolInfo, TwoFactorSetup, User, ApiKey, ApiKeyCreateResult, api, setCsrfCookieName } from "./api";
 
 type View = "overview" | "users" | "plugins" | "tools" | "services" | "audit" | "profile";
 type ToastTone = "success" | "error" | "info" | "warning";
@@ -961,6 +963,215 @@ function AuditView({ events, plugins, tools }: { events: AuditEvent[]; plugins: 
   );
 }
 
+function ApiKeysPanel() {
+  const [keys, setKeys] = useState<ApiKey[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  // Form state
+  const [newKeyName, setNewKeyName] = useState("");
+  const [expiryOption, setExpiryOption] = useState<number | null>(30);
+  const [createdToken, setCreatedToken] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // Edit state (key_id -> name)
+  const [keyNames, setKeyNames] = useState<Record<string, string>>({});
+
+  const refreshKeys = useCallback(async () => {
+    try {
+      const items = await api.apiKeys();
+      setKeys(items);
+      setKeyNames(Object.fromEntries(items.map((item) => [item.key_id, item.name])));
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось загрузить API-ключи");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshKeys();
+  }, [refreshKeys]);
+
+  async function handleCreate(event: FormEvent) {
+    event.preventDefault();
+    if (!newKeyName.trim()) return;
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    setCreatedToken(null);
+    setCopied(false);
+    try {
+      const result = await api.createApiKey(newKeyName.trim(), expiryOption);
+      setCreatedToken(result.token);
+      setNewKeyName("");
+      setMessage("API-ключ успешно создан");
+      await refreshKeys();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось создать API-ключ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRevoke(keyId: string) {
+    if (!confirm("Вы уверены, что хотите отозвать этот API-ключ? Доступ по нему будет мгновенно заблокирован.")) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      await api.revokeApiKey(keyId);
+      setMessage("API-ключ отозван");
+      await refreshKeys();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось отозвать API-ключ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRename(keyId: string, name: string) {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      await api.updateApiKey(keyId, name.trim());
+      setMessage("Название API-ключа обновлено");
+      await refreshKeys();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось обновить API-ключ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function copyToClipboard() {
+    if (!createdToken) return;
+    navigator.clipboard.writeText(createdToken);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div className="panel narrow">
+      <div className="panel-head">
+        <div>
+          <h2>API-ключи доступа</h2>
+          <p>Персональные стационарные токены для внешних MCP-клиентов и скриптов</p>
+        </div>
+        <Badge tone={keys.length ? "ok" : "muted"}>{keys.length} / 20</Badge>
+      </div>
+
+      <ErrorBanner message={error} />
+      {message ? <div className="notice notice-ok">{message}</div> : null}
+
+      {createdToken && (
+        <div className="notice notice-warn" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          <strong>Сохраните этот API-ключ!</strong>
+          <p>Он показывается только один раз и не может быть восстановлен.</p>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
+            <code style={{ flex: 1, wordBreak: "break-all", padding: "6px", background: "rgba(0,0,0,0.2)", borderRadius: "4px", fontFamily: "monospace" }}>
+              {createdToken}
+            </code>
+            <button className="icon-button" onClick={copyToClipboard} title="Копировать в буфер">
+              {copied ? <Check size={16} style={{ color: "var(--color-ok)" }} /> : <Copy size={16} />}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <form onSubmit={handleCreate} className="form-grid">
+        <label>
+          Название ключа
+          <input
+            value={newKeyName}
+            onChange={(event) => setNewKeyName(event.target.value)}
+            placeholder="Например, Antigravity MCP"
+            required
+            disabled={busy}
+          />
+        </label>
+        <label>
+          Срок действия
+          <select
+            value={expiryOption ?? ""}
+            onChange={(event) => setExpiryOption(event.target.value ? Number(event.target.value) : null)}
+            disabled={busy}
+            style={{ width: "100%", padding: "8px", borderRadius: "4px", background: "var(--color-bg-input)", border: "1px solid var(--color-border-input)", color: "var(--color-text)" }}
+          >
+            <option value="30">30 дней</option>
+            <option value="90">90 дней</option>
+            <option value="365">365 дней</option>
+            <option value="">Без ограничения</option>
+          </select>
+        </label>
+        <button className="secondary-button" type="submit" disabled={busy || !newKeyName.trim() || keys.length >= 20}>
+          {busy ? <Loader2 size={16} className="spin" /> : <KeyRound size={16} />}
+          Создать API-ключ
+        </button>
+      </form>
+
+      {loading ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: "16px" }}>
+          <Loader2 size={24} className="spin" />
+        </div>
+      ) : keys.length > 0 ? (
+        <div className="passkey-list" style={{ marginTop: "16px" }}>
+          {keys.map((item) => {
+            const isNameUnchanged = (keyNames[item.key_id] ?? item.name).trim() === item.name;
+            return (
+              <div className="passkey-row" key={item.key_id}>
+                <div style={{ flex: 1 }}>
+                  <input
+                    value={keyNames[item.key_id] ?? item.name}
+                    onChange={(event) => setKeyNames((current) => ({ ...current, [item.key_id]: event.target.value }))}
+                    style={{ width: "100%", padding: "4px 0", border: "none", background: "transparent", color: "var(--color-text)", fontWeight: "bold" }}
+                    aria-label="Название API-ключа"
+                  />
+                  <small style={{ display: "block", color: "var(--color-text-muted)", marginTop: "4px" }}>
+                    Префикс: <code>{item.token_prefix}...</code> · Создан: {formatDate(item.created_at)}
+                  </small>
+                  <small style={{ display: "block", color: "var(--color-text-muted)", marginTop: "2px" }}>
+                    Истекает: {item.expires_at ? formatDate(item.expires_at) : "никогда"}
+                    {item.last_used_at ? ` · Использован: ${formatDate(item.last_used_at)}` : " · Не использовался"}
+                  </small>
+                </div>
+                <div className="passkey-actions">
+                  <button
+                    className="icon-button"
+                    title="Сохранить название"
+                    disabled={busy || isNameUnchanged}
+                    onClick={() => handleRename(item.key_id, keyNames[item.key_id] ?? item.name)}
+                  >
+                    <Save size={16} />
+                  </button>
+                  <button
+                    className="icon-button danger-icon"
+                    title="Отозвать API-ключ"
+                    disabled={busy}
+                    onClick={() => handleRevoke(item.key_id)}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p style={{ textAlign: "center", color: "var(--color-text-muted)", marginTop: "16px" }}>
+          У вас ещё нет созданных API-ключей.
+        </p>
+      )}
+    </div>
+  );
+}
+
+
 function ProfileView({
   user,
   onSave,
@@ -1249,6 +1460,7 @@ function ProfileView({
           ))}
         </div>
       </div>
+      <ApiKeysPanel />
     </section>
   );
 }

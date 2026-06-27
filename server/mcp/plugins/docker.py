@@ -5,7 +5,7 @@ import json
 import shutil
 from typing import Any
 
-from server.mcp.plugins._common import command_result_payload, int_argument, parse_json_lines, require_argument, static_availability
+from server.mcp.plugins._common import int_argument, parse_json_lines, require_argument, static_availability
 from server.models import MCPTool, MCPToolManifest, PermissionDefinition, PluginDefinition, PluginManifest, ToolExecutionContext
 
 

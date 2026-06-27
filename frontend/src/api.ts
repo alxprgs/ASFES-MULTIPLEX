@@ -167,6 +167,18 @@ export type PasskeyOptions = {
   options: Record<string, unknown>;
 };
 
+export type ApiKey = {
+  key_id: string;
+  name: string;
+  token_prefix: string;
+  created_at: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+  is_active: boolean;
+};
+
+export type ApiKeyCreateResult = ApiKey & { token: string };
+
 export class ApiError extends Error {
   status: number;
 
@@ -331,6 +343,21 @@ export const api = {
   deletePasskey: (passkeyId: string) =>
     apiFetch<void>(`/auth/passkeys/${encodeURIComponent(passkeyId)}`, {
       method: "DELETE"
+    }),
+  apiKeys: () => apiFetch<ApiKey[]>("/auth/api-keys"),
+  createApiKey: (name: string, expiresInDays: number | null) =>
+    apiFetch<ApiKeyCreateResult>("/auth/api-keys", {
+      method: "POST",
+      body: JSON.stringify({ name, expires_in_days: expiresInDays })
+    }),
+  revokeApiKey: (keyId: string) =>
+    apiFetch<void>(`/auth/api-keys/${encodeURIComponent(keyId)}`, {
+      method: "DELETE"
+    }),
+  updateApiKey: (keyId: string, name?: string, expiresInDays?: number | null) =>
+    apiFetch<ApiKey>(`/auth/api-keys/${encodeURIComponent(keyId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name, expires_in_days: expiresInDays })
     }),
   users: () => apiFetch<User[]>("/users"),
   permissions: () => apiFetch<Permission[]>("/permissions"),

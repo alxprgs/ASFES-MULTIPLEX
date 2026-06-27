@@ -91,6 +91,29 @@ class MultiplexTokenVerifier(TokenVerifier):
         except Exception:
             return None
 
+        # Static API key authentication
+        if token.startswith("asfes_"):
+            principal = await services.api_key_service.verify_token(token)
+            if not principal:
+                return None
+            return AccessToken(
+                token=token,
+                client_id="static-api-key",
+                scopes=["mcp"],
+                expires_at=None,
+                resource=f"{self._settings.public_base_url}{self._settings.mcp_path}",
+                resource_owner=principal.user_id,
+                claims={
+                    "sub": principal.user_id,
+                    "resolved_username": principal.username,
+                    "resolved_is_root": principal.is_root,
+                    "resolved_permissions": principal.permissions,
+                    "resolved_email": str(principal.email) if principal.email else None,
+                    "resolved_tg_id": principal.tg_id,
+                    "resolved_vk_id": principal.vk_id,
+                },
+            )
+
         try:
             payload = services.oauth.verify_access_token(token)
         except Exception:

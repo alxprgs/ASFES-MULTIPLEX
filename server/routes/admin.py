@@ -8,7 +8,6 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from server.core.config import BASE_DIR
 from server.core.database import TOOL_POLICIES
 from server.core.deps import enforce_api_rate_limit, get_current_api_user, get_optional_api_user, get_services, require_permission
 from server.models import AuditEventListResponse, AuditEventResponse, BootstrapResponse, MCPConnectedServiceResponse, PermissionDefinition, PermissionMutationRequest, PluginInfoResponse, PluginReloadRequest, ProfileUpdateRequest, RuntimeSettingsResponse, SystemUpdateOptions, SystemUpdateResponse, SystemUpdateSessionResponse, SystemUpdateSessionStartResponse, ToggleRequest, ToolInfoResponse, UserResponse, UserToolPolicyResponse, UserPrincipal

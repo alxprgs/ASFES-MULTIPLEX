@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ssl as ssl_module
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from server.mcp.plugins._common import require_argument

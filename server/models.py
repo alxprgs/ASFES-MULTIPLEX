@@ -114,6 +114,30 @@ class PasskeyOptionsResponse(BaseModel):
     options: dict[str, Any]
 
 
+class ApiKeyCreateRequest(BaseModel):
+    name: str
+    expires_in_days: int | None = None
+
+
+class ApiKeyUpdateRequest(BaseModel):
+    name: str | None = None
+    expires_in_days: int | None = None
+
+
+class ApiKeyResponse(BaseModel):
+    key_id: str
+    name: str
+    token_prefix: str
+    created_at: str
+    expires_at: str | None = None
+    last_used_at: str | None = None
+    is_active: bool
+
+
+class ApiKeyCreateResponse(ApiKeyResponse):
+    token: str
+
+
 class AuthTokensResponse(BaseModel):
     two_factor_required: bool = False
     access_token: str

@@ -26,6 +26,16 @@ async def get_optional_api_user(
 ) -> UserPrincipal | None:
     token = credentials.credentials if credentials is not None else request.cookies.get(services.settings.access_cookie_name)
     using_cookie = credentials is None and bool(token)
+
+    # Static API key authentication
+    if token and token.startswith("asfes_"):
+        request.state.auth_via_api_key = True
+        request.state.auth_via_cookie = False
+        user = await services.api_key_service.verify_token(token)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or revoked API key")
+        return user
+
     request.state.auth_via_cookie = using_cookie
     if token is None:
         return None
@@ -56,6 +66,14 @@ async def get_current_mcp_user(
 ) -> UserPrincipal:
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="OAuth bearer token required")
+
+    # Static API key support for MCP
+    if credentials.credentials.startswith("asfes_"):
+        user = await services.api_key_service.verify_token(credentials.credentials)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or revoked API key")
+        return user
+
     try:
         payload = services.oauth.verify_access_token(credentials.credentials)
     except Exception as exc:

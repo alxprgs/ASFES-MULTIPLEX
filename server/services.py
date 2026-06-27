@@ -20,7 +20,7 @@ from webauthn.helpers.structs import AuthenticatorSelectionCriteria, PublicKeyCr
 
 from server.alerting import AlertingService
 from server.core.config import Settings
-from server.core.database import AUDIT_EVENTS, OAUTH_CLIENTS, OAUTH_CODES, PASSKEYS, PASSKEY_CHALLENGES, PLUGINS, REFRESH_TOKENS, SETTINGS, TOOL_POLICIES, USERS, DatabaseManager
+from server.core.database import API_KEYS, AUDIT_EVENTS, OAUTH_CLIENTS, OAUTH_CODES, PASSKEYS, PASSKEY_CHALLENGES, PLUGINS, REFRESH_TOKENS, SETTINGS, TOOL_POLICIES, USERS, DatabaseManager
 from server.core.logging import IntegrityLogManager, Mailer, get_logger
 from server.core.qr import qr_svg
 from server.core.ratelimit import RateLimitPolicy, RateLimiter
@@ -1643,6 +1643,100 @@ class PluginRegistry:
         return result if isinstance(result, dict) else {"result": result}
 
 
+class ApiKeyService:
+    def __init__(self, db: DatabaseManager, users: UserService, audit: AuditService) -> None:
+        self.db = db
+        self.users = users
+        self.audit = audit
+
+    def _generate_token(self) -> tuple[str, str, str]:
+        """Returns (token, token_hash, token_prefix)"""
+        raw = random_token(32)
+        token = f"asfes_{raw}"
+        token_hash = sha256_text(token)
+        token_prefix = token[:12]
+        return token, token_hash, token_prefix
+
+    async def create_key(self, user: UserPrincipal, *, name: str, expires_in_days: int | None, request_meta: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        # Enforce max 20 keys
+        count = await self.db.collection(API_KEYS).count_documents({"user_id": user.user_id, "is_active": True})
+        if count >= 20:
+            raise ValueError("Maximum number of API keys (20) reached")
+        token, token_hash, token_prefix = self._generate_token()
+        created_at = now_utc()
+        expires_at = created_at + timedelta(days=expires_in_days) if expires_in_days else None
+        document = {
+            "_id": f"apikey_{uuid4().hex}",
+            "user_id": user.user_id,
+            "name": name[:80].strip() or "API Key",
+            "token_hash": token_hash,
+            "token_prefix": token_prefix,
+            "created_at": created_at,
+            "expires_at": expires_at,
+            "last_used_at": None,
+            "is_active": True,
+        }
+        await self.db.collection(API_KEYS).insert_one(document)
+        await self.audit.record("account.api_key.create", actor=user, request_meta=request_meta, target={"user_id": user.user_id, "key_id": document["_id"]}, metadata={"name": document["name"]})
+        return token, document
+
+    async def list_keys(self, user: UserPrincipal) -> list[dict[str, Any]]:
+        cursor = self.db.collection(API_KEYS).find({"user_id": user.user_id}).sort("created_at", -1)
+        return [self.to_response(item) async for item in cursor]
+
+    async def revoke_key(self, user: UserPrincipal, key_id: str, *, request_meta: dict[str, Any]) -> None:
+        result = await self.db.collection(API_KEYS).delete_one({"_id": key_id, "user_id": user.user_id})
+        if result.deleted_count == 0:
+            raise LookupError("API key not found")
+        await self.audit.record("account.api_key.revoke", actor=user, request_meta=request_meta, target={"user_id": user.user_id, "key_id": key_id})
+
+    async def update_key(self, user: UserPrincipal, key_id: str, *, name: str | None, expires_in_days: int | None, request_meta: dict[str, Any]) -> dict[str, Any]:
+        updates: dict[str, Any] = {"updated_at": now_utc()}
+        if name is not None:
+            updates["name"] = name[:80].strip() or "API Key"
+        if expires_in_days is not None:
+            if expires_in_days == -1:
+                updates["expires_at"] = None
+            else:
+                updates["expires_at"] = now_utc() + timedelta(days=expires_in_days)
+        result = await self.db.collection(API_KEYS).update_one({"_id": key_id, "user_id": user.user_id}, {"$set": updates})
+        if result.matched_count == 0:
+            raise LookupError("API key not found")
+        updated = await self.db.collection(API_KEYS).find_one({"_id": key_id})
+        assert updated is not None
+        await self.audit.record("account.api_key.update", actor=user, request_meta=request_meta, target={"user_id": user.user_id, "key_id": key_id})
+        return self.to_response(updated)
+
+    async def verify_token(self, token: str) -> UserPrincipal | None:
+        if not token.startswith("asfes_"):
+            return None
+        token_hash = sha256_text(token)
+        document = await self.db.collection(API_KEYS).find_one({"token_hash": token_hash, "is_active": True})
+        if not document:
+            return None
+        if is_expired(document.get("expires_at")):
+            return None
+        # Update last_used_at (fire-and-forget)
+        asyncio.create_task(
+            self.db.collection(API_KEYS).update_one({"_id": document["_id"]}, {"$set": {"last_used_at": now_utc()}})
+        )
+        user_doc = await self.users.get_user_by_id(document["user_id"])
+        if not user_doc:
+            return None
+        return self.users.to_principal(user_doc)
+
+    def to_response(self, document: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "key_id": document["_id"],
+            "name": document.get("name", "API Key"),
+            "token_prefix": document.get("token_prefix", ""),
+            "created_at": serialize_datetime(document.get("created_at")),
+            "expires_at": serialize_datetime(document.get("expires_at")),
+            "last_used_at": serialize_datetime(document.get("last_used_at")),
+            "is_active": bool(document.get("is_active", True)),
+        }
+
+
 @dataclass(slots=True)
 class ApplicationServices:
     settings: Settings
@@ -1658,6 +1752,7 @@ class ApplicationServices:
     users: UserService
     auth: AuthService
     oauth: OAuthService
+    api_key_service: ApiKeyService
     plugins: PluginRegistry
     updates: UpdateManager
     verifier_task: asyncio.Task[Any] | None = None
@@ -1700,6 +1795,7 @@ async def build_application_services(settings: Settings, logger_manager: Integri
     users = UserService(db, settings, permissions, audit)
     auth = AuthService(db, settings, users)
     oauth = OAuthService(db, settings, users, audit)
+    api_key_service = ApiKeyService(db, users, audit)
     alerts = AlertingService(db, host_ops, mailer, settings.host_ops.alert_poll_interval_seconds)
     plugins = PluginRegistry(db, settings, permissions, audit, settings_service, rate_limiter)
     updates = UpdateManager(settings)
@@ -1718,6 +1814,7 @@ async def build_application_services(settings: Settings, logger_manager: Integri
         users=users,
         auth=auth,
         oauth=oauth,
+        api_key_service=api_key_service,
         plugins=plugins,
         updates=updates,
     )

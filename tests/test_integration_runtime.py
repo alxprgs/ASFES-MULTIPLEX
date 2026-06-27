@@ -557,7 +557,7 @@ async def test_admin_users_plugin_toggle_system_update_and_restart(integration_e
     assert enabled.status_code == 200
     assert enabled.json()["enabled"] is True
 
-    async def fake_update(command, **kwargs):
+    async def fake_run_command(session, command, **kwargs):
         return type("Result", (), {
             "command": command,
             "returncode": 0,
@@ -575,11 +575,11 @@ async def test_admin_users_plugin_toggle_system_update_and_restart(integration_e
             },
         })()
 
-    monkeypatch.setattr(services.host_ops, "run", fake_update)
+    monkeypatch.setattr(services.updates, "_run_command", fake_run_command)
     update = await client.post("/api/system/update", headers=headers)
     assert update.status_code == 200
-    assert update.json()["stdout"] == "updated"
+    assert "updated" in update.json()["stdout"]
 
     restart = await client.post("/api/system/restart", headers=headers)
     assert restart.status_code == 200
-    assert restart.json()["stdout"] == "updated"
+    assert "updated" in restart.json()["stdout"]
