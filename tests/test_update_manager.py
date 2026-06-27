@@ -12,12 +12,12 @@ async def test_update_check_session_emits_status_and_stage_events(monkeypatch) -
 
     async def fake_check_code(session):
         await manager._emit(session, "stage", {"stage": session.stages["code"].to_dict()})
-        return True
+        return {"needed": True, "changed_files": []}
 
     async def fake_check_python(session):
         return False
 
-    async def fake_check_frontend(session):
+    async def fake_check_frontend(session, changed_files=None):
         return True
 
     monkeypatch.setattr(manager, "_check_code", fake_check_code)

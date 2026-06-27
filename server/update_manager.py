@@ -181,7 +181,7 @@ class UpdateManager:
             session.stages["restart"].status = "success"
             session.stages["restart"].needed = False
             session.stages["restart"].detail = "Перезапуск будет предложен только при запуске обновления"
-            session.requires_restart = False
+            session.requires_restart = code_needed or python_needed
             await self._set_status(session, "success")
         except Exception as exc:
             session.error = str(exc)

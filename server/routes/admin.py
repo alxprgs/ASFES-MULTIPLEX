@@ -450,7 +450,10 @@ async def set_tool_global_state(
     current_user: UserPrincipal = Depends(require_permission("mcp.tool.toggle")),
 ) -> ToolInfoResponse:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
-    await services.plugins.set_global_tool_enabled(tool_key, payload.enabled, actor=current_user, request_meta=request_meta_from_request(request))
+    try:
+        await services.plugins.set_global_tool_enabled(tool_key, payload.enabled, actor=current_user, request_meta=request_meta_from_request(request))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     tool = next((item for item in await services.plugins.list_tools() if item["key"] == tool_key), None)
     if tool is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tool not found")
@@ -487,6 +490,9 @@ async def set_user_tool_state(
     target_user_doc = await services.users.get_user_by_id(user_id)
     if not target_user_doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found")
-    await services.plugins.set_user_tool_enabled(user_id, tool_key, payload.enabled, actor=current_user, request_meta=request_meta_from_request(request))
+    try:
+        await services.plugins.set_user_tool_enabled(user_id, tool_key, payload.enabled, actor=current_user, request_meta=request_meta_from_request(request))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     effective = await services.plugins.is_tool_enabled_for_user(services.users.to_principal(target_user_doc), tool_key)
     return UserToolPolicyResponse(key=tool_key, user_enabled=payload.enabled, effective_enabled=effective)
