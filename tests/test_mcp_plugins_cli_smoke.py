@@ -12,21 +12,13 @@ from server.models import ToolExecutionContext
 from server.mcp.plugins.docker import (
     list_containers,
     restart_container,
-    start_container,
-    stop_container,
-    container_logs,
     inspect_container,
-    container_stats,
     _redact_env_value,
     _looks_sensitive,
 )
 from server.mcp.plugins.docker_compose import (
     compose_ps,
-    compose_config,
-    compose_logs,
     compose_up,
-    compose_down,
-    compose_restart,
 )
 
 

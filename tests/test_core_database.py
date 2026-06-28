@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from server.core.config import Settings
-from server.core.database import DatabaseManager, USERS
+from server.core.database import DatabaseManager
 
 
 def test_database_manager_initialization() -> None:

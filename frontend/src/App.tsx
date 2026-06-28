@@ -20,12 +20,17 @@ import {
   Wrench,
   X,
   Copy,
-  Check
+  Check,
+  Globe,
+  Plus,
+  Download,
+  Upload,
+  Play
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, AuditEvent, Bootstrap, Health, MCPConnectedService, Passkey, Permission, PluginInfo, RuntimeSettings, SystemUpdateResult, SystemUpdateSession, SystemUpdateStage, ToolInfo, TwoFactorSetup, User, ApiKey, ApiKeyCreateResult, api, setCsrfCookieName } from "./api";
+import { ApiError, AuditEvent, Bootstrap, Health, MCPConnectedService, Passkey, Permission, PluginInfo, RuntimeSettings, SystemUpdateResult, SystemUpdateSession, SystemUpdateStage, ToolInfo, TwoFactorSetup, User, ApiKey, ApiKeyCreateResult, api, setCsrfCookieName, Proxy, ProxyProtocol, ProxyTgExport } from "./api";
 
-type View = "overview" | "users" | "plugins" | "tools" | "services" | "audit" | "profile";
+type View = "overview" | "users" | "plugins" | "tools" | "services" | "audit" | "profile" | "proxy";
 type ToastTone = "success" | "error" | "info" | "warning";
 
 type Toast = {
@@ -66,7 +71,8 @@ const navItems: Array<{ view: View; label: string; icon: ReactNode }> = [
   { view: "tools", label: "Инструменты", icon: <Wrench size={18} /> },
   { view: "services", label: "Подключения", icon: <KeyRound size={18} /> },
   { view: "audit", label: "Аудит", icon: <ScrollText size={18} /> },
-  { view: "profile", label: "Профиль", icon: <UserCircle size={18} /> }
+  { view: "profile", label: "Профиль", icon: <UserCircle size={18} /> },
+  { view: "proxy", label: "Proxy Tools", icon: <Globe size={18} /> }
 ];
 
 const runtimeLabels: Record<"registration_enabled" | "mcp_enabled" | "redis_runtime_enabled", string> = {
@@ -1465,6 +1471,570 @@ function ProfileView({
   );
 }
 
+export function ProxyToolsView({
+  pendingKeys,
+  pushToast,
+  runAction
+}: {
+  pendingKeys: ReadonlySet<string>;
+  pushToast: (tone: ToastTone, title: string, message?: string) => void;
+  runAction: (action: () => Promise<void>, options?: { pendingKey?: string; errorTitle?: string }) => Promise<void>;
+}) {
+  const [proxies, setProxies] = useState<Proxy[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [addTab, setAddTab] = useState<"manual" | "url">("manual");
+
+  // Manual Form States
+  const [protocol, setProtocol] = useState<ProxyProtocol>("socks5");
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState(1080);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [label, setLabel] = useState("");
+
+  // URL Form States
+  const [urlInput, setUrlInput] = useState("");
+  const [urlProtocol, setUrlProtocol] = useState<ProxyProtocol>("socks5");
+  const [urlLabel, setUrlLabel] = useState("");
+
+  // Bulk operations
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importXml, setImportXml] = useState("");
+
+  // TG Proxy export dialog
+  const [tgExportProxy, setTgExportProxy] = useState<Proxy | null>(null);
+  const [tgSecret, setTgSecret] = useState("");
+  const [tgLinks, setTgLinks] = useState<ProxyTgExport | null>(null);
+
+  const loadProxies = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await api.proxies();
+      setProxies(data);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadProxies();
+  }, [loadProxies]);
+
+  const isPollingRef = useRef(false);
+  const startPolling = useCallback(() => {
+    if (isPollingRef.current) return;
+    isPollingRef.current = true;
+    let attempts = 0;
+    const interval = window.setInterval(async () => {
+      attempts += 1;
+      try {
+        const data = await api.proxies();
+        setProxies(data);
+      } catch {
+        // Ignore errors during background checks polling
+      }
+      if (attempts >= 8) {
+        window.clearInterval(interval);
+        isPollingRef.current = false;
+      }
+    }, 3000);
+  }, []);
+
+  async function handleCheck(proxyId: string) {
+    await runAction(
+      async () => {
+        pushToast("info", "Проверка прокси запущена");
+        const result = await api.checkProxy(proxyId);
+        setProxies((current) =>
+          current.map((p) => (p.proxy_id === proxyId ? { ...p, last_check: result } : p))
+        );
+        if (result.ok) {
+          pushToast("success", "Прокси работает", `Средний отклик: ${result.avg_latency_ms} мс`);
+        } else {
+          pushToast("error", "Прокси не отвечает", "Все тестовые запросы завершились ошибкой");
+        }
+      },
+      { pendingKey: `proxy:check:${proxyId}`, errorTitle: "Ошибка проверки прокси" }
+    );
+  }
+
+  async function handleCheckAll() {
+    await runAction(
+      async () => {
+        await api.checkAllProxies();
+        pushToast("info", "Запущена массовая проверка в фоновом режиме");
+        startPolling();
+      },
+      { pendingKey: "proxy:check-all", errorTitle: "Не удалось запустить проверку" }
+    );
+  }
+
+  async function handleDelete(proxyId: string) {
+    await runAction(
+      async () => {
+        await api.deleteProxy(proxyId);
+        setProxies((current) => current.filter((p) => p.proxy_id !== proxyId));
+        setSelectedIds((current) => {
+          const next = new Set(current);
+          next.delete(proxyId);
+          return next;
+        });
+        pushToast("success", "Прокси успешно удален");
+      },
+      { pendingKey: `proxy:delete:${proxyId}`, errorTitle: "Не удалось удалить прокси" }
+    );
+  }
+
+  async function handleAddManual(e: FormEvent) {
+    e.preventDefault();
+    if (!host || !port) return;
+    await runAction(
+      async () => {
+        const created = await api.createProxy({
+          protocol,
+          host: host.trim(),
+          port,
+          username: username.trim() || undefined,
+          password: password || undefined,
+          label: label.trim() || undefined
+        });
+        setProxies((current) => [created, ...current]);
+        setHost("");
+        setUsername("");
+        setPassword("");
+        setLabel("");
+        pushToast("success", "Прокси добавлен вручную");
+      },
+      { pendingKey: "proxy:create", errorTitle: "Не удалось добавить прокси" }
+    );
+  }
+
+  async function handleAddUrl(e: FormEvent) {
+    e.preventDefault();
+    if (!urlInput) return;
+    await runAction(
+      async () => {
+        const created = await api.createProxyFromUrl(
+          urlInput.trim(),
+          urlProtocol,
+          urlLabel.trim() || undefined
+        );
+        setProxies((current) => [created, ...current]);
+        setUrlInput("");
+        setUrlLabel("");
+        pushToast("success", "Прокси успешно импортирован из ссылки");
+      },
+      { pendingKey: "proxy:create-url", errorTitle: "Не удалось импортировать прокси" }
+    );
+  }
+
+  async function handleImportSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!importXml.trim()) return;
+    await runAction(
+      async () => {
+        const result = await api.importProxifier(importXml);
+        await loadProxies();
+        setImportXml("");
+        setImportOpen(false);
+        pushToast(
+          "success",
+          "Импорт завершен",
+          `Импортировано: ${result.imported}, Пропущено (дубликаты): ${result.skipped}`
+        );
+      },
+      { pendingKey: "proxy:import", errorTitle: "Не удалось импортировать профиль" }
+    );
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      setImportXml(text);
+    };
+    reader.readAsText(file);
+  }
+
+  function handleSelectRow(proxyId: string, checked: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (checked) {
+        next.add(proxyId);
+      } else {
+        next.delete(proxyId);
+      }
+      return next;
+    });
+  }
+
+  function handleSelectAll(checked: boolean) {
+    if (checked) {
+      setSelectedIds(new Set(proxies.map((p) => p.proxy_id)));
+    } else {
+      setSelectedIds(new Set());
+    }
+  }
+
+  async function handleExportUrls() {
+    if (selectedIds.size === 0) return;
+    try {
+      const lines: string[] = [];
+      for (const id of Array.from(selectedIds)) {
+        const res = await api.exportProxyUrl(id);
+        lines.push(res.url);
+      }
+      await navigator.clipboard.writeText(lines.join("\n"));
+      pushToast("success", "Ссылки экспортированы в буфер обмена");
+    } catch (err) {
+      pushToast("error", "Ошибка при копировании", err instanceof Error ? err.message : String(err));
+    }
+    setExportDropdownOpen(false);
+  }
+
+  async function handleExportLines() {
+    if (selectedIds.size === 0) return;
+    try {
+      const blocks: string[] = [];
+      for (const id of Array.from(selectedIds)) {
+        const res = await api.exportProxyLines(id);
+        blocks.push(res.lines);
+      }
+      await navigator.clipboard.writeText(blocks.join("\n\n"));
+      pushToast("success", "Данные прокси экспортированы в буфер обмена");
+    } catch (err) {
+      pushToast("error", "Ошибка при копировании", err instanceof Error ? err.message : String(err));
+    }
+    setExportDropdownOpen(false);
+  }
+
+  async function handleExportProxifier() {
+    if (selectedIds.size === 0) return;
+    try {
+      const res = await api.exportProxifier(Array.from(selectedIds));
+      const blob = new Blob([res.xml_content], { type: "application/xml" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "proxies.ppx";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      pushToast("success", "Профиль Proxifier (.ppx) успешно сохранен");
+    } catch (err) {
+      pushToast("error", "Ошибка при сохранении", err instanceof Error ? err.message : String(err));
+    }
+    setExportDropdownOpen(false);
+  }
+
+  function handleOpenTgExport(proxy: Proxy) {
+    setTgExportProxy(proxy);
+    setTgSecret("");
+    setTgLinks(null);
+  }
+
+  async function handleTgExportSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!tgExportProxy) return;
+    try {
+      const res = await api.exportProxyTg(tgExportProxy.proxy_id, tgSecret || undefined);
+      setTgLinks(res);
+    } catch (err) {
+      pushToast("error", "Ошибка генерации TG Proxy", err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  if (loading && proxies.length === 0) {
+    return <div className="loading">Загрузка прокси-инструментов...</div>;
+  }
+
+  return (
+    <section className="profile-grid span-2" style={{ display: "grid", gap: "20px", gridTemplateColumns: "1fr 1fr", width: "100%" }}>
+      {/* ADD PROXY PANEL */}
+      <div className="panel" style={{ padding: "20px" }}>
+        <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", marginBottom: "16px" }}>
+          <div>
+            <h2>Добавить прокси</h2>
+            <p>Настройки подключения</p>
+          </div>
+          <div className="segmented" style={{ display: "flex", gap: "4px" }}>
+            <button className={addTab === "manual" ? "active" : ""} onClick={() => setAddTab("manual")}>Вручную</button>
+            <button className={addTab === "url" ? "active" : ""} onClick={() => setAddTab("url")}>По ссылке</button>
+          </div>
+        </div>
+
+        {addTab === "manual" ? (
+          <form className="form-grid" onSubmit={handleAddManual} style={{ display: "grid", gap: "10px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr", gap: "10px" }}>
+              <label>
+                Протокол
+                <select value={protocol} onChange={(e) => setProtocol(e.target.value as ProxyProtocol)} style={{ width: "100%", height: "38px", borderRadius: "6px", border: "1px solid #dfe6ea", padding: "0 8px" }}>
+                  <option value="socks5">SOCKS5</option>
+                  <option value="http">HTTP</option>
+                  <option value="https">HTTPS</option>
+                </select>
+              </label>
+              <label>
+                Адрес сервера (IP/Хост)
+                <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="например 192.168.1.1" required />
+              </label>
+              <label>
+                Порт
+                <input type="number" value={port} onChange={(e) => setPort(parseInt(e.target.value) || 1080)} min={1} max={65535} required />
+              </label>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <label>
+                Имя пользователя
+                <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="необязательно" />
+              </label>
+              <label>
+                Пароль
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="необязательно" />
+              </label>
+            </div>
+            <label>
+              Метка (Название)
+              <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="например, Рабочий прокси" />
+            </label>
+            <button type="submit" className="primary-button" style={{ marginTop: "10px" }}>
+              <Plus size={16} /> Добавить
+            </button>
+          </form>
+        ) : (
+          <form className="form-grid" onSubmit={handleAddUrl} style={{ display: "grid", gap: "10px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 3fr", gap: "10px" }}>
+              <label>
+                Протокол
+                <select value={urlProtocol} onChange={(e) => setUrlProtocol(e.target.value as ProxyProtocol)} style={{ width: "100%", height: "38px", borderRadius: "6px", border: "1px solid #dfe6ea", padding: "0 8px" }}>
+                  <option value="socks5">SOCKS5</option>
+                  <option value="http">HTTP</option>
+                  <option value="https">HTTPS</option>
+                </select>
+              </label>
+              <label>
+                Строка подключения
+                <input value={urlInput} onChange={(e) => setUrlInput(e.target.value)} placeholder="user:password@host:port" required />
+              </label>
+            </div>
+            <label>
+              Метка (Название)
+              <input value={urlLabel} onChange={(e) => setUrlLabel(e.target.value)} placeholder="например, Мой импорт" />
+            </label>
+            <button type="submit" className="primary-button" style={{ marginTop: "10px" }}>
+              <Plus size={16} /> Импортировать
+            </button>
+          </form>
+        )}
+      </div>
+
+      {/* QUICK ACTIONS & STATS PANEL */}
+      <div className="panel" style={{ padding: "20px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+        <div>
+          <h2>Управление прокси</h2>
+          <p>Быстрый импорт / проверка работоспособности</p>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", margin: "20px 0" }}>
+          <div className="metric">
+            <span>Всего прокси</span>
+            <strong>{proxies.length} <small style={{ display: "inline", color: "#888" }}>/ 500</small></strong>
+          </div>
+          <div className="metric">
+            <span>Активных (OK)</span>
+            <strong>{proxies.filter(p => p.last_check?.ok).length}</strong>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button className="secondary-button" style={{ flex: 1 }} onClick={() => setImportOpen(true)}>
+            <Upload size={16} /> Импорт Proxifier (.ppx)
+          </button>
+          <button className="secondary-button" style={{ flex: 1 }} onClick={handleCheckAll} disabled={pendingKeys.has("proxy:check-all")}>
+            <RefreshCw size={16} className={pendingKeys.has("proxy:check-all") ? "spin" : ""} /> Проверить все
+          </button>
+        </div>
+      </div>
+
+      {/* LIST PANEL */}
+      <div className="panel span-2" style={{ padding: "20px", gridColumn: "span 2" }}>
+        <div className="panel-head" style={{ display: "flex", justifyContent: "space-between", marginBottom: "16px" }}>
+          <div>
+            <h2>Список ваших прокси-серверов</h2>
+            <p>Выбрано: {selectedIds.size} из {proxies.length}</p>
+          </div>
+          <div style={{ position: "relative" }}>
+            <button className="secondary-button" disabled={selectedIds.size === 0} onClick={() => setExportDropdownOpen(!exportDropdownOpen)}>
+              <Download size={16} /> Экспортировать ({selectedIds.size}) ▾
+            </button>
+            {exportDropdownOpen && (
+              <div style={{ position: "absolute", right: 0, top: "42px", background: "white", border: "1px solid #dfe6ea", borderRadius: "6px", boxShadow: "0 4px 12px rgba(0,0,0,0.1)", zIndex: 10, display: "flex", flexDirection: "column", minWidth: "200px" }}>
+                <button className="logout" style={{ color: "#333", background: "none", padding: "10px 14px", border: "none", width: "100%", justifyContent: "flex-start", margin: 0, borderRadius: 0 }} onClick={handleExportUrls}>Копировать URL-ссылки</button>
+                <button className="logout" style={{ color: "#333", background: "none", padding: "10px 14px", border: "none", width: "100%", justifyContent: "flex-start", margin: 0, borderRadius: 0 }} onClick={handleExportLines}>Скопировать построчно</button>
+                <button className="logout" style={{ color: "#333", background: "none", padding: "10px 14px", border: "none", width: "100%", justifyContent: "flex-start", margin: 0, borderRadius: 0 }} onClick={handleExportProxifier}>Скачать Proxifier profile</button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+            <thead>
+              <tr style={{ borderBottom: "2px solid #dfe6ea", textAlign: "left", color: "#697782" }}>
+                <th style={{ padding: "10px 8px", width: "40px" }}>
+                  <input type="checkbox" onChange={(e) => handleSelectAll(e.target.checked)} checked={selectedIds.size === proxies.length && proxies.length > 0} />
+                </th>
+                <th style={{ padding: "10px 8px" }}>Название</th>
+                <th style={{ padding: "10px 8px", width: "100px" }}>Протокол</th>
+                <th style={{ padding: "10px 8px" }}>Адрес сервера</th>
+                <th style={{ padding: "10px 8px" }}>Логин</th>
+                <th style={{ padding: "10px 8px", width: "120px" }}>Тест доступности</th>
+                <th style={{ padding: "10px 8px", width: "120px" }}>Задержка (avg)</th>
+                <th style={{ padding: "10px 8px", width: "150px" }}>Действия</th>
+              </tr>
+            </thead>
+            <tbody>
+              {proxies.map(p => (
+                <tr key={p.proxy_id} style={{ borderBottom: "1px solid #eef2f3" }}>
+                  <td style={{ padding: "10px 8px" }}>
+                    <input type="checkbox" checked={selectedIds.has(p.proxy_id)} onChange={(e) => handleSelectRow(p.proxy_id, e.target.checked)} />
+                  </td>
+                  <td style={{ padding: "10px 8px", fontWeight: "bold" }}>{p.label || "Без названия"}</td>
+                  <td style={{ padding: "10px 8px" }}>
+                    <Badge tone={p.protocol === "socks5" ? "ok" : "warn"}>{p.protocol.toUpperCase()}</Badge>
+                  </td>
+                  <td style={{ padding: "10px 8px" }}><code>{p.host}:{p.port}</code></td>
+                  <td style={{ padding: "10px 8px" }}>{p.username || <span style={{ color: "#aaa" }}>нет</span>}</td>
+                  <td style={{ padding: "10px 8px" }}>
+                    {p.last_check ? (
+                      <span style={{ color: p.last_check.ok ? "#166534" : "#be123c", fontWeight: "bold", display: "inline-flex", alignItems: "center", gap: "6px" }} title={
+                        p.last_check.details ? 
+                          Object.entries(p.last_check.details).map(([target, d]) => `${target}: ${d.ok ? `${d.latency_ms}ms` : "FAIL"}`).join(" | ") : ""
+                      }>
+                        <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: p.last_check.ok ? "#166534" : "#be123c" }}></span>
+                        {p.last_check.ok ? "Доступен" : "Недоступен"}
+                      </span>
+                    ) : (
+                      <span style={{ color: "#697782" }}>Не проверялся</span>
+                    )}
+                  </td>
+                  <td style={{ padding: "10px 8px" }}>
+                    {p.last_check?.avg_latency_ms ? (
+                      <strong>{p.last_check.avg_latency_ms} мс</strong>
+                    ) : (
+                      <span style={{ color: "#697782" }}>—</span>
+                    )}
+                  </td>
+                  <td style={{ padding: "10px 8px", display: "flex", gap: "6px", alignItems: "center" }}>
+                    <button className="secondary-button" style={{ height: "30px", padding: "0 10px" }} title="Проверить скорость" onClick={() => handleCheck(p.proxy_id)} disabled={pendingKeys.has(`proxy:check:${p.proxy_id}`)}>
+                      {pendingKeys.has(`proxy:check:${p.proxy_id}`) ? <Loader2 size={12} className="spin" /> : <Play size={12} />}
+                    </button>
+                    {p.protocol === "socks5" && (
+                      <button className="secondary-button" style={{ height: "30px", padding: "0 10px" }} title="TG Proxy Link" onClick={() => handleOpenTgExport(p)}>
+                        TG
+                      </button>
+                    )}
+                    <button className="secondary-button icon-button danger-icon" style={{ height: "30px", width: "30px" }} title="Удалить" onClick={() => handleDelete(p.proxy_id)} disabled={pendingKeys.has(`proxy:delete:${p.proxy_id}`)}>
+                      <Trash2 size={12} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {proxies.length === 0 && (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: "center", padding: "30px", color: "#697782" }}>Прокси-серверов пока нет. Добавьте вручную или импортируйте XML-профиль.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* IMPORT PROXIFIER DIALOG */}
+      {importOpen && (
+        <div className="confirm-backdrop" role="presentation" onMouseDown={() => setImportOpen(false)}>
+          <section className="confirm-dialog" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()} style={{ maxWidth: "500px", width: "100%", padding: "20px" }}>
+            <h2>Импорт из Proxifier Profile</h2>
+            <p style={{ color: "#697782", marginBottom: "14px" }}>Выберите XML-файл профиля Proxifier (.ppx) для парсинга и импорта списка прокси.</p>
+            <form onSubmit={handleImportSubmit} style={{ display: "grid", gap: "12px" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "20px", border: "2px dashed #dfe6ea", borderRadius: "8px", textAlign: "center", cursor: "pointer", background: "#f8fafb" }}>
+                <span style={{ color: "#0b5c76", fontWeight: "bold" }}>Выбрать .ppx / .xml файл</span>
+                <input type="file" accept=".ppx,.xml" onChange={handleFileChange} style={{ display: "none" }} />
+              </label>
+              <label>
+                Содержимое XML файла
+                <textarea value={importXml} onChange={(e) => setImportXml(e.target.value)} rows={6} placeholder="<?xml version=..." style={{ width: "100%", border: "1px solid #dfe6ea", borderRadius: "6px", padding: "8px", fontFamily: "monospace", fontSize: "12px" }} required />
+              </label>
+              <div className="confirm-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
+                <button type="button" className="secondary-button" onClick={() => setImportOpen(false)}>Отмена</button>
+                <button type="submit" className="primary-button" disabled={!importXml.trim()}>Импортировать</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {/* TG EXPORT DIALOG */}
+      {tgExportProxy && (
+        <div className="confirm-backdrop" role="presentation" onMouseDown={() => setTgExportProxy(null)}>
+          <section className="confirm-dialog" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()} style={{ maxWidth: "450px", width: "100%", padding: "20px" }}>
+            <h2>Экспорт в TG Proxy</h2>
+            <p style={{ color: "#697782", marginBottom: "12px" }}>Экспорт прокси SOCKS5 <code>{tgExportProxy.host}:{tgExportProxy.port}</code> для мессенджера Telegram.</p>
+            
+            <form onSubmit={handleTgExportSubmit} style={{ display: "grid", gap: "10px" }}>
+              <label>
+                MTProto Secret (необязательно)
+                <input value={tgSecret} onChange={(e) => setTgSecret(e.target.value)} placeholder="например d41d8cd98f00b204e9800998ecf8427e" />
+              </label>
+              <button type="submit" className="primary-button">Сгенерировать ссылки</button>
+            </form>
+
+            {tgLinks && (
+              <div style={{ marginTop: "16px", display: "grid", gap: "12px" }}>
+                <div>
+                  <small style={{ color: "#697782" }}>Deep Link (в приложении)</small>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <code style={{ flex: 1, wordBreak: "break-all", background: "#f8fafb", border: "1px solid #dfe6ea", padding: "6px", borderRadius: "4px" }}>
+                      {tgLinks.deep_link}
+                    </code>
+                    <button className="icon-button" onClick={() => {
+                      void navigator.clipboard.writeText(tgLinks.deep_link);
+                      pushToast("success", "Deep Link скопирован");
+                    }}>
+                      <Copy size={14} />
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <small style={{ color: "#697782" }}>Web URL (в браузере)</small>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <code style={{ flex: 1, wordBreak: "break-all", background: "#f8fafb", border: "1px solid #dfe6ea", padding: "6px", borderRadius: "4px" }}>
+                      {tgLinks.web_url}
+                    </code>
+                    <button className="icon-button" onClick={() => {
+                      void navigator.clipboard.writeText(tgLinks.web_url);
+                      pushToast("success", "Web URL скопирован");
+                    }}>
+                      <Copy size={14} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="confirm-actions" style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
+              <button type="button" className="secondary-button" onClick={() => setTgExportProxy(null)}>Закрыть</button>
+            </div>
+          </section>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function App() {
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -1934,6 +2504,13 @@ export function App() {
                 pushToast("success", "Профиль сохранён");
               }, { pendingKey: "profile:save", errorTitle: "Не удалось сохранить профиль" })
             }
+          />
+        ) : null}
+        {view === "proxy" ? (
+          <ProxyToolsView
+            pendingKeys={pendingActions}
+            pushToast={pushToast}
+            runAction={runAction}
           />
         ) : null}
       </main>

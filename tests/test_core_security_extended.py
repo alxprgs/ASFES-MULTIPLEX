@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import timedelta
-import time
 
 import pytest
 import jwt

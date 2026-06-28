@@ -21,6 +21,7 @@ ALERT_EVENTS = "alert_events"
 PASSKEYS = "passkeys"
 PASSKEY_CHALLENGES = "passkey_challenges"
 API_KEYS = "api_keys"
+PROXIES = "proxies"
 
 
 class DatabaseManager:
@@ -160,5 +161,22 @@ class DatabaseManager:
                 IndexModel([("user_id", ASCENDING)]),
                 IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0, partialFilterExpression={"expires_at": {"$type": "date"}}),
                 IndexModel([("is_active", ASCENDING)]),
+            ]
+        )
+
+        proxies = self.collection(PROXIES)
+        await proxies.create_indexes(
+            [
+                IndexModel([("user_id", ASCENDING)]),
+                IndexModel(
+                    [
+                        ("user_id", ASCENDING),
+                        ("host", ASCENDING),
+                        ("port", ASCENDING),
+                        ("protocol", ASCENDING),
+                    ],
+                    unique=True,
+                ),
+                IndexModel([("created_at", ASCENDING)]),
             ]
         )

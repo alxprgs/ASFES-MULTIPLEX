@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from unittest.mock import AsyncMock, patch
 
 from fastmcp import Client as FastMCPClient
 from fastmcp.client.transports import StreamableHttpTransport
-from mcp.shared.exceptions import McpError
 
 
 @pytest.mark.asyncio

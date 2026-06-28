@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import shutil
 from pathlib import Path
@@ -10,7 +9,7 @@ from uuid import uuid4
 import pytest
 
 from server.core.config import LoggingConfig, SMTPConfig
-from server.core.logging import IntegrityLogManager, Mailer, TamperDetection
+from server.core.logging import IntegrityLogManager, Mailer
 
 
 @pytest.mark.asyncio

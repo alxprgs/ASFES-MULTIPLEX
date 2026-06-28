@@ -24,3 +24,5 @@ typing_extensions>=4.15,<5
 urllib3>=2.5,<3
 uvicorn>=0.42,<1
 webauthn>=2.2,<3
+socksio>=1.0,<2
+cryptography>=45.0.1,<50

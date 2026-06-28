@@ -432,3 +432,66 @@ class PluginDefinition:
     startup: Callable[["ApplicationServices"], Awaitable[None]] | None = None
     shutdown: Callable[["ApplicationServices"], Awaitable[None]] | None = None
     availability: AvailabilityHandler | None = None
+
+
+class ProxyCreateRequest(BaseModel):
+    protocol: str = Field(pattern="^(http|https|socks5)$")
+    host: str
+    port: int = Field(ge=1, le=65535)
+    username: str | None = None
+    password: str | None = None
+    label: str | None = None
+
+
+class ProxyCreateFromUrlRequest(BaseModel):
+    url: str
+    protocol: str = Field(pattern="^(http|https|socks5)$")
+    label: str | None = None
+
+
+class ProxyImportProxifierRequest(BaseModel):
+    xml_content: str
+
+
+class ProxyExportProxifierRequest(BaseModel):
+    proxy_ids: list[str]
+
+
+class ProxyExportProxifierResponse(BaseModel):
+    xml_content: str
+
+
+class ProxyCheckDetail(BaseModel):
+    ok: bool
+    latency_ms: int | None = None
+    external_ip: str | None = None
+
+
+class ProxyCheckResult(BaseModel):
+    checked_at: str
+    ok: bool
+    avg_latency_ms: int | None = None
+    details: dict[str, ProxyCheckDetail]
+
+
+class ProxyResponse(BaseModel):
+    proxy_id: str
+    user_id: str
+    protocol: str
+    host: str
+    port: int
+    username: str | None = None
+    label: str | None = None
+    last_check: ProxyCheckResult | None = None
+    created_at: str
+
+
+class ProxyBulkImportResult(BaseModel):
+    imported: int
+    skipped: int
+    errors: list[str]
+
+
+class ProxyTgExportResponse(BaseModel):
+    deep_link: str
+    web_url: str

@@ -28,6 +28,7 @@ from server.core.security import TokenBundle, b64url_decode, b64url_encode, buil
 from server.host_ops import HostOpsService
 from server.models import MCPTool, PermissionDefinition, PluginDefinition, RuntimeAvailability, ToolExecutionContext, UserPrincipal
 from server.update_manager import UpdateManager
+from server.proxy_service import ProxyService
 
 
 LOGGER = get_logger("multiplex.services")
@@ -1755,6 +1756,7 @@ class ApplicationServices:
     api_key_service: ApiKeyService
     plugins: PluginRegistry
     updates: UpdateManager
+    proxy_service: ProxyService
     verifier_task: asyncio.Task[Any] | None = None
 
 
@@ -1799,6 +1801,7 @@ async def build_application_services(settings: Settings, logger_manager: Integri
     alerts = AlertingService(db, host_ops, mailer, settings.host_ops.alert_poll_interval_seconds)
     plugins = PluginRegistry(db, settings, permissions, audit, settings_service, rate_limiter)
     updates = UpdateManager(settings)
+    proxy_service = ProxyService(db, settings)
 
     services = ApplicationServices(
         settings=settings,
@@ -1817,6 +1820,7 @@ async def build_application_services(settings: Settings, logger_manager: Integri
         api_key_service=api_key_service,
         plugins=plugins,
         updates=updates,
+        proxy_service=proxy_service,
     )
     plugins.attach_services(services)
     await users.ensure_root_user()

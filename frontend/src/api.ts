@@ -179,6 +179,44 @@ export type ApiKey = {
 
 export type ApiKeyCreateResult = ApiKey & { token: string };
 
+export type ProxyProtocol = "http" | "https" | "socks5";
+
+export type ProxyCheckDetail = {
+  ok: boolean;
+  latency_ms: number | null;
+  external_ip: string | null;
+};
+
+export type ProxyCheckResult = {
+  checked_at: string;
+  ok: boolean;
+  avg_latency_ms: number | null;
+  details: Record<string, ProxyCheckDetail>;
+};
+
+export type Proxy = {
+  proxy_id: string;
+  user_id: string;
+  protocol: ProxyProtocol;
+  host: string;
+  port: number;
+  username: string | null;
+  label: string | null;
+  last_check: ProxyCheckResult | null;
+  created_at: string;
+};
+
+export type ProxyBulkImportResult = {
+  imported: number;
+  skipped: number;
+  errors: string[];
+};
+
+export type ProxyTgExport = {
+  deep_link: string;
+  web_url: string;
+};
+
 export class ApiError extends Error {
   status: number;
 
@@ -419,5 +457,29 @@ export const api = {
       body: JSON.stringify({ enabled })
     }),
   connectedServices: () => apiFetch<MCPConnectedService[]>("/mcp/connected-services"),
-  audit: () => apiFetch<{ items: AuditEvent[] }>("/audit/logs")
+  audit: () => apiFetch<{ items: AuditEvent[] }>("/audit/logs"),
+  
+  proxies: () => apiFetch<Proxy[]>("/proxy/proxies"),
+  createProxy: (data: { protocol: string; host: string; port: number; username?: string; password?: string; label?: string }) =>
+    apiFetch<Proxy>("/proxy/proxies", { method: "POST", body: JSON.stringify(data) }),
+  createProxyFromUrl: (url: string, protocol: string, label?: string) =>
+    apiFetch<Proxy>("/proxy/proxies/from-url", { method: "POST", body: JSON.stringify({ url, protocol, label }) }),
+  deleteProxy: (proxyId: string) =>
+    apiFetch<{ status: string }>(`/proxy/proxies/${encodeURIComponent(proxyId)}`, { method: "DELETE" }),
+  importProxifier: (xmlContent: string) =>
+    apiFetch<ProxyBulkImportResult>("/proxy/proxies/import/proxifier", { method: "POST", body: JSON.stringify({ xml_content: xmlContent }) }),
+  checkProxy: (proxyId: string) =>
+    apiFetch<ProxyCheckResult>(`/proxy/proxies/${encodeURIComponent(proxyId)}/check`, { method: "POST" }),
+  checkAllProxies: () =>
+    apiFetch<{ status: string }>("/proxy/proxies/check-all", { method: "POST" }),
+  exportProxyUrl: (proxyId: string) =>
+    apiFetch<{ url: string }>(`/proxy/proxies/${encodeURIComponent(proxyId)}/export/url`),
+  exportProxyTg: (proxyId: string, secret?: string) => {
+    const q = secret ? `?secret=${encodeURIComponent(secret)}` : "";
+    return apiFetch<ProxyTgExport>(`/proxy/proxies/${encodeURIComponent(proxyId)}/export/tg${q}`);
+  },
+  exportProxyLines: (proxyId: string) =>
+    apiFetch<{ lines: string }>(`/proxy/proxies/${encodeURIComponent(proxyId)}/export/lines`),
+  exportProxifier: (proxyIds: string[]) =>
+    apiFetch<{ xml_content: string }>("/proxy/proxies/export/proxifier", { method: "POST", body: JSON.stringify({ proxy_ids: proxyIds }) })
 };

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import pytest
 import tempfile
 from pathlib import Path
@@ -10,7 +9,7 @@ from server.core.config import Settings
 from server.host_ops import HostOpsService, CommandResult
 from server.models import ToolExecutionContext
 from server.mcp.plugins.system_stats import get_snapshot
-from server.mcp.plugins.process_manager import list_processes, inspect_process, start_process, stop_process, restart_process
+from server.mcp.plugins.process_manager import list_processes, inspect_process, start_process
 from server.mcp.plugins.logs_viewer import read_file_logs, read_system_logs, read_docker_logs
 
 
