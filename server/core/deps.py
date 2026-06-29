@@ -6,6 +6,7 @@ import hmac
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.requests import HTTPConnection
 
 from server.core.ratelimit import RateLimitError
 from server.models import UserPrincipal
@@ -15,8 +16,8 @@ from server.services import ApplicationServices, request_meta_from_request
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def get_services(request: Request) -> ApplicationServices:
-    return request.app.state.services
+def get_services(connection: HTTPConnection) -> ApplicationServices:
+    return connection.app.state.services
 
 
 async def get_optional_api_user(

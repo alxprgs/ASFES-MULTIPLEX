@@ -53,6 +53,7 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
   // Single Install form states
   const [pkgName, setPkgName] = useState("");
   const [pkgVersion, setPkgVersion] = useState("");
+  const [withDependencies, setWithDependencies] = useState(false);
 
   // Bulk Install form states
   const [bulkText, setBulkText] = useState("");
@@ -108,74 +109,144 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
     }
   }, []);
 
-  // Poll for active jobs
+  // Poll for active jobs via WS or fallback
   const jobPollInterval = useRef<number | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const wsFailures = useRef<number>(0);
+  const usingFallback = useRef<boolean>(false);
 
-  const pollJobs = useCallback(async () => {
-    try {
-      // Find active jobs from stats first, or just check the activeJobs list
-      // In the backend, we fetch active jobs list by reading status on known jobIds
-      // We can also update our active job list. Since we start jobs, we can keep track of their IDs.
-      // Alternatively, we fetch stats, and if active_jobs > 0, we poll known jobs or just refresh package lists.
-      // Let's check active jobs.
-      const currentActiveIds = activeJobs.map(j => j.job_id);
-      if (currentActiveIds.length === 0) {
-        if (jobPollInterval.current) {
-          window.clearInterval(jobPollInterval.current);
-          jobPollInterval.current = null;
-        }
-        return;
-      }
-
-      const updatedJobs: PyPIJobStatus[] = [];
-      for (const id of currentActiveIds) {
-        try {
-          const status = await api.pypiJobStatus(id);
-          if (status.status === "running" || status.status === "pending") {
-            updatedJobs.push(status);
-          } else {
-            // Job finished! Refresh package list and stats
-            void fetchStats();
-            void fetchPackages();
-            if (status.status === "done") {
-              pushToast("success", `Задача выполнена`, status.message || `Успешно завершено: ${status.name}`);
-            } else if (status.status === "error") {
-              pushToast("error", `Ошибка задачи`, status.message || `Ошибка выполнения для: ${status.name}`);
-            } else if (status.status === "cancelled") {
-              pushToast("info", `Задача отменена`, `Задача ${status.name || status.job_id} была отменена`);
-            }
-          }
-        } catch {
-          // If 404 or other error, assume job is gone
-        }
-      }
-      setActiveJobs(updatedJobs);
-    } catch (err) {
-      console.error("Error polling jobs:", err);
-    }
-  }, [activeJobs, fetchStats, fetchPackages, pushToast]);
-
-  // Start polling when activeJobs changes
+  const activeJobsRef = useRef(activeJobs);
   useEffect(() => {
-    if (activeJobs.length > 0) {
-      if (!jobPollInterval.current) {
-        jobPollInterval.current = window.setInterval(() => {
-          void pollJobs();
-        }, 1500);
-      }
-    } else {
-      if (jobPollInterval.current) {
-        window.clearInterval(jobPollInterval.current);
-        jobPollInterval.current = null;
-      }
-    }
+    activeJobsRef.current = activeJobs;
+  }, [activeJobs]);
+
+  useEffect(() => {
     return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
       if (jobPollInterval.current) {
         window.clearInterval(jobPollInterval.current);
         jobPollInterval.current = null;
       }
     };
-  }, [activeJobs, pollJobs]);
+  }, []);
+
+  const pollJobsFallback = useCallback(async (ids: string[]) => {
+    const updatedJobs: PyPIJobStatus[] = [];
+    for (const id of ids) {
+      try {
+        const status = await api.pypiJobStatus(id);
+        updatedJobs.push(status);
+      } catch {
+        // Assume gone
+      }
+    }
+    return updatedJobs;
+  }, []);
+
+  const handleJobUpdates = useCallback((updatedJobs: PyPIJobStatus[]) => {
+    const nextJobs = [...activeJobsRef.current];
+    let changed = false;
+
+    for (const st of updatedJobs) {
+      const idx = nextJobs.findIndex(j => j.job_id === st.job_id);
+      if (st.status === "running" || st.status === "pending") {
+        if (idx !== -1) {
+          nextJobs[idx] = st;
+        } else {
+          nextJobs.push(st);
+        }
+        changed = true;
+      } else {
+        // Finished
+        if (idx !== -1) {
+          nextJobs.splice(idx, 1);
+          changed = true;
+        }
+        void fetchStats();
+        void fetchPackages();
+        if (st.status === "done") {
+          pushToast("success", `Задача выполнена`, st.message || `Успешно завершено: ${st.name}`);
+        } else if (st.status === "error") {
+          pushToast("error", `Ошибка задачи`, st.message || `Ошибка выполнения для: ${st.name}`);
+        } else if (st.status === "cancelled") {
+          pushToast("info", `Задача отменена`, `Задача ${st.name || st.job_id} была отменена`);
+        }
+      }
+    }
+
+    if (changed) {
+      setActiveJobs(nextJobs);
+    }
+  }, [fetchStats, fetchPackages, pushToast]);
+
+  useEffect(() => {
+    const currentActiveIds = activeJobs.map(j => j.job_id);
+
+    if (currentActiveIds.length === 0) {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      if (jobPollInterval.current) {
+        window.clearInterval(jobPollInterval.current);
+        jobPollInterval.current = null;
+      }
+      return;
+    }
+
+    if (usingFallback.current) {
+      if (!jobPollInterval.current) {
+        jobPollInterval.current = window.setInterval(() => {
+          void pollJobsFallback(activeJobsRef.current.map(j => j.job_id)).then(handleJobUpdates);
+        }, 1500);
+      }
+      return;
+    }
+
+    // WebSocket logic
+    if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
+      const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/api/pypi/jobs/ws`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        wsFailures.current = 0;
+        ws.send(JSON.stringify({ action: "subscribe", job_ids: activeJobsRef.current.map(j => j.job_id) }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "jobs_update" && Array.isArray(data.jobs)) {
+            handleJobUpdates(data.jobs);
+          }
+        } catch (e) {
+          console.error("WS parse error", e);
+        }
+      };
+
+      ws.onclose = () => {
+        wsRef.current = null;
+        if (activeJobsRef.current.length > 0) {
+          wsFailures.current += 1;
+          if (wsFailures.current >= 5) {
+            console.warn("WebSocket failed 5 times, falling back to REST polling");
+            usingFallback.current = true;
+            setActiveJobs([...activeJobsRef.current]); // trigger effect re-run
+          } else {
+            setTimeout(() => {
+              setActiveJobs([...activeJobsRef.current]); // trigger reconnect
+            }, 1000);
+          }
+        }
+      };
+    } else if (wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ action: "subscribe", job_ids: currentActiveIds }));
+    }
+  }, [activeJobs, pollJobsFallback, handleJobUpdates]);
 
   const addActiveJob = (job: PyPIJobStatus) => {
     setActiveJobs(current => {
@@ -206,7 +277,7 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
     if (!pkgName.trim()) return;
 
     await runAction(async () => {
-      const job = await api.pypiInstall(pkgName.trim(), pkgVersion.trim() || undefined);
+      const job = await api.pypiInstall(pkgName.trim(), pkgVersion.trim() || undefined, withDependencies);
       addActiveJob(job);
       setPkgName("");
       setPkgVersion("");
@@ -220,7 +291,7 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
     if (lines.length === 0) return;
 
     await runAction(async () => {
-      const job = await api.pypiBulkInstall(lines);
+      const job = await api.pypiBulkInstall(lines, withDependencies);
       addActiveJob(job);
       setBulkText("");
       setActiveTab("packages");
@@ -550,22 +621,22 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
                   Нет установленных пакетов. Установите библиотеку через панель справа или с помощью pip.
                 </div>
               ) : (
-                <div className="table-wrapper">
-                  <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
+                <div className="table-wrapper" style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead>
-                      <tr style={{ borderBottom: "1px solid #dfe6ea", textAlign: "left" }}>
-                        <th style={{ padding: "10px 5px" }}>Имя пакета</th>
-                        <th style={{ padding: "10px 5px" }}>Версий локально</th>
-                        <th style={{ padding: "10px 5px" }}>Последняя</th>
-                        <th style={{ padding: "10px 5px" }}>Размер</th>
-                        <th style={{ padding: "10px 5px" }}>Статус</th>
-                        <th style={{ padding: "10px 5px", textAlign: "right" }}>Действия</th>
+                      <tr style={{ borderBottom: "2px solid #dfe6ea", textAlign: "left", color: "#697782" }}>
+                        <th style={{ padding: "10px 8px" }}>Имя пакета</th>
+                        <th style={{ padding: "10px 8px" }}>Версий локально</th>
+                        <th style={{ padding: "10px 8px" }}>Последняя</th>
+                        <th style={{ padding: "10px 8px" }}>Размер</th>
+                        <th style={{ padding: "10px 8px" }}>Статус</th>
+                        <th style={{ padding: "10px 8px", textAlign: "right" }}>Действия</th>
                       </tr>
                     </thead>
                     <tbody>
                       {packages.map(pkg => (
-                        <tr key={pkg.name} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                          <td style={{ padding: "12px 5px", fontWeight: "bold" }}>
+                        <tr key={pkg.name} style={{ borderBottom: "1px solid #eef2f3" }}>
+                          <td style={{ padding: "12px 8px", fontWeight: "bold" }}>
                             <span
                               onClick={() => void handleViewPackageDetail(pkg.name)}
                               style={{ color: "#1d4ed8", cursor: "pointer", textDecoration: "underline" }}
@@ -573,10 +644,10 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
                               {pkg.name}
                             </span>
                           </td>
-                          <td style={{ padding: "12px 5px" }}>{pkg.versions_count}</td>
-                          <td style={{ padding: "12px 5px" }}>{pkg.latest_version || "—"}</td>
-                          <td style={{ padding: "12px 5px" }}>{pkg.total_size_human}</td>
-                          <td style={{ padding: "12px 5px" }}>
+                          <td style={{ padding: "12px 8px" }}>{pkg.versions_count}</td>
+                          <td style={{ padding: "12px 8px" }}>{pkg.latest_version || "—"}</td>
+                          <td style={{ padding: "12px 8px" }}>{pkg.total_size_human}</td>
+                          <td style={{ padding: "12px 8px" }}>
                             {pkg.is_blocked ? (
                               <span className="badge badge-danger">Заблокирован</span>
                             ) : pkg.has_blocked_versions ? (
@@ -585,7 +656,7 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
                               <span className="badge badge-ok">Активен</span>
                             )}
                           </td>
-                          <td style={{ padding: "12px 5px", textAlign: "right" }}>
+                          <td style={{ padding: "12px 8px", textAlign: "right" }}>
                             <div style={{ display: "flex", gap: "5px", justifyContent: "flex-end" }}>
                               <button
                                 className="icon-button"
@@ -747,6 +818,15 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
                   onChange={(e) => setPkgVersion(e.target.value)}
                 />
               </label>
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontWeight: "normal", margin: "4px 0" }}>
+                <input
+                  type="checkbox"
+                  checked={withDependencies}
+                  onChange={(e) => setWithDependencies(e.target.checked)}
+                  style={{ width: "16px", height: "16px", minHeight: "auto", cursor: "pointer", margin: 0 }}
+                />
+                Устанавливать с зависимостями
+              </label>
               <button
                 type="submit"
                 className="primary-button"
@@ -782,6 +862,15 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
                     fontSize: "13px"
                   }}
                 />
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontWeight: "normal", margin: "4px 0" }}>
+                <input
+                  type="checkbox"
+                  checked={withDependencies}
+                  onChange={(e) => setWithDependencies(e.target.checked)}
+                  style={{ width: "16px", height: "16px", minHeight: "auto", cursor: "pointer", margin: 0 }}
+                />
+                Устанавливать с зависимостями
               </label>
               <button
                 type="submit"
@@ -879,32 +968,32 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
 
                 {/* Table of local versions */}
                 <div className="table-wrapper" style={{ maxHeight: "350px", overflowY: "auto" }}>
-                  <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead>
-                      <tr style={{ borderBottom: "1px solid #dfe6ea", textAlign: "left" }}>
-                        <th style={{ padding: "8px 5px" }}>Версия</th>
-                        <th style={{ padding: "8px 5px" }}>Файлов</th>
-                        <th style={{ padding: "8px 5px" }}>Размер</th>
-                        <th style={{ padding: "8px 5px" }}>Статус</th>
-                        <th style={{ padding: "8px 5px", textAlign: "right" }}>Действия</th>
+                      <tr style={{ borderBottom: "2px solid #dfe6ea", textAlign: "left", color: "#697782" }}>
+                        <th style={{ padding: "10px 8px" }}>Версия</th>
+                        <th style={{ padding: "10px 8px" }}>Файлов</th>
+                        <th style={{ padding: "10px 8px" }}>Размер</th>
+                        <th style={{ padding: "10px 8px" }}>Статус</th>
+                        <th style={{ padding: "10px 8px", textAlign: "right" }}>Действия</th>
                       </tr>
                     </thead>
                     <tbody>
                       {selectedPkg.versions.map(ver => (
-                        <tr key={ver.version} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                          <td style={{ padding: "10px 5px", fontFamily: "monospace", fontWeight: "bold" }}>
+                        <tr key={ver.version} style={{ borderBottom: "1px solid #eef2f3" }}>
+                          <td style={{ padding: "10px 8px", fontFamily: "monospace", fontWeight: "bold" }}>
                             {ver.version}
                           </td>
-                          <td style={{ padding: "10px 5px" }}>{ver.files_count}</td>
-                          <td style={{ padding: "10px 5px" }}>{ver.size_human}</td>
-                          <td style={{ padding: "10px 5px" }}>
+                          <td style={{ padding: "10px 8px" }}>{ver.files_count}</td>
+                          <td style={{ padding: "10px 8px" }}>{ver.size_human}</td>
+                          <td style={{ padding: "10px 8px" }}>
                             {selectedPkg.is_blocked || ver.is_blocked ? (
                               <span className="badge badge-danger">Блокирован</span>
                             ) : (
                               <span className="badge badge-ok">Доступен</span>
                             )}
                           </td>
-                          <td style={{ padding: "10px 5px", textAlign: "right" }}>
+                          <td style={{ padding: "10px 8px", textAlign: "right" }}>
                             <div style={{ display: "flex", gap: "5px", justifyContent: "flex-end" }}>
                               <button
                                 className="icon-button"

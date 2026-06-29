@@ -505,10 +505,12 @@ class ProxyTgExportResponse(BaseModel):
 class PyPIInstallRequest(BaseModel):
     name: str
     version: str | None = None  # None = install all available versions
+    with_dependencies: bool = False
 
 
 class PyPIBulkInstallRequest(BaseModel):
     packages: list[str]  # e.g. ["flask==2.0.0", "requests", "django>=4.0"]
+    with_dependencies: bool = False
 
 
 class PyPIBlockRequest(BaseModel):

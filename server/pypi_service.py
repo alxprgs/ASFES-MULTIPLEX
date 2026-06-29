@@ -523,35 +523,112 @@ class PyPIMirrorService:
         self._jobs[job_id] = job
         return job
 
+    async def _resolve_and_download(self, session: Any, job: PyPIJob, specs: list[str]) -> None:
+        from packaging.requirements import Requirement
+        from packaging.version import parse as parse_version
+
+        queue = list(specs)
+        visited: set[str] = set()
+
+        job.total = len(queue)
+        job.remaining_packages = list(queue)
+
+        while queue and job.status != "cancelled":
+            spec_str = queue.pop(0)
+            if spec_str in job.remaining_packages:
+                job.remaining_packages.remove(spec_str)
+
+            try:
+                req = Requirement(spec_str)
+            except Exception as exc:
+                LOGGER.warning("Invalid requirement spec: %s - %s", spec_str, exc)
+                job.failed += 1
+                continue
+
+            norm = normalize_package_name(req.name)
+            visit_key = f"{norm}:{str(req.specifier)}"
+            if visit_key in visited:
+                job.done += 1
+                continue
+            visited.add(visit_key)
+
+            job.message = f"Resolving {spec_str}"
+            metadata = await self._mirror._fetch_metadata(session, norm)
+            if not metadata:
+                job.failed += 1
+                continue
+
+            releases = metadata.get("releases", {})
+            if not releases:
+                job.failed += 1
+                continue
+
+            available_versions = []
+            for v in releases.keys():
+                try:
+                    available_versions.append(parse_version(v))
+                except Exception:
+                    pass
+
+            matched = list(req.specifier.filter(available_versions)) if req.specifier else available_versions
+            if not matched:
+                job.failed += 1
+                continue
+
+            best_version = str(max(matched))
+            job.message = f"Downloading {norm}=={best_version}"
+            
+            ok = await self._mirror.download_version(session, norm, best_version)
+            if ok:
+                job.done += 1
+                requires_dist = metadata.get("info", {}).get("requires_dist") or []
+                for dist in requires_dist:
+                    try:
+                        dep_req = Requirement(dist)
+                        if dep_req.marker and 'extra' in str(dep_req.marker):
+                            continue
+                        dep_str = str(dep_req)
+                        queue.append(dep_str)
+                        if dep_str not in job.remaining_packages:
+                            job.remaining_packages.append(dep_str)
+                            job.total += 1
+                    except Exception:
+                        pass
+            else:
+                job.failed += 1
+
     # ------------------------------------------------------------------
     # Install operations
     # ------------------------------------------------------------------
 
-    def install_version(self, name: str, version: str) -> PyPIJob:
+    def install_version(self, name: str, version: str, with_dependencies: bool = False) -> PyPIJob:
         norm = normalize_package_name(name)
         job = self._make_job("install", norm)
 
         async def _run() -> None:
             import aiohttp
 
-            job.total = 1
-            job.message = f"Downloading {norm}=={version}"
+            job.message = f"Starting {norm}=={version}"
             try:
                 async with aiohttp.ClientSession(
                     headers={"User-Agent": self.config.user_agent}
                 ) as session:
-                    ok = await self._mirror.download_version(session, norm, version)
-                if ok:
-                    job.done = 1
-                    job.status = "done"
-                    job.message = f"Done {norm}=={version}"
-                else:
-                    job.failed = 1
-                    job.status = "error"
-                    job.message = f"Failed to download {norm}=={version}"
+                    if with_dependencies:
+                        await self._resolve_and_download(session, job, [f"{norm}=={version}"])
+                    else:
+                        job.total = 1
+                        job.message = f"Downloading {norm}=={version}"
+                        ok = await self._mirror.download_version(session, norm, version)
+                        if ok:
+                            job.done = 1
+                        else:
+                            job.failed = 1
+                            
+                    if job.status != "cancelled":
+                        job.status = "done" if job.failed == 0 else "error"
+                        job.message = f"Done: {job.done} ok, {job.failed} failed"
             except Exception as exc:
                 job.status = "error"
-                job.failed = 1
                 job.message = str(exc)
                 LOGGER.error("install_version error package=%s version=%s error=%s", norm, version, exc)
             finally:
@@ -560,7 +637,7 @@ class PyPIMirrorService:
         job.task = asyncio.create_task(_run())
         return job
 
-    def install_all_versions(self, name: str) -> PyPIJob:
+    def install_all_versions(self, name: str, with_dependencies: bool = False) -> PyPIJob:
         norm = normalize_package_name(name)
         job = self._make_job("install_all", norm)
 
@@ -593,6 +670,25 @@ class PyPIMirrorService:
                 if job.status != "cancelled":
                     job.status = "done"
                     job.message = f"Completed: {job.done} ok, {job.failed} failed"
+                    
+                    if with_dependencies and job.done > 0:
+                        job.message = f"Resolving dependencies for {norm}"
+                        requires_dist = metadata.get("info", {}).get("requires_dist") or []
+                        deps_to_install = []
+                        from packaging.requirements import Requirement
+                        for dist in requires_dist:
+                            try:
+                                dep_req = Requirement(dist)
+                                if not (dep_req.marker and 'extra' in str(dep_req.marker)):
+                                    deps_to_install.append(str(dep_req))
+                            except Exception:
+                                pass
+                        
+                        if deps_to_install:
+                            await self._resolve_and_download(session, job, deps_to_install)
+                            job.status = "done" if job.failed == 0 else "error"
+                            job.message = f"Completed with deps: {job.done} ok, {job.failed} failed"
+
             except Exception as exc:
                 job.status = "error"
                 job.message = str(exc)
@@ -604,45 +700,47 @@ class PyPIMirrorService:
         job.task = asyncio.create_task(_run())
         return job
 
-    def bulk_install(self, packages: list[str]) -> PyPIJob:
+    def bulk_install(self, packages: list[str], with_dependencies: bool = False) -> PyPIJob:
         """Install packages from a list of specs: 'flask==2.0.0', 'requests', etc."""
         job = self._make_job("bulk_install", None)
 
         async def _run() -> None:
             import aiohttp
 
-            job.total = len(packages)
-            job.remaining_packages = list(packages)
-
             try:
                 async with aiohttp.ClientSession(
                     headers={"User-Agent": self.config.user_agent}
                 ) as session:
-                    for pkg_spec in list(packages):
-                        if job.status == "cancelled":
-                            break
-                        name_parsed, version_parsed = _parse_pkg_spec(pkg_spec)
-                        norm = normalize_package_name(name_parsed)
-                        job.message = f"Downloading {pkg_spec}"
-                        try:
-                            if version_parsed:
-                                ok = await self._mirror.download_version(session, norm, version_parsed)
-                            else:
-                                await self._mirror.download_all_versions(session, norm)
-                                ok = True
-                            if ok:
-                                job.done += 1
-                            else:
+                    if with_dependencies:
+                        await self._resolve_and_download(session, job, packages)
+                    else:
+                        job.total = len(packages)
+                        job.remaining_packages = list(packages)
+                        for pkg_spec in list(packages):
+                            if job.status == "cancelled":
+                                break
+                            name_parsed, version_parsed = _parse_pkg_spec(pkg_spec)
+                            norm = normalize_package_name(name_parsed)
+                            job.message = f"Downloading {pkg_spec}"
+                            try:
+                                if version_parsed:
+                                    ok = await self._mirror.download_version(session, norm, version_parsed)
+                                else:
+                                    await self._mirror.download_all_versions(session, norm)
+                                    ok = True
+                                if ok:
+                                    job.done += 1
+                                else:
+                                    job.failed += 1
+                            except Exception as exc:
                                 job.failed += 1
-                        except Exception as exc:
-                            job.failed += 1
-                            LOGGER.warning("bulk_install error pkg=%s error=%s", pkg_spec, exc)
-                        if pkg_spec in job.remaining_packages:
-                            job.remaining_packages.remove(pkg_spec)
+                                LOGGER.warning("bulk_install error pkg=%s error=%s", pkg_spec, exc)
+                            if pkg_spec in job.remaining_packages:
+                                job.remaining_packages.remove(pkg_spec)
 
-                if job.status != "cancelled":
-                    job.status = "done"
-                    job.message = f"Bulk install done: {job.done} ok, {job.failed} failed"
+                    if job.status != "cancelled":
+                        job.status = "done" if job.failed == 0 else "error"
+                        job.message = f"Bulk install done: {job.done} ok, {job.failed} failed"
             except Exception as exc:
                 job.status = "error"
                 job.message = str(exc)

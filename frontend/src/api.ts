@@ -498,15 +498,15 @@ export const api = {
   },
   pypiPackage: (name: string) =>
     apiFetch<PyPIPackage>(`/pypi/packages/${encodeURIComponent(name)}`),
-  pypiInstall: (name: string, version?: string) =>
+  pypiInstall: (name: string, version?: string, with_dependencies?: boolean) =>
     apiFetch<PyPIJobStatus>("/pypi/packages/install", {
       method: "POST",
-      body: JSON.stringify({ name, version: version || null })
+      body: JSON.stringify({ name, version: version || null, with_dependencies: !!with_dependencies })
     }),
-  pypiBulkInstall: (packages: string[]) =>
+  pypiBulkInstall: (packages: string[], with_dependencies?: boolean) =>
     apiFetch<PyPIJobStatus>("/pypi/packages/bulk-install", {
       method: "POST",
-      body: JSON.stringify({ packages })
+      body: JSON.stringify({ packages, with_dependencies: !!with_dependencies })
     }),
   pypiDeletePackage: (name: string) =>
     apiFetch<{ ok: boolean }>(`/pypi/packages/${encodeURIComponent(name)}`, { method: "DELETE" }),

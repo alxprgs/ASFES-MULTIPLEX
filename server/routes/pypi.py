@@ -7,7 +7,7 @@ Two separate routers:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 
 from server.core.deps import get_services, require_permission
@@ -89,9 +89,9 @@ async def pypi_install(
     """
     _check_enabled(services)
     if payload.version:
-        job = services.pypi_mirror.install_version(payload.name, payload.version)
+        job = services.pypi_mirror.install_version(payload.name, payload.version, payload.with_dependencies)
     else:
-        job = services.pypi_mirror.install_all_versions(payload.name)
+        job = services.pypi_mirror.install_all_versions(payload.name, payload.with_dependencies)
     return job.to_status()
 
 
@@ -111,7 +111,7 @@ async def pypi_bulk_install(
     Accepts specs like 'flask==2.0.0', 'requests', 'django>=4.0'.
     """
     _check_enabled(services)
-    job = services.pypi_mirror.bulk_install(payload.packages)
+    job = services.pypi_mirror.bulk_install(payload.packages, payload.with_dependencies)
     return job.to_status()
 
 
@@ -243,6 +243,81 @@ async def pypi_verify_package(
     _check_enabled(services)
     job = services.pypi_mirror.verify_package(name)
     return job.to_status()
+
+
+@management_router.websocket("/jobs/ws")
+async def pypi_jobs_ws(
+    websocket: WebSocket,
+    services: ApplicationServices = Depends(get_services),
+) -> None:
+    """Stream active job statuses for a requested list of job IDs via WebSocket."""
+    import asyncio
+    
+    await websocket.accept()
+
+    # Manual auth using cookie for WebSocket
+    token = websocket.cookies.get(services.settings.access_cookie_name)
+    if not token:
+        await websocket.close(code=1008)
+        return
+
+    try:
+        if token.startswith("asfes_"):
+            user = await services.api_key_service.verify_token(token)
+            if user is None:
+                raise ValueError("Invalid API key")
+            principal = user
+        else:
+            payload = services.auth.verify_api_access_token(token)
+            user = await services.users.get_user_by_id(payload["sub"])
+            if not user:
+                raise ValueError("User not found")
+            principal = services.users.to_principal(user)
+
+        if not principal.is_root and "pypi.read" not in principal.permissions:
+            raise ValueError("No permission")
+    except Exception:
+        await websocket.close(code=1008)
+        return
+
+    job_ids: list[str] = []
+
+    async def receive_loop() -> None:
+        nonlocal job_ids
+        try:
+            while True:
+                data = await websocket.receive_json()
+                if isinstance(data, dict) and data.get("action") == "subscribe":
+                    ids = data.get("job_ids")
+                    if isinstance(ids, list):
+                        job_ids = ids
+        except WebSocketDisconnect:
+            pass
+
+    receiver_task = asyncio.create_task(receive_loop())
+
+    try:
+        while True:
+            if job_ids:
+                updates = []
+                for jid in job_ids:
+                    job = services.pypi_mirror.get_job(jid)
+                    if job:
+                        updates.append(job.to_status().model_dump())
+                
+                if updates:
+                    await websocket.send_json({"type": "jobs_update", "jobs": updates})
+            
+            await asyncio.sleep(1.5)
+            if receiver_task.done():
+                break
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        if not receiver_task.done():
+            receiver_task.cancel()
 
 
 @management_router.get("/jobs/{job_id}", response_model=PyPIJobStatus)
