@@ -83,7 +83,14 @@ class ProxyService:
         )
 
     def decrypt_password(self, encrypted_password: str | None) -> str | None:
-        return self.encryptor.decrypt(encrypted_password)
+        if not encrypted_password:
+            return None
+        try:
+            return self.encryptor.decrypt(encrypted_password)
+        except Exception as exc:
+            import logging
+            logging.getLogger("multiplex.proxy").warning(f"Failed to decrypt proxy password: {exc}")
+            return None
 
     @staticmethod
     def parse_proxy_url(url: str, protocol: str) -> dict[str, Any]:

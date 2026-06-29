@@ -21,6 +21,8 @@ import aiohttp
 from packaging import version as pkg_version
 from pydantic import BaseModel, Field
 
+from server.core.cache import CacheManager
+
 logger = logging.getLogger("multiplex.pypi_mirror")
 
 
@@ -62,11 +64,12 @@ class MirrorConfig(BaseModel):
 class AsyncPypiMirror:
     """Async PyPI mirror with low-level and high-level API."""
 
-    def __init__(self, config: MirrorConfig):
+    def __init__(self, config: MirrorConfig, cache: CacheManager | None = None):
         self.cfg = config
         self.cfg.data_dir.mkdir(parents=True, exist_ok=True)
         self.proxies = self._load_proxies(self.cfg.proxies)
         self._rate_limit_bytes = (self.cfg.rate_limit_mb * 1024 * 1024) if self.cfg.rate_limit_mb else None
+        self.cache = cache
 
     # ------------------------------------------------------------------
     # Basic helpers
@@ -227,11 +230,20 @@ class AsyncPypiMirror:
 
     async def _fetch_metadata(self, session: aiohttp.ClientSession, name: str) -> Optional[dict]:
         norm = normalize_package_name(name)
+        cache_key = f"pypi:meta:{norm}"
+        if self.cache is not None:
+            cached = await self.cache.get(cache_key)
+            if cached is not None:
+                return cached
+
         url = f"{self.cfg.api_base}/{norm}/json"
         try:
             async with session.get(url, proxy=self._choose_proxy(), ssl=self.cfg.verify_ssl) as resp:
                 if resp.status == 200:
-                    return await resp.json()
+                    data = await resp.json()
+                    if self.cache is not None:
+                        await self.cache.set(cache_key, data, ttl_seconds=900)
+                    return data
                 return None
         except Exception as exc:
             logger.warning("metadata_error name=%s error=%s", norm, exc)

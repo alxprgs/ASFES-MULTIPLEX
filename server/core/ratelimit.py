@@ -72,7 +72,7 @@ class RedisRateLimiterBackend:
     async def close(self) -> None:
         if self._redis is None:
             return
-        await self._redis.close()
+        await self._redis.aclose()
         self._redis = None
 
     async def consume(self, key: str, policy: RateLimitPolicy) -> RateLimitResult:

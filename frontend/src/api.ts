@@ -523,6 +523,8 @@ export const api = {
     apiFetch<{ ok: boolean }>(`/pypi/blocklist/${encodeURIComponent(name)}`, { method: "DELETE" }),
   pypiUnblockVersion: (name: string, version: string) =>
     apiFetch<{ ok: boolean }>(`/pypi/blocklist/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`, { method: "DELETE" }),
+  pypiSyncAllPackages: () =>
+    apiFetch<PyPIJobStatus>("/pypi/packages/sync-all", { method: "POST" }),
   pypiVerify: (name?: string) => {
     if (name) {
       return apiFetch<PyPIJobStatus>(`/pypi/packages/${encodeURIComponent(name)}/verify`, { method: "POST" });

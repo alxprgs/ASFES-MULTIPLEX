@@ -24,6 +24,7 @@ from server.core.database import API_KEYS, AUDIT_EVENTS, OAUTH_CLIENTS, OAUTH_CO
 from server.core.logging import IntegrityLogManager, Mailer, get_logger
 from server.core.qr import qr_svg
 from server.core.ratelimit import RateLimitPolicy, RateLimiter
+from server.core.cache import CacheManager
 from server.core.security import TokenBundle, b64url_decode, b64url_encode, build_totp_uri, create_jwt, decode_jwt, generate_totp_secret, hash_password, now_utc, random_token, sha256_text, verify_password, verify_pkce, verify_totp_code
 from server.host_ops import HostOpsService
 from server.models import MCPTool, PermissionDefinition, PluginDefinition, RuntimeAvailability, ToolExecutionContext, UserPrincipal
@@ -213,11 +214,12 @@ class AuditService:
 
 
 class SettingsService:
-    def __init__(self, db: DatabaseManager, settings: Settings, rate_limiter: RateLimiter, audit: AuditService) -> None:
+    def __init__(self, db: DatabaseManager, settings: Settings, rate_limiter: RateLimiter, audit: AuditService, cache: CacheManager) -> None:
         self.db = db
         self.settings = settings
         self.rate_limiter = rate_limiter
         self.audit = audit
+        self.cache = cache
 
     def _runtime_insert_defaults(self) -> dict[str, Any]:
         return {
@@ -288,6 +290,7 @@ class SettingsService:
         if self.settings.redis.mode == "required" and not enabled:
             raise ValueError("Redis cannot be disabled while REDIS__MODE is set to 'required'")
         await self.rate_limiter.set_runtime_enabled(enabled)
+        await self.cache.set_runtime_enabled(enabled)
         await self.db.collection(SETTINGS).update_one(
             {"_id": "runtime"},
             self._runtime_upsert_update(redis_runtime_enabled=enabled),
@@ -854,10 +857,11 @@ class UserService:
 
 
 class AuthService:
-    def __init__(self, db: DatabaseManager, settings: Settings, users: UserService) -> None:
+    def __init__(self, db: DatabaseManager, settings: Settings, users: UserService, cache: CacheManager | None = None) -> None:
         self.db = db
         self.settings = settings
         self.users = users
+        self.cache = cache
 
     async def issue_api_tokens(self, user: UserPrincipal, request_meta: dict[str, Any]) -> TokenBundle:
         access_token = create_jwt(
@@ -921,14 +925,25 @@ class AuthService:
     async def revoke_refresh_token(self, refresh_token: str) -> None:
         await self.db.collection(REFRESH_TOKENS).delete_one({"token_hash": sha256_text(refresh_token)})
 
-    def verify_api_access_token(self, token: str) -> dict[str, Any]:
-        return decode_jwt(
+    async def revoke_api_access_token(self, token_jti: str, expires_at: int) -> None:
+        if self.cache is not None:
+            now = int(now_utc().timestamp())
+            ttl = max(1, expires_at - now)
+            await self.cache.set(f"jwt:revoked:{token_jti}", True, ttl_seconds=ttl)
+
+    async def verify_api_access_token(self, token: str) -> dict[str, Any]:
+        payload = decode_jwt(
             token,
             self.settings.security.api_jwt_secret.get_secret_value(),
             issuer=self.settings.security_issuer,
             audience=self.settings.security.api_audience,
             token_type="api_access",
         )
+        if self.cache is not None:
+            jti = payload.get("jti")
+            if jti and await self.cache.get(f"jwt:revoked:{jti}"):
+                raise ValueError("Token has been revoked")
+        return payload
 
 
 class OAuthService:
@@ -1752,6 +1767,7 @@ class ApplicationServices:
     permissions: PermissionCatalog
     audit: AuditService
     rate_limiter: RateLimiter
+    cache: CacheManager
     settings_service: SettingsService
     users: UserService
     auth: AuthService
@@ -1794,12 +1810,19 @@ async def build_application_services(settings: Settings, logger_manager: Integri
     )
     await rate_limiter.initialize()
 
+    cache = CacheManager(
+        redis_mode=settings.redis.mode,
+        redis_url=settings.redis.url,
+        redis_runtime_enabled=settings.redis.enabled_on_startup or settings.redis.mode == "required",
+    )
+    await cache.connect()
+
     audit = AuditService(db)
-    settings_service = SettingsService(db, settings, rate_limiter, audit)
+    settings_service = SettingsService(db, settings, rate_limiter, audit, cache)
     await settings_service.ensure_runtime_settings()
 
     users = UserService(db, settings, permissions, audit)
-    auth = AuthService(db, settings, users)
+    auth = AuthService(db, settings, users, cache)
     oauth = OAuthService(db, settings, users, audit)
     api_key_service = ApiKeyService(db, users, audit)
     alerts = AlertingService(db, host_ops, mailer, settings.host_ops.alert_poll_interval_seconds)
@@ -1810,6 +1833,7 @@ async def build_application_services(settings: Settings, logger_manager: Integri
         config=settings.pypi,
         db=db,
         audit=audit,
+        cache=cache,
     )
 
     services = ApplicationServices(
@@ -1822,6 +1846,7 @@ async def build_application_services(settings: Settings, logger_manager: Integri
         permissions=permissions,
         audit=audit,
         rate_limiter=rate_limiter,
+        cache=cache,
         settings_service=settings_service,
         users=users,
         auth=auth,
@@ -1852,6 +1877,7 @@ async def shutdown_application_services(services: ApplicationServices) -> None:
             await services.verifier_task
     await services.pypi_mirror.shutdown()
     await services.rate_limiter.shutdown()
+    await services.cache.close()
     await services.db.disconnect()
 
 

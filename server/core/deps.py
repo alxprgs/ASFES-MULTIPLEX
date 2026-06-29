@@ -42,7 +42,9 @@ async def get_optional_api_user(
         return None
     enforce_csrf_for_cookie_auth(request, services)
     try:
-        payload = services.auth.verify_api_access_token(token)
+        payload = await services.auth.verify_api_access_token(token)
+        request.state.access_token_jti = payload.get("jti")
+        request.state.access_token_exp = payload.get("exp")
     except Exception as exc:
         if using_cookie:
             return None

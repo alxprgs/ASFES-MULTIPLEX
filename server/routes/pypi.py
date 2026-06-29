@@ -115,6 +115,29 @@ async def pypi_bulk_install(
     return job.to_status()
 
 
+@management_router.post(
+    "/packages/sync-all",
+    response_model=PyPIJobStatus,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def pypi_sync_all_packages(
+    request: Request,
+    current_user: UserPrincipal = Depends(require_permission("pypi.manage")),
+    services: ApplicationServices = Depends(get_services),
+) -> PyPIJobStatus:
+    """Sync all versions for all locally cached packages."""
+    _check_enabled(services)
+    
+    packages = await services.pypi_mirror.list_packages("", 1, 999999)
+    names = [pkg.name for pkg in packages.items]
+    
+    if not names:
+        raise HTTPException(status_code=400, detail="No local packages to sync")
+        
+    job = services.pypi_mirror.bulk_install(names, with_dependencies=False)
+    return job.to_status()
+
+
 @management_router.delete("/packages/{name}", status_code=status.HTTP_200_OK)
 async def pypi_delete_package(
     name: str,
@@ -268,7 +291,7 @@ async def pypi_jobs_ws(
                 raise ValueError("Invalid API key")
             principal = user
         else:
-            payload = services.auth.verify_api_access_token(token)
+            payload = await services.auth.verify_api_access_token(token)
             user = await services.users.get_user_by_id(payload["sub"])
             if not user:
                 raise ValueError("User not found")

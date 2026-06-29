@@ -66,7 +66,7 @@ async def test_get_optional_api_user_cookie_and_token() -> None:
     mock_services.settings.access_cookie_name = "access_token"
     mock_services.settings.csrf_cookie_name = "csrf_token"
     mock_services.users.get_user_by_id = AsyncMock()
-    mock_services.auth.verify_api_access_token = MagicMock()
+    mock_services.auth.verify_api_access_token = AsyncMock()
     request = create_mock_request(app_services=mock_services)
 
     # Case 1: no token/cookies

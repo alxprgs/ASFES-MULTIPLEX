@@ -16,6 +16,7 @@ from packaging import version as pkg_version
 
 from server.core.config import PyPIConfig
 from server.core.database import DatabaseManager
+from server.core.cache import CacheManager
 from server.core.logging import get_logger
 from server.core.pypi_mirror import AsyncPypiMirror, MirrorConfig, normalize_package_name
 from server.models import (
@@ -91,10 +92,11 @@ class PyPIMirrorService:
     - Audit logging for destructive operations
     """
 
-    def __init__(self, config: PyPIConfig, db: DatabaseManager, audit: Any) -> None:
+    def __init__(self, config: PyPIConfig, db: DatabaseManager, audit: Any, cache: CacheManager | None = None) -> None:
         self.config = config
         self.db = db
         self.audit = audit
+        self.cache = cache
 
         mirror_cfg = MirrorConfig(
             api_base=config.api_base,
@@ -110,12 +112,19 @@ class PyPIMirrorService:
             verify_ssl=config.verify_ssl,
             user_agent=config.user_agent,
         )
-        self._mirror = AsyncPypiMirror(mirror_cfg)
+        self._mirror = AsyncPypiMirror(mirror_cfg, cache=self.cache)
         self._jobs: dict[str, PyPIJob] = {}
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    async def _invalidate_cache(self, name: str | None = None) -> None:
+        if self.cache is not None:
+            await self.cache.delete("pypi:html:root")
+            if name:
+                norm = normalize_package_name(name)
+                await self.cache.delete(f"pypi:html:pkg:{norm}")
 
     def _format_size(self, size_bytes: int) -> str:
         return self._mirror._format_size(size_bytes)
@@ -173,6 +182,7 @@ class PyPIMirrorService:
             request_meta=request_meta,
             target={"package": norm, "version": version},
         )
+        await self._invalidate_cache(norm)
         LOGGER.info("pypi.block package=%s version=%s actor=%s", norm, version, actor.username)
 
     async def unblock(
@@ -203,6 +213,7 @@ class PyPIMirrorService:
             request_meta=request_meta,
             target={"package": norm, "version": version},
         )
+        await self._invalidate_cache(norm)
 
     # ------------------------------------------------------------------
     # Simple API (PEP 503, pip-compatible)
@@ -210,6 +221,12 @@ class PyPIMirrorService:
 
     async def simple_api_root_html(self) -> str:
         """Return PEP 503 root index HTML listing all local packages."""
+        cache_key = "pypi:html:root"
+        if self.cache is not None:
+            cached = await self.cache.get(cache_key)
+            if cached is not None:
+                return cached
+
         packages = self._mirror.list_packages(include_versions=False)
         simple_path = self.config.simple_path.rstrip("/")
         lines = [
@@ -217,7 +234,7 @@ class PyPIMirrorService:
             for item in packages
         ]
         body = "\n".join(lines)
-        return (
+        html_resp = (
             "<!DOCTYPE html>\n"
             "<html>\n"
             "  <head><title>Simple Package Index</title></head>\n"
@@ -227,6 +244,9 @@ class PyPIMirrorService:
             "  </body>\n"
             "</html>"
         )
+        if self.cache is not None:
+            await self.cache.set(cache_key, html_resp, ttl_seconds=3600)
+        return html_resp
 
     async def simple_api_package_html(self, name: str) -> str | None:
         """
@@ -241,6 +261,11 @@ class PyPIMirrorService:
         import aiohttp
 
         norm = normalize_package_name(name)
+        cache_key = f"pypi:html:pkg:{norm}"
+        if self.cache is not None:
+            cached = await self.cache.get(cache_key)
+            if cached is not None:
+                return cached
 
         # Enforce blocklist
         doc = await self._get_blocklist_doc()
@@ -321,7 +346,7 @@ class PyPIMirrorService:
             links.append(f'  <a href="{href}">{f["filename"]}</a>')
 
         body = "\n".join(links)
-        return (
+        html_resp = (
             "<!DOCTYPE html>\n"
             "<html>\n"
             f"  <head><title>Links for {norm}</title></head>\n"
@@ -331,6 +356,9 @@ class PyPIMirrorService:
             "  </body>\n"
             "</html>"
         )
+        if self.cache is not None:
+            await self.cache.set(cache_key, html_resp, ttl_seconds=3600)
+        return html_resp
 
     async def get_file_path(self, name: str, version: str, filename: str) -> Path | None:
         """
@@ -517,10 +545,23 @@ class PyPIMirrorService:
     # Job factory helpers
     # ------------------------------------------------------------------
 
+    async def _sync_job(self, job: PyPIJob) -> None:
+        if self.cache is not None:
+            await self.cache.set(f"pypi:job:{job.job_id}", job.to_status().model_dump(), ttl_seconds=86400)
+
     def _make_job(self, kind: str, name: str | None) -> PyPIJob:
         job_id = uuid4().hex
         job = PyPIJob(job_id=job_id, kind=kind, name=name)
         self._jobs[job_id] = job
+        
+        if self.cache is not None:
+            async def _sync_loop() -> None:
+                while job.status in ("running", "pending"):
+                    await asyncio.sleep(2)
+                    await self._sync_job(job)
+                await self._sync_job(job)
+            asyncio.create_task(_sync_loop())
+            
         return job
 
     async def _resolve_and_download(self, session: Any, job: PyPIJob, specs: list[str]) -> None:
@@ -633,6 +674,7 @@ class PyPIMirrorService:
                 LOGGER.error("install_version error package=%s version=%s error=%s", norm, version, exc)
             finally:
                 job.finished_at = datetime.now(UTC)
+                await self._invalidate_cache(norm)
 
         job.task = asyncio.create_task(_run())
         return job
@@ -667,27 +709,27 @@ class PyPIMirrorService:
                         if spec in job.remaining_packages:
                             job.remaining_packages.remove(spec)
 
-                if job.status != "cancelled":
-                    job.status = "done"
-                    job.message = f"Completed: {job.done} ok, {job.failed} failed"
-                    
-                    if with_dependencies and job.done > 0:
-                        job.message = f"Resolving dependencies for {norm}"
-                        requires_dist = metadata.get("info", {}).get("requires_dist") or []
-                        deps_to_install = []
-                        from packaging.requirements import Requirement
-                        for dist in requires_dist:
-                            try:
-                                dep_req = Requirement(dist)
-                                if not (dep_req.marker and 'extra' in str(dep_req.marker)):
-                                    deps_to_install.append(str(dep_req))
-                            except Exception:
-                                pass
+                    if job.status != "cancelled":
+                        job.status = "done"
+                        job.message = f"Completed: {job.done} ok, {job.failed} failed"
                         
-                        if deps_to_install:
-                            await self._resolve_and_download(session, job, deps_to_install)
-                            job.status = "done" if job.failed == 0 else "error"
-                            job.message = f"Completed with deps: {job.done} ok, {job.failed} failed"
+                        if with_dependencies and job.done > 0:
+                            job.message = f"Resolving dependencies for {norm}"
+                            requires_dist = metadata.get("info", {}).get("requires_dist") or []
+                            deps_to_install = []
+                            from packaging.requirements import Requirement
+                            for dist in requires_dist:
+                                try:
+                                    dep_req = Requirement(dist)
+                                    if not (dep_req.marker and 'extra' in str(dep_req.marker)):
+                                        deps_to_install.append(str(dep_req))
+                                except Exception:
+                                    pass
+                            
+                            if deps_to_install:
+                                await self._resolve_and_download(session, job, deps_to_install)
+                                job.status = "done" if job.failed == 0 else "error"
+                                job.message = f"Completed with deps: {job.done} ok, {job.failed} failed"
 
             except Exception as exc:
                 job.status = "error"
@@ -696,6 +738,7 @@ class PyPIMirrorService:
             finally:
                 job.finished_at = datetime.now(UTC)
                 job.remaining_packages = []
+                await self._invalidate_cache(norm)
 
         job.task = asyncio.create_task(_run())
         return job
@@ -746,6 +789,7 @@ class PyPIMirrorService:
                 job.message = str(exc)
             finally:
                 job.finished_at = datetime.now(UTC)
+                await self._invalidate_cache()
 
         job.task = asyncio.create_task(_run())
         return job
@@ -799,6 +843,7 @@ class PyPIMirrorService:
                 job.message = str(exc)
             finally:
                 job.finished_at = datetime.now(UTC)
+                await self._invalidate_cache()
 
         job.task = asyncio.create_task(_run())
         return job
@@ -825,6 +870,7 @@ class PyPIMirrorService:
                 target={"package": norm, "version": version},
             )
             LOGGER.info("pypi.delete_version package=%s version=%s actor=%s", norm, version, actor.username)
+            await self._invalidate_cache(norm)
         return bool(result.get("deleted"))
 
     async def delete_package(
@@ -844,6 +890,7 @@ class PyPIMirrorService:
                 target={"package": norm},
             )
             LOGGER.info("pypi.delete_package package=%s actor=%s", norm, actor.username)
+            await self._invalidate_cache(norm)
         return bool(result.get("deleted"))
 
     # ------------------------------------------------------------------

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, FormEvent } from "react";
 import {
   Database,
   Download,
+  DownloadCloud,
   Play,
   Trash2,
   RefreshCw,
@@ -13,7 +14,8 @@ import {
   AlertOctagon,
   Eye,
   Ban,
-  Unlock
+  Unlock,
+  Terminal
 } from "lucide-react";
 import {
   api,
@@ -21,7 +23,8 @@ import {
   PyPIPackageListItem,
   PyPIJobStatus,
   PyPIPackage,
-  PyPIBlocklist
+  PyPIBlocklist,
+  Proxy as ProxyType
 } from "./api";
 
 type ToastTone = "success" | "error" | "info" | "warning";
@@ -66,6 +69,15 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [pkgDetailLoading, setPkgDetailLoading] = useState(false);
 
+  // Command Builder modal
+  const [cmdBuilderOpen, setCmdBuilderOpen] = useState(false);
+  const [cmdSelectedPkgs, setCmdSelectedPkgs] = useState<{name: string, version: string}[]>([]);
+  const [cmdPkgSearch, setCmdPkgSearch] = useState("");
+  const [cmdPkgSearchResults, setCmdPkgSearchResults] = useState<PyPIPackageListItem[]>([]);
+  const [cmdProxies, setCmdProxies] = useState<ProxyType[]>([]);
+  const [cmdSelectedProxy, setCmdSelectedProxy] = useState<string>("");
+  const [cmdProxyUrl, setCmdProxyUrl] = useState<string>("");
+
   // Loading states
   const [loadingStats, setLoadingStats] = useState(false);
   const [loadingPackages, setLoadingPackages] = useState(false);
@@ -108,6 +120,44 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
       setLoadingBlocklist(false);
     }
   }, []);
+
+  // Command Builder Search Debounce
+  useEffect(() => {
+    if (!cmdBuilderOpen) return;
+    const timer = setTimeout(() => {
+      if (cmdPkgSearch.trim()) {
+        api.pypiPackages({ search: cmdPkgSearch, page: 1, per_page: 10 }).then(res => setCmdPkgSearchResults(res.items)).catch(() => {});
+      } else {
+        setCmdPkgSearchResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [cmdPkgSearch, cmdBuilderOpen]);
+
+  // Command Builder Proxy Fetching
+  const handleOpenCommandBuilder = async () => {
+    setCmdBuilderOpen(true);
+    try {
+      const proxies = await api.proxies();
+      setCmdProxies(proxies);
+    } catch (err) {
+      console.error("Failed to load proxies", err);
+    }
+  };
+
+  const handleProxyChange = async (proxyId: string) => {
+    setCmdSelectedProxy(proxyId);
+    if (!proxyId) {
+      setCmdProxyUrl("");
+      return;
+    }
+    try {
+      const res = await api.exportProxyUrl(proxyId);
+      setCmdProxyUrl(res.url);
+    } catch (err) {
+      console.error("Failed to get proxy URL", err);
+    }
+  };
 
   // Poll for active jobs via WS or fallback
   const jobPollInterval = useRef<number | null>(null);
@@ -393,7 +443,7 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
       return;
     }
     await runAction(async () => {
-      const job = await api.pypiBulkDownload();
+      const job = await api.pypiSyncAllPackages();
       addActiveJob(job);
     }, { pendingKey: "pypi:bulk-download", errorTitle: "Не удалось запустить обновление хранилища" });
   };
@@ -413,6 +463,16 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
     }
   };
 
+  // Install all versions for a single package
+  const handleInstallAllVersions = async (name: string) => {
+    if (!window.confirm(`Вы уверены, что хотите запустить фоновое скачивание ВСЕХ доступных версий пакета ${name}? Это может занять много места на диске.`)) return;
+    await runAction(async () => {
+      const job = await api.pypiInstall(name, undefined, withDependencies);
+      addActiveJob(job);
+      setDetailModalOpen(false);
+    }, { pendingKey: "pypi:install", errorTitle: "Не удалось запустить скачивание" });
+  };
+
   // Pagination helpers
   const totalPages = Math.ceil(totalPackages / perPage);
   const handlePrevPage = () => {
@@ -427,6 +487,24 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
       void fetchPackages(searchQuery, page + 1);
     }
   };
+
+  // Compute Command Builder Output
+  const generatedCommand = (() => {
+    let cmd = "pip install";
+    for (const p of cmdSelectedPkgs) {
+      cmd += ` ${p.name}${p.version ? p.version : ""}`;
+    }
+    const host = window.location.host;
+    const protocol = window.location.protocol;
+    cmd += ` --index-url ${protocol}//${host}/pypi/simple/`;
+    if (protocol === "http:") {
+      cmd += ` --trusted-host ${window.location.hostname}`;
+    }
+    if (cmdProxyUrl) {
+      cmd += ` --proxy ${cmdProxyUrl}`;
+    }
+    return cmd;
+  })();
 
   return (
     <section className="page-grid" style={{ width: "100%", display: "flex", flexDirection: "column", gap: "20px" }}>
@@ -451,10 +529,11 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
             <button
               className="secondary-button"
               onClick={handleBulkRefresh}
-              title="Докачать/обновить все версии локальных пакетов"
+              disabled={loadingStats || pendingKeys.has("pypi:bulk-download")}
+              title="Перескачать все пакеты / Синхронизировать версии"
             >
-              <Download size={16} />
-              Обновить хранилище
+              <DownloadCloud size={16} />
+              Докачать все версии локальных пакетов
             </button>
             <button
               className="secondary-button"
@@ -612,9 +691,9 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
           {activeTab === "packages" && (
             <div>
               {loadingPackages && packages.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "40px", color: "#697782" }}>
-                  <Loader2 className="spin" size={24} style={{ margin: "0 auto 10px" }} />
-                  Загрузка пакетов...
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px", color: "#697782" }}>
+                  <Loader2 className="spin" size={24} style={{ marginBottom: "10px" }} />
+                  <span>Загрузка пакетов...</span>
                 </div>
               ) : packages.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "40px", color: "#697782" }}>
@@ -911,6 +990,22 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
               </button>
             </div>
           </div>
+          {/* Command Builder Section */}
+          <div style={{ marginTop: "20px", paddingTop: "20px", borderTop: "1px solid #dfe6ea" }}>
+            <h4 style={{ marginBottom: "10px", display: "flex", alignItems: "center", gap: "8px" }}>
+              <Terminal size={18} /> Создатель команд
+            </h4>
+            <p style={{ fontSize: "12px", color: "#697782", marginBottom: "10px" }}>
+              Генератор готовых pip-команд для установки пакетов с локального зеркала, с возможностью указания прокси.
+            </p>
+            <button
+              className="primary-button"
+              style={{ width: "100%", justifyContent: "center", background: "#0f172a" }}
+              onClick={handleOpenCommandBuilder}
+            >
+              Открыть конструктор
+            </button>
+          </div>
         </div>
 
       </div>
@@ -950,6 +1045,13 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
                     <strong>Глобальные операции с пакетом</strong>
                   </div>
                   <div style={{ display: "flex", gap: "10px" }}>
+                    <button
+                      className="secondary-button"
+                      style={{ color: "#0b5c76" }}
+                      onClick={() => void handleInstallAllVersions(selectedPkg.name)}
+                    >
+                      <DownloadCloud size={14} /> Скачать все версии
+                    </button>
                     <button
                       className={`secondary-button ${selectedPkg.is_blocked ? "success-icon" : "danger-icon"}`}
                       onClick={() => void handleBlockPackage(selectedPkg.name, !selectedPkg.is_blocked)}
@@ -1040,6 +1142,160 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
             ) : (
               <div style={{ padding: "20px", textAlign: "center" }}>Не удалось получить информацию о пакете.</div>
             )}
+          </section>
+        </div>
+      )}
+
+      {/* 5. Command Builder Modal */}
+      {cmdBuilderOpen && (
+        <div className="confirm-backdrop" role="presentation">
+          <section className="update-log-dialog" role="dialog" aria-modal="true" style={{ maxWidth: "650px", width: "100%" }}>
+            
+            <div className="update-log-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
+              <h2 style={{ margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
+                <Terminal size={20} /> Конструктор pip install
+              </h2>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setCmdBuilderOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              
+              {/* Package selection */}
+              <div>
+                <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>Добавить пакеты</label>
+                <div style={{ position: "relative" }}>
+                  <Search size={16} style={{ position: "absolute", left: "10px", top: "9px", color: "#697782" }} />
+                  <input
+                    type="text"
+                    placeholder="Поиск по локальному зеркалу..."
+                    value={cmdPkgSearch}
+                    onChange={(e) => setCmdPkgSearch(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px 8px 30px",
+                      borderRadius: "6px",
+                      border: "1px solid #dfe6ea"
+                    }}
+                  />
+                  {cmdPkgSearchResults.length > 0 && (
+                    <div style={{
+                      position: "absolute", top: "100%", left: 0, right: 0,
+                      background: "#fff", border: "1px solid #dfe6ea",
+                      borderRadius: "6px", marginTop: "4px", zIndex: 10,
+                      maxHeight: "200px", overflowY: "auto",
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
+                    }}>
+                      {cmdPkgSearchResults.map(pkg => (
+                        <div
+                          key={pkg.name}
+                          style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #f8fafb" }}
+                          onClick={() => {
+                            if (!cmdSelectedPkgs.find(p => p.name === pkg.name)) {
+                              setCmdSelectedPkgs([...cmdSelectedPkgs, { name: pkg.name, version: "" }]);
+                            }
+                            setCmdPkgSearch("");
+                            setCmdPkgSearchResults([]);
+                          }}
+                        >
+                          <strong>{pkg.name}</strong> <span style={{ fontSize: "11px", color: "#697782" }}>({pkg.versions_count} версий)</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Selected Packages List */}
+              {cmdSelectedPkgs.length > 0 && (
+                <div style={{ background: "#f8fafb", padding: "10px", borderRadius: "6px", border: "1px solid #dfe6ea" }}>
+                  <label style={{ display: "block", marginBottom: "10px", fontSize: "13px", fontWeight: "bold" }}>Выбранные пакеты:</label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {cmdSelectedPkgs.map((pkg, idx) => (
+                      <div key={pkg.name} style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                        <span style={{ fontWeight: "bold", width: "150px" }}>{pkg.name}</span>
+                        <input
+                          type="text"
+                          placeholder="Версия (напр. ==2.0.0)"
+                          value={pkg.version}
+                          onChange={(e) => {
+                            const newPkgs = [...cmdSelectedPkgs];
+                            newPkgs[idx].version = e.target.value;
+                            setCmdSelectedPkgs(newPkgs);
+                          }}
+                          style={{ flex: 1, padding: "6px", borderRadius: "4px", border: "1px solid #dfe6ea", fontSize: "12px" }}
+                        />
+                        <button
+                          className="icon-button danger-icon"
+                          onClick={() => setCmdSelectedPkgs(cmdSelectedPkgs.filter((_, i) => i !== idx))}
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Proxy selection */}
+              <div>
+                <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>Использовать прокси (опционально)</label>
+                <select
+                  value={cmdSelectedProxy}
+                  onChange={(e) => void handleProxyChange(e.target.value)}
+                  style={{
+                    width: "100%", padding: "8px", borderRadius: "6px",
+                    border: "1px solid #dfe6ea", backgroundColor: "#fff"
+                  }}
+                >
+                  <option value="">-- Без прокси --</option>
+                  {cmdProxies.map(p => (
+                    <option key={p.proxy_id} value={p.proxy_id}>
+                      {p.protocol}://{p.host}:{p.port} {p.username ? "(с авторизацией)" : ""}
+                    </option>
+                  ))}
+                </select>
+                {cmdProxyUrl && (
+                  <div style={{ marginTop: "5px", fontSize: "11px", color: "#10b981", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <CheckCircle size={12} /> Прокси готов к использованию
+                  </div>
+                )}
+              </div>
+
+              {/* Command Preview */}
+              <div>
+                <label style={{ display: "block", marginBottom: "5px", fontWeight: "bold" }}>Сгенерированная команда</label>
+                <div style={{ position: "relative" }}>
+                  <textarea
+                    readOnly
+                    value={generatedCommand}
+                    rows={4}
+                    style={{
+                      width: "100%", padding: "10px", borderRadius: "6px",
+                      border: "1px solid #dfe6ea", backgroundColor: "#0f172a",
+                      color: "#38bdf8", fontFamily: "monospace", fontSize: "13px",
+                      resize: "none", wordBreak: "break-all"
+                    }}
+                  />
+                  <button
+                    className="primary-button"
+                    style={{ position: "absolute", bottom: "10px", right: "10px", padding: "4px 10px", fontSize: "12px" }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(generatedCommand);
+                      pushToast("success", "Скопировано", "Команда скопирована в буфер обмена");
+                    }}
+                  >
+                    Скопировать
+                  </button>
+                </div>
+              </div>
+
+            </div>
           </section>
         </div>
       )}

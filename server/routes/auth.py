@@ -221,7 +221,7 @@ async def refresh_tokens(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
-    access_payload = services.auth.verify_api_access_token(tokens.access_token)
+    access_payload = await services.auth.verify_api_access_token(tokens.access_token)
     user_doc = await services.users.get_user_by_id(access_payload["sub"])
     if not user_doc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User does not exist")
@@ -240,6 +240,12 @@ async def logout(
     refresh_token = payload.refresh_token if payload is not None else request.cookies.get(services.settings.refresh_cookie_name)
     if refresh_token:
         await services.auth.revoke_refresh_token(refresh_token)
+    
+    jti = getattr(request.state, "access_token_jti", None)
+    exp = getattr(request.state, "access_token_exp", None)
+    if jti and exp:
+        await services.auth.revoke_api_access_token(jti, exp)
+        
     _clear_auth_cookies(response, services)
     if current_user is not None:
         await services.audit.record("auth.logout", actor=current_user, request_meta=request_meta_from_request(request), target={"user_id": current_user.user_id})
