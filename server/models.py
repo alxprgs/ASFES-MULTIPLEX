@@ -495,3 +495,99 @@ class ProxyBulkImportResult(BaseModel):
 class ProxyTgExportResponse(BaseModel):
     deep_link: str
     web_url: str
+
+
+# ---------------------------------------------------------------------------
+# PyPI Mirror models
+# ---------------------------------------------------------------------------
+
+
+class PyPIInstallRequest(BaseModel):
+    name: str
+    version: str | None = None  # None = install all available versions
+
+
+class PyPIBulkInstallRequest(BaseModel):
+    packages: list[str]  # e.g. ["flask==2.0.0", "requests", "django>=4.0"]
+
+
+class PyPIBlockRequest(BaseModel):
+    name: str
+    version: str | None = None  # None = block the entire package
+
+
+class PyPIPackageVersion(BaseModel):
+    version: str
+    files_count: int
+    size_bytes: int
+    size_human: str
+    is_blocked: bool
+
+
+class PyPIPackage(BaseModel):
+    name: str
+    versions: list[PyPIPackageVersion]
+    total_versions: int
+    total_size_bytes: int
+    total_size_human: str
+    is_blocked: bool
+    blocked_versions: list[str]
+
+
+class PyPIPackageListItem(BaseModel):
+    name: str
+    versions_count: int
+    total_size_human: str
+    latest_version: str | None
+    is_blocked: bool
+    has_blocked_versions: bool
+
+
+class PyPIPackageListResponse(BaseModel):
+    items: list[PyPIPackageListItem]
+    total: int
+    page: int
+    per_page: int
+
+
+class PyPIStatsResponse(BaseModel):
+    packages_count: int
+    versions_count: int
+    files_count: int
+    total_size_bytes: int
+    total_size_human: str
+    blocked_packages: int
+    blocked_versions: int
+    active_jobs: int
+
+
+class PyPIJobStatus(BaseModel):
+    job_id: str
+    kind: str
+    status: str  # "pending" | "running" | "done" | "error" | "cancelled"
+    name: str | None = None
+    total: int = 0
+    done: int = 0
+    failed: int = 0
+    progress_pct: float = 0.0
+    eta_seconds: float | None = None
+    message: str | None = None
+    started_at: str
+    finished_at: str | None = None
+    remaining_packages: list[str] = Field(default_factory=list)
+
+
+class PyPIVerifyResult(BaseModel):
+    name: str | None = None
+    checked_files: int
+    missing_count: int
+    corrupted_count: int
+    missing_files: list[str]
+    corrupted_files: list[str]
+    ok: bool
+
+
+class PyPIBlocklistResponse(BaseModel):
+    blocked_packages: list[str]
+    blocked_versions: dict[str, list[str]]
+

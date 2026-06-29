@@ -8,7 +8,7 @@ from server.core.security import totp_code
 @pytest.mark.asyncio
 async def test_auth_routes_failures(integration_env) -> None:
     client = integration_env["client"]
-    cfg = integration_env["settings"]
+    integration_env["settings"]
 
     # 1. Registration status (initially registration is disabled by default)
     resp = await client.get("/api/auth/registration-status")

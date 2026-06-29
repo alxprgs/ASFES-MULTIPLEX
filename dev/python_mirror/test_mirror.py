@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import shutil
 import sys
 import types
@@ -389,8 +389,8 @@ def test_get_file_path_variants_and_invalid(mirror):
     w = mirror.get_file_path("3.12.0", "windows", "amd64", True)
     assert w.name == "python-3.12.0-amd64.exe"
 
-    l = mirror.get_file_path("3.12.0", "linux", "amd64", False)
-    assert l.name == "Python-3.12.0.tar.xz"
+    linux_path = mirror.get_file_path("3.12.0", "linux", "amd64", False)
+    assert linux_path.name == "Python-3.12.0.tar.xz"
 
     m = mirror.get_file_path("3.12.0", "macos", "amd64", True)
     assert m.name == "python-3.12.0-macos11.pkg"

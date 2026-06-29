@@ -184,7 +184,7 @@ async def test_ports_scanner_probes(host_ops) -> None:
     context = ToolExecutionContext(user=MagicMock(), services=services, request_meta={})
 
     # 1. probe_tcp allowed host (reachable)
-    with patch("socket.create_connection") as mock_conn:
+    with patch("socket.create_connection"):
         tcp_res = await probe_tcp(context, {"host": "127.0.0.1", "port": 80})
         assert tcp_res["reachable"] is True
 

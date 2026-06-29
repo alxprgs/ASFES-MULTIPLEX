@@ -15,6 +15,7 @@ from server.core.config import Settings, settings
 from server.core.logging import IntegrityLogManager, Mailer, get_logger
 from server.mcp import create_mcp_gateway
 from server.routes import api_router, root_router
+from server.routes.pypi import simple_router as pypi_simple_router
 from server.services import build_application_services, periodic_integrity_verifier, shutdown_application_services
 
 
@@ -95,6 +96,7 @@ def create_app() -> FastAPI:
     app.state.mcp_gateway = mcp_gateway
     app.include_router(root_router)
     app.include_router(api_router, prefix=settings.api_prefix)
+    app.include_router(pypi_simple_router)  # pip-compatible Simple API — before frontend catch-all
     app.mount(settings.mcp_path, mcp_gateway.http_app)
     mount_frontend(app, settings)
     return app
@@ -111,6 +113,7 @@ def mount_frontend(app: FastAPI, app_settings: Settings) -> None:
         blocked_prefixes = (
             app_settings.api_prefix.strip("/"),
             app_settings.mcp_path.strip("/"),
+            app_settings.pypi.simple_path.strip("/"),
             ".well-known",
         )
         first_segment = frontend_path.split("/", 1)[0] if frontend_path else ""

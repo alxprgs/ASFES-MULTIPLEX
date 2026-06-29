@@ -202,6 +202,27 @@ class RateLimitPresetConfig(BaseModel):
     mcp_write_window_seconds: int = 300
 
 
+class PyPIConfig(BaseModel):
+    """Configuration for the built-in PyPI mirror."""
+
+    enabled: bool = True
+    data_dir: Path = BASE_DIR / "data" / "pypi_storage"
+    simple_path: str = "/pypi"
+    api_base: str = "https://pypi.org/pypi"
+    parallel: int = Field(default=5, ge=1)
+    max_retries: int = Field(default=3, ge=1)
+    request_timeout: float = Field(default=30.0, gt=0)
+    connect_timeout: float = Field(default=10.0, gt=0)
+    min_safe_space_gb: float = Field(default=3.0, ge=0)
+    rate_limit_mb: float | None = None
+    public_access: bool = True
+    on_demand_proxy: bool = True
+    verify_ssl: bool = True
+    network_mode: Literal["direct", "proxy", "mix"] = "direct"
+    proxies: list[str] = Field(default_factory=list)
+    user_agent: str = "ASFES-PyPI-Mirror/1.0"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -221,6 +242,7 @@ class Settings(BaseSettings):
     password_policy: PasswordPolicyConfig = Field(default_factory=PasswordPolicyConfig)
     oauth: OAuthConfig = Field(default_factory=OAuthConfig)
     rate_limits: RateLimitPresetConfig = Field(default_factory=RateLimitPresetConfig)
+    pypi: PyPIConfig = Field(default_factory=PyPIConfig)
 
     @model_validator(mode="after")
     def finalize_paths(self) -> "Settings":
@@ -257,6 +279,9 @@ class Settings(BaseSettings):
         self.host_ops.nginx_config_paths = [
             path if path.is_absolute() else BASE_DIR / path for path in self.host_ops.nginx_config_paths
         ]
+        self.pypi.data_dir = (
+            self.pypi.data_dir if self.pypi.data_dir.is_absolute() else BASE_DIR / self.pypi.data_dir
+        )
         if self.redis.mode != "disabled" and not self.redis.url:
             raise ValueError("REDIS__URL is required when REDIS__MODE is not 'disabled'")
         if self.app.mcp_path == self.app.api_prefix:

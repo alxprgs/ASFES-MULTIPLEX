@@ -127,7 +127,7 @@ async def test_oauth_authorization_endpoint_failures(integration_env) -> None:
 @pytest.mark.asyncio
 async def test_oauth_token_endpoint_failures(integration_env) -> None:
     client = integration_env["client"]
-    cfg = integration_env["settings"]
+    integration_env["settings"]
 
     # Case 1: unsupported grant_type -> 400
     resp1 = await client.post(

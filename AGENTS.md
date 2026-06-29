@@ -20,13 +20,14 @@
 
 | Префикс              | Назначение                                              |
 |----------------------|---------------------------------------------------------|
-| `/api/*`             | FastAPI REST API (auth, admin, health, oauth)           |
+| `/api/*`             | FastAPI REST API (auth, admin, health, oauth, pypi)     |
+| `/pypi/*`            | pip-совместимый Simple API и файлы (`/pypi/simple/`)    |
 | `/mcp/*`             | FastMCP gateway (MCP-протокол, SSE, OAuth/PKCE)         |
 | `/.well-known/*`     | OAuth discovery, JWKS                                   |
 | `/assets/*`          | Статические файлы React-сборки (`frontend/dist/assets`) |
 | `/*` (всё остальное) | React SPA (`frontend/dist/index.html`) — catch-all      |
 
-Попытки обратиться к `/api`, `/mcp` или `/.well-known` через catch-all маршрут возвращают **404** — это намеренное поведение.
+Попытки обратиться к `/api`, `/mcp`, `/pypi` или `/.well-known` через catch-all маршрут возвращают **404** — это намеренное поведение.
 
 ### Технологический стек
 
@@ -41,9 +42,11 @@
 
 - `server/app.py` — фабрика FastAPI приложения, монтирование маршрутов, lifespan
 - `server/core/config.py` — настройки через Pydantic Settings (читает `.env`)
+- `server/core/pypi_mirror.py` — библиотека нормализации имён и скачивания PyPI-пакетов
+- `server/pypi_service.py` — сервис управления зеркалом (черные списки, фоновые задачи)
 - `server/services.py` — инициализация MongoDB, плагинов, политик, сервисов
 - `server/mcp/` — FastMCP gateway, регистрация tools, OAuth scope
-- `server/routes/` — маршруты: `auth.py`, `admin.py`, `oauth.py`, `health.py`
+- `server/routes/` — маршруты: `auth.py`, `admin.py`, `oauth.py`, `health.py`, `pypi.py`
 - `server/host_ops.py` — host operations tools (файлы, процессы, Docker, Nginx и т.д.)
 - `frontend/src/` — React TypeScript админ-панель
 - `scripts/install.sh` — установочный скрипт для Debian/Ubuntu

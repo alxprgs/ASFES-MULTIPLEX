@@ -43,7 +43,7 @@ def temp_workspace():
         cert_file.write_text("DUMMY CERTIFICATE", encoding="utf-8")
         
         # Save a dummy SSL profile pointing to cert_file
-        ssl_profile = {
+        {
             "provider": "certbot",
             "domains": ["example.com"],
             "email": "admin@example.com",

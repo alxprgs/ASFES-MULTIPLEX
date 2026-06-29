@@ -481,5 +481,128 @@ export const api = {
   exportProxyLines: (proxyId: string) =>
     apiFetch<{ lines: string }>(`/proxy/proxies/${encodeURIComponent(proxyId)}/export/lines`),
   exportProxifier: (proxyIds: string[]) =>
-    apiFetch<{ xml_content: string }>("/proxy/proxies/export/proxifier", { method: "POST", body: JSON.stringify({ proxy_ids: proxyIds }) })
+    apiFetch<{ xml_content: string }>("/proxy/proxies/export/proxifier", { method: "POST", body: JSON.stringify({ proxy_ids: proxyIds }) }),
+
+  // ------------------------------------------------------------------
+  // PyPI Mirror
+  // ------------------------------------------------------------------
+  pypiStats: () =>
+    apiFetch<PyPIStats>("/pypi/stats"),
+  pypiPackages: (params?: { search?: string; page?: number; per_page?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.search) q.set("search", params.search);
+    if (params?.page) q.set("page", String(params.page));
+    if (params?.per_page) q.set("per_page", String(params.per_page));
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return apiFetch<PyPIPackageListResponse>(`/pypi/packages${qs}`);
+  },
+  pypiPackage: (name: string) =>
+    apiFetch<PyPIPackage>(`/pypi/packages/${encodeURIComponent(name)}`),
+  pypiInstall: (name: string, version?: string) =>
+    apiFetch<PyPIJobStatus>("/pypi/packages/install", {
+      method: "POST",
+      body: JSON.stringify({ name, version: version || null })
+    }),
+  pypiBulkInstall: (packages: string[]) =>
+    apiFetch<PyPIJobStatus>("/pypi/packages/bulk-install", {
+      method: "POST",
+      body: JSON.stringify({ packages })
+    }),
+  pypiDeletePackage: (name: string) =>
+    apiFetch<{ ok: boolean }>(`/pypi/packages/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  pypiDeleteVersion: (name: string, version: string) =>
+    apiFetch<{ ok: boolean }>(`/pypi/packages/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`, { method: "DELETE" }),
+  pypiGetBlocklist: () =>
+    apiFetch<PyPIBlocklist>("/pypi/blocklist"),
+  pypiBlock: (name: string, version?: string) =>
+    apiFetch<{ ok: boolean }>("/pypi/blocklist", {
+      method: "POST",
+      body: JSON.stringify({ name, version: version || null })
+    }),
+  pypiUnblockPackage: (name: string) =>
+    apiFetch<{ ok: boolean }>(`/pypi/blocklist/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  pypiUnblockVersion: (name: string, version: string) =>
+    apiFetch<{ ok: boolean }>(`/pypi/blocklist/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`, { method: "DELETE" }),
+  pypiVerify: (name?: string) => {
+    if (name) {
+      return apiFetch<PyPIJobStatus>(`/pypi/packages/${encodeURIComponent(name)}/verify`, { method: "POST" });
+    }
+    return apiFetch<PyPIJobStatus>("/pypi/verify", { method: "POST" });
+  },
+  pypiJobStatus: (jobId: string) =>
+    apiFetch<PyPIJobStatus>(`/pypi/jobs/${encodeURIComponent(jobId)}`),
+  pypiCancelJob: (jobId: string) =>
+    apiFetch<{ ok: boolean; remaining_packages: string[] }>(`/pypi/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" }),
+  pypiBulkDownload: () =>
+    apiFetch<PyPIJobStatus>("/pypi/bulk-download", { method: "POST" })
+};
+
+// ---------------------------------------------------------------------------
+// PyPI Mirror types
+// ---------------------------------------------------------------------------
+
+export type PyPIStats = {
+  packages_count: number;
+  versions_count: number;
+  files_count: number;
+  total_size_bytes: number;
+  total_size_human: string;
+  blocked_packages: number;
+  blocked_versions: number;
+  active_jobs: number;
+};
+
+export type PyPIPackageVersion = {
+  version: string;
+  files_count: number;
+  size_bytes: number;
+  size_human: string;
+  is_blocked: boolean;
+};
+
+export type PyPIPackage = {
+  name: string;
+  versions: PyPIPackageVersion[];
+  total_versions: number;
+  total_size_bytes: number;
+  total_size_human: string;
+  is_blocked: boolean;
+  blocked_versions: string[];
+};
+
+export type PyPIPackageListItem = {
+  name: string;
+  versions_count: number;
+  total_size_human: string;
+  latest_version: string | null;
+  is_blocked: boolean;
+  has_blocked_versions: boolean;
+};
+
+export type PyPIPackageListResponse = {
+  items: PyPIPackageListItem[];
+  total: number;
+  page: number;
+  per_page: number;
+};
+
+export type PyPIJobStatus = {
+  job_id: string;
+  kind: string;
+  status: string;
+  name: string | null;
+  total: number;
+  done: number;
+  failed: number;
+  progress_pct: number;
+  eta_seconds: number | null;
+  message: string | null;
+  started_at: string;
+  finished_at: string | null;
+  remaining_packages: string[];
+};
+
+export type PyPIBlocklist = {
+  blocked_packages: string[];
+  blocked_versions: Record<string, string[]>;
 };

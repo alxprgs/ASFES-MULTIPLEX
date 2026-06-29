@@ -112,7 +112,7 @@ async def test_lifespan_context() -> None:
 
     with patch("server.app.IntegrityLogManager") as mock_log_mgr_cls, \
          patch("server.app.build_application_services", return_value=mock_services) as mock_build_svcs, \
-         patch("server.app.periodic_integrity_verifier") as mock_verifier, \
+         patch("server.app.periodic_integrity_verifier"), \
          patch("server.app.shutdown_application_services") as mock_shutdown_svcs:
 
         # Temporarily change startup_progress to False for easier testing
