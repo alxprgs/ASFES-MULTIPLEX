@@ -109,6 +109,8 @@ async def test_lifespan_context() -> None:
 
     mock_services = MagicMock()
     mock_services.verifier_task = None
+    mock_services.audit.start = AsyncMock()
+    mock_services.audit_archiver.start = AsyncMock()
 
     with patch("server.app.IntegrityLogManager") as mock_log_mgr_cls, \
          patch("server.app.build_application_services", return_value=mock_services) as mock_build_svcs, \

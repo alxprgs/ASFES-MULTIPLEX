@@ -883,75 +883,88 @@ function ConnectedServicesView({ services }: { services: MCPConnectedService[] }
 }
 
 function formatAuditEvent(event: AuditEvent, plugins: PluginInfo[], tools: ToolInfo[]): { title: string; detail: string } {
-  const targetPluginKey = textValue(event.target.plugin_key);
-  const targetToolKey = textValue(event.target.tool_key);
+  const target = (event.payload?.target as Record<string, any>) || {};
+  const metadata = (event.payload?.metadata as Record<string, any>) || {};
+
+  const targetPluginKey = textValue(target.plugin_key);
+  const targetToolKey = textValue(target.tool_key);
   const plugin = targetPluginKey ? plugins.find((item) => item.key === targetPluginKey) : null;
   const tool = targetToolKey ? tools.find((item) => item.key === targetToolKey) : null;
-  const pluginName = textValue(event.metadata.plugin_name) || plugin?.name || targetPluginKey || "плагин";
-  const toolName = textValue(event.metadata.tool_name) || tool?.name || targetToolKey || "инструмент";
+  const pluginName = textValue(metadata.plugin_name) || plugin?.name || targetPluginKey || "Плагин";
+  const toolName = textValue(metadata.tool_name) || tool?.name || targetToolKey || "Неизвестный";
 
   switch (event.event_type) {
     case "mcp.plugin.update":
       return {
-        title: `Плагин «${pluginName}» ${enabledText(event.metadata.enabled)}`,
-        detail: event.metadata.changed === false ? "Состояние уже было таким" : "Состояние плагина обновлено"
+        title: `Плагин «${pluginName}» ${enabledText(metadata.enabled)}`,
+        detail: metadata.changed === false ? "Состояние не изменилось" : "Состояние успешно изменено"
       };
     case "mcp.tool.global.update":
       return {
-        title: `Инструмент «${toolName}» ${enabledText(event.metadata.enabled)}`,
-        detail: `Глобальное состояние инструмента обновлено${textValue(event.metadata.plugin_key) ? ` · ${event.metadata.plugin_key}` : ""}`
+        title: `Инструмент «${toolName}» ${enabledText(metadata.enabled)}`,
+        detail: `Глобальное состояние инструмента успешно изменено${textValue(metadata.plugin_key) ? ` в ${metadata.plugin_key}` : ""}`
       };
+    case "admin.settings.registration":
+      return { title: "Настройка регистрации", detail: `Регистрация ${enabledText(target.enabled)}` };
+    case "admin.settings.mcp":
+      return { title: "Настройка MCP", detail: `MCP-сервер ${enabledText(target.enabled)}` };
     case "mcp.plugins.reload":
       return { title: "Плагины MCP перезагружены", detail: "Реестр плагинов перечитан сервером" };
     case "mcp.tool.call":
-      return { title: `Инструмент «${toolName}» вызван`, detail: targetToolKey || "MCP-вызов" };
-    case "settings.registration.update":
-      return { title: `Регистрация ${enabledText(event.metadata.enabled, "включена", "отключена")}`, detail: "Настройка самостоятельной регистрации обновлена" };
-    case "settings.mcp.update":
-      return { title: `MCP ${enabledText(event.metadata.enabled)}`, detail: "Глобальная настройка MCP обновлена" };
-    case "settings.redis.update":
-      return { title: `Redis во время работы ${enabledText(event.metadata.enabled)}`, detail: "Настройка Redis во время работы обновлена" };
+      return {
+        title: `Вызов MCP-инструмента «${toolName}»`,
+        detail: `Использование: ${metadata.read_only ? "чтение" : "запись"}, Аргументы: ${JSON.stringify(metadata.arguments || {})}`
+      };
     case "system.update":
       return { title: "Обновление приложения запущено", detail: `Скрипт update.sh завершился: ${formatResult(event.result)}` };
     case "system.restart":
       return { title: "Перезапуск приложения запланирован", detail: `Скрипт restart.sh завершился: ${formatResult(event.result)}` };
     case "users.permission.mutate":
-      return { title: "Права пользователя обновлены", detail: textValue(event.target.user_id) || event.event_type };
-    case "account.profile.update":
-      return { title: "Профиль обновлён", detail: textValue(event.target.user_id) || event.event_type };
+      return { title: "Права пользователя обновлены", detail: textValue(target.user_id) || event.event_type };
+    case "account.api_key.create":
+      return { title: "Создан API-ключ", detail: `API-ключ «${textValue(metadata.name) || "без имени"}» создан` };
     case "account.2fa.setup":
-      return { title: "Настройка 2FA начата", detail: textValue(event.target.user_id) || event.event_type };
+      return { title: "Настройка 2FA начата", detail: textValue(target.user_id) || event.event_type };
     case "account.2fa.enable":
-      return { title: "2FA включена", detail: textValue(event.target.user_id) || event.event_type };
+      return { title: "2FA включена", detail: textValue(target.user_id) || event.event_type };
     case "account.2fa.disable":
-      return { title: "2FA отключена", detail: textValue(event.target.user_id) || event.event_type };
+      return { title: "2FA отключена", detail: textValue(target.user_id) || event.event_type };
     case "auth.login":
-      return { title: "Вход выполнен", detail: textValue(event.target.user_id) || event.event_type };
+      return { title: "Вход выполнен", detail: textValue(target.user_id) || event.event_type };
     case "auth.logout":
-      return { title: "Выход выполнен", detail: textValue(event.target.user_id) || event.event_type };
+      return { title: "Выход выполнен", detail: textValue(target.user_id) || event.event_type };
     case "auth.login.failed":
-      return { title: "Неудачная попытка входа", detail: textValue(event.target.username) || event.event_type };
+      return { title: "Неудачная попытка входа", detail: textValue(target.username) || event.event_type };
     case "auth.login.2fa_required":
-      return { title: "Запрошен код 2FA", detail: textValue(event.target.user_id) || event.event_type };
+      return { title: "Запрошен код 2FA", detail: textValue(target.user_id) || event.event_type };
     case "auth.login.2fa_failed":
-      return { title: "Ошибка проверки 2FA", detail: textValue(event.target.user_id) || event.event_type };
+      return { title: "Ошибка проверки 2FA", detail: textValue(target.user_id) || event.event_type };
     case "oauth.client.create":
-      return { title: "OAuth-клиент создан", detail: textValue(event.target.client_id) || event.event_type };
+      return { title: "OAuth-клиент создан", detail: textValue(target.client_id) || event.event_type };
     case "oauth.client.dynamic_register":
-      return { title: "OAuth-клиент зарегистрирован динамически", detail: textValue(event.target.client_id) || event.event_type };
+      return { title: "OAuth-клиент зарегистрирован динамически", detail: textValue(target.client_id) || event.event_type };
     case "oauth.authorize":
-      return { title: "OAuth-авторизация создана", detail: textValue(event.target.client_id) || event.event_type };
+      return { title: "OAuth-авторизация создана", detail: textValue(target.client_id) || event.event_type };
     case "oauth.token.issue":
-      return { title: "OAuth-токен выпущен", detail: textValue(event.target.client_id) || event.event_type };
+      return { title: "OAuth-токен выпущен", detail: textValue(target.client_id) || event.event_type };
     default:
-      return { title: "Событие аудита", detail: `Код события: ${event.event_type}` };
+      return { title: event.event_type, detail: JSON.stringify(event.payload || {}) };
   }
 }
 
 function AuditView({ events, plugins, tools }: { events: AuditEvent[]; plugins: PluginInfo[]; tools: ToolInfo[] }) {
+  const handleExport = () => {
+    window.location.href = "/api/admin/audit/logs/export";
+  };
+
   return (
     <section className="panel">
-      <h2>Аудит</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+        <h2>Аудит</h2>
+        <button className="button" onClick={handleExport}>
+          <ScrollText size={16} style={{marginRight: "6px", verticalAlign: "middle"}} /> Экспорт
+        </button>
+      </div>
       <div className="timeline">
         {events.map((event) => {
           const formatted = formatAuditEvent(event, plugins, tools);
@@ -959,8 +972,13 @@ function AuditView({ events, plugins, tools }: { events: AuditEvent[]; plugins: 
             <div className="timeline-row" key={event.event_id}>
               <span className="timeline-dot" />
               <div className="timeline-content">
-                <strong className="timeline-title">{formatted.title}</strong>
-                <small className="timeline-meta">{formatDate(event.created_at)} · {event.actor_username || "система"} · {formatResult(event.result)}</small>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <strong className="timeline-title">{formatted.title}</strong>
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "monospace", background: "var(--bg-card)", padding: "2px 6px", borderRadius: "4px" }}>
+                    ID: {event.correlation_id?.substring(0,8)}
+                  </span>
+                </div>
+                <small className="timeline-meta">{formatDate(event.timestamp)} · {event.actor?.username || "система"} · {formatResult(event.result)}</small>
                 <small className="timeline-detail">{formatted.detail}</small>
               </div>
             </div>

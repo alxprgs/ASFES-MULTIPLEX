@@ -263,21 +263,8 @@ class BootstrapResponse(BaseModel):
     runtime: RuntimeSettingsResponse | None = None
 
 
-class AuditEventResponse(BaseModel):
-    event_id: str
-    event_type: str
-    actor_user_id: str | None = None
-    actor_username: str | None = None
-    target: dict[str, Any] = Field(default_factory=dict)
-    result: str
-    ip: str | None = None
-    user_agent: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: str
-
-
 class AuditEventListResponse(BaseModel):
-    items: list[AuditEventResponse]
+    items: list[dict[str, Any]]
 
 
 class OAuthClientCreateRequest(BaseModel):
@@ -373,7 +360,8 @@ class UserToolPolicyResponse(BaseModel):
 class ToolExecutionContext:
     user: UserPrincipal
     services: "ApplicationServices"
-    request_meta: dict[str, Any]
+    audit_ctx: AuditContext | None = None
+    request_meta: dict[str, Any] | None = None
 
 
 ToolHandler = Callable[[ToolExecutionContext, dict[str, Any]], Awaitable[Any]]

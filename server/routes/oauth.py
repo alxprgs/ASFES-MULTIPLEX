@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from server.audit import audit_context_from_request
 import base64
 import html
 from urllib.parse import urlencode
@@ -10,7 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from server.core.deps import enforce_api_rate_limit, get_services, require_permission
 from server.core.ratelimit import RateLimitError
 from server.models import OAuthClientCreateRequest, OAuthClientResponse, OAuthClientSecretRotateResponse, OAuthDynamicClientRegistrationRequest, UserPrincipal
-from server.services import ApplicationServices, request_meta_from_request
+from server.services import ApplicationServices
 
 
 oauth_router = APIRouter(prefix="/oauth", tags=["oauth"])
@@ -206,7 +207,7 @@ async def oauth_authorize_post(request: Request, services: ApplicationServices =
         scopes=scopes,
         code_challenge=code_challenge,
         code_challenge_method=code_challenge_method,
-        request_meta=request_meta_from_request(request),
+        audit_ctx=audit_context_from_request(request),
     )
     return RedirectResponse(_append_query(redirect_uri, {"code": code, "state": state}), status_code=status.HTTP_302_FOUND)
 
@@ -218,9 +219,9 @@ async def oauth_token(request: Request, services: ApplicationServices = Depends(
     basic_client_id, _ = _basic_client_credentials(request)
     client_id = str(form.get("client_id", "") or basic_client_id or "")
     client_secret = _client_secret_from_request(request, form)
-    request_meta = request_meta_from_request(request)
+    request_meta = audit_context_from_request(request)
     try:
-        await services.rate_limiter.enforce("oauth_token", f"{client_id}:{request_meta['ip']}")
+        await services.rate_limiter.enforce("oauth_token", f"{client_id}:{request_meta.actor.ip or 'anonymous'}")
     except RateLimitError as exc:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many token requests", headers={"Retry-After": str(exc.retry_after)}) from exc
 
@@ -235,7 +236,7 @@ async def oauth_token(request: Request, services: ApplicationServices = Depends(
                 client_secret=client_secret,
                 redirect_uri=redirect_uri,
                 code_verifier=code_verifier,
-                request_meta=request_meta,
+                audit_ctx=request_meta,
             )
         except LookupError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -246,7 +247,7 @@ async def oauth_token(request: Request, services: ApplicationServices = Depends(
     if grant_type == "refresh_token":
         refresh_token = str(form.get("refresh_token", ""))
         try:
-            payload = await services.oauth.refresh_token(refresh_token=refresh_token, client_id=client_id, client_secret=client_secret, request_meta=request_meta)
+            payload = await services.oauth.refresh_token(refresh_token=refresh_token, client_id=client_id, client_secret=client_secret, audit_ctx=request_meta)
         except LookupError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except ValueError as exc:
@@ -289,7 +290,7 @@ async def create_oauth_client(
     await services.audit.record(
         "oauth.client.create",
         actor=current_user,
-        request_meta=request_meta_from_request(request),
+        audit_ctx=audit_context_from_request(request),
         target={"client_id": client["client_id"]},
         metadata={"redirect_uris": payload.redirect_uris, "allowed_scopes": payload.allowed_scopes},
     )
@@ -313,7 +314,7 @@ async def rotate_oauth_client_secret(
     await services.audit.record(
         "oauth.client.secret.rotate",
         actor=current_user,
-        request_meta=request_meta_from_request(request),
+        audit_ctx=audit_context_from_request(request),
         target={"client_id": client_id},
     )
     return OAuthClientSecretRotateResponse.model_validate(rotated)
@@ -348,7 +349,7 @@ async def register_oauth_client(
     await services.audit.record(
         "oauth.client.dynamic_register",
         actor=current_user,
-        request_meta=request_meta_from_request(request),
+        audit_ctx=audit_context_from_request(request),
         target={"client_id": client["client_id"]},
         metadata={"redirect_uris": payload.redirect_uris, "allowed_scopes": client["allowed_scopes"]},
     )

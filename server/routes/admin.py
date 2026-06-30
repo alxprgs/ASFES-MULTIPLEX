@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from server.audit import audit_context_from_request
 import asyncio
 import contextlib
 import json
@@ -10,8 +11,8 @@ from fastapi.responses import StreamingResponse
 
 from server.core.database import TOOL_POLICIES
 from server.core.deps import enforce_api_rate_limit, get_current_api_user, get_optional_api_user, get_services, require_permission
-from server.models import AuditEventListResponse, AuditEventResponse, BootstrapResponse, MCPConnectedServiceResponse, PermissionDefinition, PermissionMutationRequest, PluginInfoResponse, PluginReloadRequest, ProfileUpdateRequest, RuntimeSettingsResponse, SystemUpdateOptions, SystemUpdateResponse, SystemUpdateSessionResponse, SystemUpdateSessionStartResponse, ToggleRequest, ToolInfoResponse, UserResponse, UserToolPolicyResponse, UserPrincipal
-from server.services import ApplicationServices, request_meta_from_request
+from server.models import BootstrapResponse, MCPConnectedServiceResponse, PermissionDefinition, PermissionMutationRequest, PluginInfoResponse, PluginReloadRequest, ProfileUpdateRequest, RuntimeSettingsResponse, SystemUpdateOptions, SystemUpdateResponse, SystemUpdateSessionResponse, SystemUpdateSessionStartResponse, ToggleRequest, ToolInfoResponse, UserResponse, UserToolPolicyResponse, UserPrincipal
+from server.services import ApplicationServices
 
 
 router = APIRouter(tags=["admin"])
@@ -44,8 +45,8 @@ async def _audit_update_session(
     services: ApplicationServices,
     event_type: str,
     current_user: UserPrincipal,
-    request_meta: dict,
     session_id: str,
+    audit_ctx: Any = None,
 ) -> None:
     session = services.updates.get_session(session_id)
     if session is None or session.task is None:
@@ -56,7 +57,7 @@ async def _audit_update_session(
     await services.audit.record(
         event_type,
         actor=current_user,
-        request_meta=request_meta,
+        audit_ctx=audit_ctx,
         target={"session_id": session_id},
         result="success" if session.status == "success" else "error",
         metadata={
@@ -121,7 +122,7 @@ async def update_profile(
         email=str(payload.email) if payload.email else None,
         tg_id=payload.tg_id,
         vk_id=payload.vk_id,
-        request_meta=request_meta_from_request(request),
+        audit_ctx=audit_context_from_request(request),
     )
     return UserResponse.model_validate(services.users.to_response(user_doc))
 
@@ -156,7 +157,7 @@ async def mutate_permissions(
 ) -> UserResponse:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
     try:
-        user_doc = await services.users.mutate_permissions(user_id, payload.permissions, payload.mode, actor=current_user, request_meta=request_meta_from_request(request))
+        user_doc = await services.users.mutate_permissions(user_id, payload.permissions, payload.mode, actor=current_user, audit_ctx=audit_context_from_request(request))
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
@@ -183,7 +184,7 @@ async def set_registration_settings(
     current_user: UserPrincipal = Depends(require_permission("settings.registration.update")),
 ) -> RuntimeSettingsResponse:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
-    runtime = await services.settings_service.set_registration(payload.enabled, actor=current_user, request_meta=request_meta_from_request(request))
+    runtime = await services.settings_service.set_registration(payload.enabled, actor=current_user, audit_ctx=audit_context_from_request(request))
     return _runtime_response(services, runtime)
 
 
@@ -206,7 +207,7 @@ async def set_mcp_settings(
     current_user: UserPrincipal = Depends(require_permission("mcp.enable")),
 ) -> RuntimeSettingsResponse:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
-    runtime = await services.settings_service.set_mcp(payload.enabled, actor=current_user, request_meta=request_meta_from_request(request))
+    runtime = await services.settings_service.set_mcp(payload.enabled, actor=current_user, audit_ctx=audit_context_from_request(request))
     return _runtime_response(services, runtime)
 
 
@@ -230,7 +231,7 @@ async def set_redis_settings(
 ) -> RuntimeSettingsResponse:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
     try:
-        runtime = await services.settings_service.set_redis_runtime(payload.enabled, actor=current_user, request_meta=request_meta_from_request(request))
+        runtime = await services.settings_service.set_redis_runtime(payload.enabled, actor=current_user, audit_ctx=audit_context_from_request(request))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return _runtime_response(services, runtime)
@@ -264,7 +265,8 @@ async def run_system_update_session(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    asyncio.create_task(_audit_update_session(services, "system.update", current_user, request_meta_from_request(request), session.session_id))
+    audit_ctx = audit_context_from_request(request, services.settings)
+    asyncio.create_task(_audit_update_session(services, "system.update", current_user, session.session_id, audit_ctx))
     return SystemUpdateSessionStartResponse(session_id=session.session_id)
 
 
@@ -312,7 +314,8 @@ async def run_system_update(
         session = await services.updates.start_update(["code", "python", "frontend", "restart"], ["code", "python", "frontend", "restart"])
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    await _audit_update_session(services, "system.update", current_user, request_meta_from_request(request), session.session_id)
+    audit_ctx = audit_context_from_request(request, services.settings)
+    await _audit_update_session(services, "system.update", current_user, session.session_id, audit_ctx)
     return await _wait_update_result(session)
 
 
@@ -327,30 +330,72 @@ async def run_system_restart(
         session = await services.updates.start_restart()
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    await _audit_update_session(services, "system.restart", current_user, request_meta_from_request(request), session.session_id)
+    audit_ctx = audit_context_from_request(request, services.settings)
+    await _audit_update_session(services, "system.restart", current_user, session.session_id, audit_ctx)
     return await _wait_update_result(session)
 
 
-@router.get("/audit/logs", response_model=AuditEventListResponse)
+from fastapi.responses import StreamingResponse
+import json
+from datetime import datetime, timedelta, UTC
+
+@router.get("/audit/logs", response_model=dict)
 async def audit_logs(
     request: Request,
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(require_permission("audit.read")),
+    limit: int = 50,
+    skip: int = 0,
+    event_type: str | None = None,
+    correlation_id: str | None = None,
+    actor_user_id: str | None = None,
 ) -> AuditEventListResponse:
     await enforce_api_rate_limit(request, services, user=current_user)
-    items = [AuditEventResponse(
-        event_id=item["_id"],
-        event_type=item["event_type"],
-        actor_user_id=item.get("actor_user_id"),
-        actor_username=item.get("actor_username"),
-        target=item.get("target", {}),
-        result=item.get("result", "success"),
-        ip=item.get("ip"),
-        user_agent=item.get("user_agent"),
-        metadata=item.get("metadata", {}),
-        created_at=item["created_at"],
-    ) for item in await services.audit.list_events()]
+    filters = {}
+    if event_type: filters["event_type"] = event_type
+    if correlation_id: filters["correlation_id"] = correlation_id
+    if actor_user_id: filters["actor.user_id"] = actor_user_id
+    
+    items = await services.audit.list_events(limit=limit, skip=skip, **filters)
     return AuditEventListResponse(items=items)
+
+@router.get("/audit/logs/export")
+async def export_audit_logs(
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(require_permission("audit.read")),
+    start_date: str | None = None,
+    end_date: str | None = None,
+    event_type: str | None = None,
+    actor_user_id: str | None = None,
+):
+    await enforce_api_rate_limit(request, services, user=current_user)
+    
+    if not start_date:
+        start_date = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+    if not end_date:
+        end_date = datetime.now(UTC).isoformat()
+        
+    # Check max 30 days limit
+    start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+    end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+    if (end_dt - start_dt).days > 31:
+        raise HTTPException(status_code=400, detail="Export range cannot exceed 31 days")
+
+    filters = {}
+    if event_type: filters["event_type"] = event_type
+    if actor_user_id: filters["actor.user_id"] = actor_user_id
+
+    async def log_generator():
+        async for item in services.audit.export_stream(start_date=start_date, end_date=end_date, **filters):
+            yield json.dumps(item, ensure_ascii=False) + "\\n"
+            
+    now_str = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    return StreamingResponse(
+        log_generator(),
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": f'attachment; filename="audit_export_{now_str}.jsonl"'}
+    )
 
 
 @router.get("/mcp/plugins", response_model=list[PluginInfoResponse])
@@ -383,7 +428,7 @@ async def set_plugin_state(
 ) -> PluginInfoResponse:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
     try:
-        await services.plugins.set_plugin_enabled(plugin_key, payload.enabled, actor=current_user, request_meta=request_meta_from_request(request))
+        await services.plugins.set_plugin_enabled(plugin_key, payload.enabled, actor=current_user, audit_ctx=audit_context_from_request(request))
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     mcp_gateway = getattr(request.app.state, "mcp_gateway", None)
@@ -411,7 +456,7 @@ async def reload_plugins(
     await services.audit.record(
         "mcp.plugins.reload",
         actor=current_user,
-        request_meta=request_meta_from_request(request),
+        audit_ctx=audit_context_from_request(request),
         target={"plugin_keys": loaded},
     )
     return {"reloaded": loaded}
@@ -451,7 +496,7 @@ async def set_tool_global_state(
 ) -> ToolInfoResponse:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
     try:
-        await services.plugins.set_global_tool_enabled(tool_key, payload.enabled, actor=current_user, request_meta=request_meta_from_request(request))
+        await services.plugins.set_global_tool_enabled(tool_key, payload.enabled, actor=current_user, audit_ctx=audit_context_from_request(request))
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     tool = next((item for item in await services.plugins.list_tools() if item["key"] == tool_key), None)
@@ -491,7 +536,7 @@ async def set_user_tool_state(
     if not target_user_doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found")
     try:
-        await services.plugins.set_user_tool_enabled(user_id, tool_key, payload.enabled, actor=current_user, request_meta=request_meta_from_request(request))
+        await services.plugins.set_user_tool_enabled(user_id, tool_key, payload.enabled, actor=current_user, audit_ctx=audit_context_from_request(request))
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     effective = await services.plugins.is_tool_enabled_for_user(services.users.to_principal(target_user_doc), tool_key)

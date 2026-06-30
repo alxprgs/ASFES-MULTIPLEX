@@ -6,6 +6,7 @@ Two separate routers:
 - simple_router: pip-compatible Simple Repository API (/pypi/simple/…)
 """
 from __future__ import annotations
+from server.audit import audit_context_from_request
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
@@ -22,7 +23,7 @@ from server.models import (
     PyPIStatsResponse,
     UserPrincipal,
 )
-from server.services import ApplicationServices, request_meta_from_request
+from server.services import ApplicationServices
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +148,7 @@ async def pypi_delete_package(
 ) -> dict:
     """Delete an entire package and all its versions from the mirror."""
     _check_enabled(services)
-    request_meta = request_meta_from_request(request)
+    request_meta = audit_context_from_request(request)
     deleted = await services.pypi_mirror.delete_package(
         name, actor=current_user, request_meta=request_meta
     )
@@ -167,7 +168,7 @@ async def pypi_delete_version(
 ) -> dict:
     """Delete a specific version of a package from the mirror."""
     _check_enabled(services)
-    request_meta = request_meta_from_request(request)
+    request_meta = audit_context_from_request(request)
     deleted = await services.pypi_mirror.delete_version(
         name, version, actor=current_user, request_meta=request_meta
     )
@@ -194,7 +195,7 @@ async def pypi_block(
 ) -> dict:
     """Block a package or a specific version from being served by the mirror."""
     _check_enabled(services)
-    request_meta = request_meta_from_request(request)
+    request_meta = audit_context_from_request(request)
     await services.pypi_mirror.block(
         payload.name, payload.version, actor=current_user, request_meta=request_meta
     )
@@ -210,7 +211,7 @@ async def pypi_unblock_package(
 ) -> dict:
     """Remove a package (and all its versions) from the blocklist."""
     _check_enabled(services)
-    request_meta = request_meta_from_request(request)
+    request_meta = audit_context_from_request(request)
     await services.pypi_mirror.unblock(name, actor=current_user, request_meta=request_meta)
     return {"ok": True}
 
@@ -228,7 +229,7 @@ async def pypi_unblock_version(
 ) -> dict:
     """Remove a single version of a package from the blocklist."""
     _check_enabled(services)
-    request_meta = request_meta_from_request(request)
+    request_meta = audit_context_from_request(request)
     await services.pypi_mirror.unblock(
         name, version, actor=current_user, request_meta=request_meta
     )

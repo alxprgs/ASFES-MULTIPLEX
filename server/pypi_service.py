@@ -19,6 +19,7 @@ from server.core.database import DatabaseManager
 from server.core.cache import CacheManager
 from server.core.logging import get_logger
 from server.core.pypi_mirror import AsyncPypiMirror, MirrorConfig, normalize_package_name
+from server.audit import AuditContext
 from server.models import (
     PyPIBlocklistResponse,
     PyPIJobStatus,
@@ -161,7 +162,7 @@ class PyPIMirrorService:
         version: str | None = None,
         *,
         actor: UserPrincipal,
-        request_meta: dict[str, Any],
+        request_meta: AuditContext,
     ) -> None:
         norm = normalize_package_name(name)
         if version is None:
@@ -191,7 +192,7 @@ class PyPIMirrorService:
         version: str | None = None,
         *,
         actor: UserPrincipal,
-        request_meta: dict[str, Any],
+        request_meta: AuditContext,
     ) -> None:
         norm = normalize_package_name(name)
         if version is None:
@@ -858,7 +859,7 @@ class PyPIMirrorService:
         version: str,
         *,
         actor: UserPrincipal,
-        request_meta: dict[str, Any],
+        request_meta: AuditContext,
     ) -> bool:
         norm = normalize_package_name(name)
         result = self._mirror.delete_target(norm, version)
@@ -878,7 +879,7 @@ class PyPIMirrorService:
         name: str,
         *,
         actor: UserPrincipal,
-        request_meta: dict[str, Any],
+        request_meta: AuditContext,
     ) -> bool:
         norm = normalize_package_name(name)
         result = self._mirror.delete_target(norm)

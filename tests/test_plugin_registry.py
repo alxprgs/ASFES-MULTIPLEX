@@ -51,6 +51,7 @@ async def test_call_tool_redacts_arguments_in_audit(integration_env) -> None:
     )
     assert result["ok"] is True
 
+    await services.audit._flush()
     events = await services.audit.list_events()
     tool_event = next(item for item in events if item["event_type"] == "mcp.tool.call" and item["target"]["tool_key"] == "docker.restart_container")
     assert tool_event["metadata"]["arguments"]["container"] == "[REDACTED]"
@@ -71,6 +72,7 @@ async def test_set_plugin_enabled_records_detailed_audit_metadata(integration_en
         request_meta={"ip": "127.0.0.1", "user_agent": "pytest"},
     )
 
+    await services.audit._flush()
     events = await services.audit.list_events()
     event = next(item for item in events if item["event_type"] == "mcp.plugin.update" and item["target"]["plugin_key"] == "docker")
     assert event["metadata"]["enabled"] is False
@@ -94,6 +96,7 @@ async def test_set_global_tool_enabled_records_detailed_audit_metadata(integrati
         request_meta={"ip": "127.0.0.1", "user_agent": "pytest"},
     )
 
+    await services.audit._flush()
     events = await services.audit.list_events()
     event = next(item for item in events if item["event_type"] == "mcp.tool.global.update" and item["target"]["tool_key"] == "docker.list_containers")
     assert event["metadata"]["enabled"] is True

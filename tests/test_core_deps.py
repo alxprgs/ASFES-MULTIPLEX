@@ -179,14 +179,15 @@ async def test_enforce_api_rate_limit() -> None:
     mock_services.rate_limiter.enforce = AsyncMock()
     request = create_mock_request()
 
+    request.client = MagicMock()
+    request.client.host = "127.0.0.1"
+    
     # Success case
-    with patch("server.core.deps.request_meta_from_request", return_value={"ip": "127.0.0.1"}):
-        await enforce_api_rate_limit(request, mock_services)
+    await enforce_api_rate_limit(request, mock_services)
 
     # Rate limit error raises 429
     mock_services.rate_limiter.enforce.side_effect = RateLimitError("policy", 60)
-    with patch("server.core.deps.request_meta_from_request", return_value={"ip": "127.0.0.1"}):
-        with pytest.raises(HTTPException) as exc:
-            await enforce_api_rate_limit(request, mock_services)
-        assert exc.value.status_code == 429
-        assert "Retry-After" in exc.value.headers
+    with pytest.raises(HTTPException) as exc:
+        await enforce_api_rate_limit(request, mock_services)
+    assert exc.value.status_code == 429
+    assert "Retry-After" in exc.value.headers

@@ -27,6 +27,7 @@ from server.core.ratelimit import RateLimitPolicy, RateLimiter
 from server.core.cache import CacheManager
 from server.core.security import TokenBundle, b64url_decode, b64url_encode, build_totp_uri, create_jwt, decode_jwt, generate_totp_secret, hash_password, now_utc, random_token, sha256_text, verify_password, verify_pkce, verify_totp_code
 from server.host_ops import HostOpsService
+from server.audit import AuditCollector, AuditContext, ensure_audit_context, AuditEnricher, AuditRepository, AuditArchiverJob
 from server.models import MCPTool, PermissionDefinition, PluginDefinition, RuntimeAvailability, ToolExecutionContext, UserPrincipal
 from server.update_manager import UpdateManager
 from server.proxy_service import ProxyService
@@ -82,7 +83,9 @@ def validate_runtime_security(settings: Settings) -> None:
             raise RuntimeError("Production HTTPS mode requires SECURITY__COOKIE_SECURE=true")
 
 
-def serialize_datetime(value: datetime | None) -> str | None:
+def serialize_datetime(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value
     return value.isoformat() if value else None
 
 
@@ -126,22 +129,6 @@ def client_ip_from_request(request: Any, settings: Settings) -> str | None:
     return forwarded.split(",")[0].strip() or peer_ip
 
 
-def request_meta_from_request(request: Any, settings: Settings | None = None) -> dict[str, Any]:
-    settings_obj = settings
-    if settings_obj is None:
-        state = getattr(getattr(request, "app", None), "state", None)
-        settings_obj = getattr(getattr(state, "services", None), "settings", None)
-    if settings_obj is None:
-        settings_obj = getattr(request.app.state, "services").settings
-    ip = client_ip_from_request(request, settings_obj)
-    return {
-        "ip": ip,
-        "user_agent": request.headers.get("user-agent"),
-        "method": request.method,
-        "path": request.url.path,
-    }
-
-
 class PermissionCatalog:
     def __init__(self) -> None:
         self._permissions: dict[str, PermissionDefinition] = {}
@@ -167,54 +154,8 @@ class PermissionCatalog:
         return key in self._permissions
 
 
-class AuditService:
-    def __init__(self, db: DatabaseManager) -> None:
-        self.db = db
-        self.logger = get_logger("multiplex.audit")
-
-    async def record(
-        self,
-        event_type: str,
-        *,
-        actor: UserPrincipal | None,
-        request_meta: dict[str, Any],
-        target: dict[str, Any] | None = None,
-        result: str = "success",
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        created_at = now_utc()
-        document = {
-            "_id": uuid4().hex,
-            "event_type": event_type,
-            "actor_user_id": actor.user_id if actor else None,
-            "actor_username": actor.username if actor else None,
-            "target": target or {},
-            "result": result,
-            "ip": request_meta.get("ip"),
-            "user_agent": request_meta.get("user_agent"),
-            "metadata": metadata or {},
-            "created_at": created_at,
-        }
-        await self.db.collection(AUDIT_EVENTS).insert_one(document)
-        self.logger.info(
-            f"Audit event recorded: {event_type}",
-            extra={"event_type": f"audit.{event_type}", "payload": self._serialize_doc(document)},
-        )
-        return document
-
-    async def list_events(self, limit: int = 100) -> list[dict[str, Any]]:
-        cursor = self.db.collection(AUDIT_EVENTS).find().sort("created_at", -1).limit(limit)
-        return [self._serialize_doc(item) async for item in cursor]
-
-    def _serialize_doc(self, document: dict[str, Any]) -> dict[str, Any]:
-        output: dict[str, Any] = {}
-        for key, value in document.items():
-            output[key] = value.isoformat() if isinstance(value, datetime) else value
-        return output
-
-
 class SettingsService:
-    def __init__(self, db: DatabaseManager, settings: Settings, rate_limiter: RateLimiter, audit: AuditService, cache: CacheManager) -> None:
+    def __init__(self, db: DatabaseManager, settings: Settings, rate_limiter: RateLimiter, audit: AuditCollector, cache: CacheManager) -> None:
         self.db = db
         self.settings = settings
         self.rate_limiter = rate_limiter
@@ -254,7 +195,8 @@ class SettingsService:
             document = await self.ensure_runtime_settings()
         return document
 
-    async def set_registration(self, enabled: bool, *, actor: UserPrincipal, request_meta: dict[str, Any]) -> dict[str, Any]:
+    async def set_registration(self, enabled: bool, *, actor: UserPrincipal, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         await self.db.collection(SETTINGS).update_one(
             {"_id": "runtime"},
             self._runtime_upsert_update(registration_enabled=enabled),
@@ -264,13 +206,14 @@ class SettingsService:
         await self.audit.record(
             "settings.registration.update",
             actor=actor,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"scope": "runtime"},
             metadata={"enabled": enabled},
         )
         return document
 
-    async def set_mcp(self, enabled: bool, *, actor: UserPrincipal, request_meta: dict[str, Any]) -> dict[str, Any]:
+    async def set_mcp(self, enabled: bool, *, actor: UserPrincipal, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         await self.db.collection(SETTINGS).update_one(
             {"_id": "runtime"},
             self._runtime_upsert_update(mcp_enabled=enabled),
@@ -280,13 +223,14 @@ class SettingsService:
         await self.audit.record(
             "settings.mcp.update",
             actor=actor,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"scope": "runtime"},
             metadata={"enabled": enabled},
         )
         return document
 
-    async def set_redis_runtime(self, enabled: bool, *, actor: UserPrincipal, request_meta: dict[str, Any]) -> dict[str, Any]:
+    async def set_redis_runtime(self, enabled: bool, *, actor: UserPrincipal, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         if self.settings.redis.mode == "required" and not enabled:
             raise ValueError("Redis cannot be disabled while REDIS__MODE is set to 'required'")
         await self.rate_limiter.set_runtime_enabled(enabled)
@@ -300,7 +244,7 @@ class SettingsService:
         await self.audit.record(
             "settings.redis.update",
             actor=actor,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"scope": "runtime"},
             metadata={"enabled": enabled},
         )
@@ -308,7 +252,7 @@ class SettingsService:
 
 
 class UserService:
-    def __init__(self, db: DatabaseManager, settings: Settings, permissions: PermissionCatalog, audit: AuditService) -> None:
+    def __init__(self, db: DatabaseManager, settings: Settings, permissions: PermissionCatalog, audit: AuditCollector) -> None:
         self.db = db
         self.settings = settings
         self.permissions = permissions
@@ -358,8 +302,9 @@ class UserService:
         tg_id: str | None = None,
         vk_id: str | None = None,
         actor: UserPrincipal | None,
-        request_meta: dict[str, Any],
+        audit_ctx: Any = None, request_meta: Any = None,
     ) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         existing = await self.get_user_by_username(username)
         if existing:
             raise ValueError("User already exists")
@@ -383,7 +328,7 @@ class UserService:
         await self.audit.record(
             "auth.register",
             actor=actor,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"user_id": document["_id"], "username": username},
         )
         return document
@@ -417,8 +362,9 @@ class UserService:
         rp_id: str,
         rp_name: str,
         origin: str,
-        request_meta: dict[str, Any],
+        audit_ctx: Any = None, request_meta: Any = None,
     ) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         if not await self.verify_password_for_user(user, current_password):
             raise PermissionError("Current password is invalid")
         existing = await self._passkeys_for_user(user.user_id)
@@ -448,7 +394,7 @@ class UserService:
         await self.audit.record(
             "account.passkey.registration_options",
             actor=user,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"user_id": user.user_id},
         )
         return {"challenge_id": challenge_id, "options": json.loads(options_to_json(options))}
@@ -460,8 +406,9 @@ class UserService:
         challenge_id: str,
         name: str | None,
         credential: dict[str, Any],
-        request_meta: dict[str, Any],
+        audit_ctx: Any = None, request_meta: Any = None,
     ) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         challenge = await self._consume_passkey_challenge(challenge_id, purpose="registration")
         if challenge.get("user_id") != user.user_id:
             raise ValueError("Passkey challenge does not belong to this user")
@@ -496,7 +443,7 @@ class UserService:
         await self.audit.record(
             "account.passkey.create",
             actor=user,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"user_id": user.user_id, "passkey_id": document["_id"]},
             metadata={"name": document["name"]},
         )
@@ -508,8 +455,9 @@ class UserService:
         username: str | None,
         rp_id: str,
         origin: str,
-        request_meta: dict[str, Any],
+        audit_ctx: Any = None, request_meta: Any = None,
     ) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         username = username.strip() if username else None
         user_doc = await self.get_user_by_username(username) if username else None
         if username and not user_doc:
@@ -537,7 +485,7 @@ class UserService:
         await self.audit.record(
             "auth.passkey.options",
             actor=self.to_principal(user_doc) if user_doc else None,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"username": username},
         )
         return {"challenge_id": challenge_id, "options": json.loads(options_to_json(options))}
@@ -547,8 +495,9 @@ class UserService:
         *,
         challenge_id: str,
         credential: dict[str, Any],
-        request_meta: dict[str, Any],
+        audit_ctx: Any = None, request_meta: Any = None,
     ) -> tuple[UserPrincipal, dict[str, Any]]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         challenge = await self._consume_passkey_challenge(challenge_id, purpose="authentication")
         credential_id = credential.get("id") or credential.get("rawId")
         if not isinstance(credential_id, str) or not credential_id:
@@ -586,12 +535,13 @@ class UserService:
         await self.audit.record(
             "auth.passkey.login",
             actor=user,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"user_id": user.user_id, "passkey_id": passkey["_id"]},
         )
         return user, user_doc
 
-    async def rename_passkey(self, user: UserPrincipal, passkey_id: str, name: str, *, request_meta: dict[str, Any]) -> dict[str, Any]:
+    async def rename_passkey(self, user: UserPrincipal, passkey_id: str, name: str, *, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         result = await self.db.collection(PASSKEYS).update_one(
             {"_id": passkey_id, "user_id": user.user_id},
             {"$set": {"name": clean_passkey_name(name), "updated_at": now_utc()}},
@@ -603,27 +553,29 @@ class UserService:
         await self.audit.record(
             "account.passkey.rename",
             actor=user,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"user_id": user.user_id, "passkey_id": passkey_id},
             metadata={"name": updated["name"]},
         )
         return self.to_passkey_response(updated)
 
-    async def delete_passkey(self, user: UserPrincipal, passkey_id: str, *, request_meta: dict[str, Any]) -> None:
+    async def delete_passkey(self, user: UserPrincipal, passkey_id: str, *, audit_ctx: Any = None, request_meta: Any = None) -> None:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         result = await self.db.collection(PASSKEYS).delete_one({"_id": passkey_id, "user_id": user.user_id})
         if result.deleted_count == 0:
             raise LookupError("Passkey not found")
         await self.audit.record(
             "account.passkey.delete",
             actor=user,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"user_id": user.user_id, "passkey_id": passkey_id},
         )
 
     def two_factor_enabled(self, document: dict[str, Any]) -> bool:
         return bool(document.get("two_factor", {}).get("enabled"))
 
-    async def begin_two_factor_setup(self, user: UserPrincipal, *, request_meta: dict[str, Any]) -> dict[str, str]:
+    async def begin_two_factor_setup(self, user: UserPrincipal, *, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, str]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         secret = generate_totp_secret()
         issuer = "ASFES"
         otpauth_uri = build_totp_uri(secret=secret, issuer=issuer, account_name=user.user_id)
@@ -634,12 +586,13 @@ class UserService:
         await self.audit.record(
             "account.2fa.setup",
             actor=user,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"user_id": user.user_id},
         )
         return {"secret": secret, "otpauth_uri": otpauth_uri, "qr_svg": qr_svg(otpauth_uri)}
 
-    async def enable_two_factor(self, user: UserPrincipal, code: str, *, request_meta: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    async def enable_two_factor(self, user: UserPrincipal, code: str, *, audit_ctx: Any = None, request_meta: Any = None) -> tuple[dict[str, Any], list[str]]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         document = await self.get_user_by_id(user.user_id)
         if not document:
             raise LookupError("User not found")
@@ -668,12 +621,13 @@ class UserService:
         await self.audit.record(
             "account.2fa.enable",
             actor=user,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"user_id": user.user_id},
         )
         return updated, recovery_codes
 
-    async def disable_two_factor(self, user: UserPrincipal, code: str, *, current_password: str, request_meta: dict[str, Any]) -> dict[str, Any]:
+    async def disable_two_factor(self, user: UserPrincipal, code: str, *, current_password: str, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         document = await self.get_user_by_id(user.user_id)
         if not document:
             raise LookupError("User not found")
@@ -692,7 +646,7 @@ class UserService:
         await self.audit.record(
             "account.2fa.disable",
             actor=user,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"user_id": user.user_id},
         )
         return updated
@@ -723,8 +677,9 @@ class UserService:
         email: str | None,
         tg_id: str | None,
         vk_id: str | None,
-        request_meta: dict[str, Any],
+        audit_ctx: Any = None, request_meta: Any = None,
     ) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         await self.db.collection(USERS).update_one(
             {"_id": user.user_id},
             {"$set": {"email": email, "tg_id": tg_id, "vk_id": vk_id, "updated_at": now_utc()}},
@@ -734,7 +689,7 @@ class UserService:
         await self.audit.record(
             "account.profile.update",
             actor=user,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"user_id": user.user_id},
             metadata={"email": email, "tg_id": tg_id, "vk_id": vk_id},
         )
@@ -747,8 +702,9 @@ class UserService:
         mode: str,
         *,
         actor: UserPrincipal,
-        request_meta: dict[str, Any],
+        audit_ctx: Any = None, request_meta: Any = None,
     ) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         if user_id == "user_root":
             raise ValueError("Root permissions are managed implicitly and cannot be modified")
         for permission in permissions:
@@ -773,7 +729,7 @@ class UserService:
         await self.audit.record(
             "users.permission.mutate",
             actor=actor,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"user_id": user_id},
             metadata={"mode": mode, "permissions": permissions},
         )
@@ -863,7 +819,8 @@ class AuthService:
         self.users = users
         self.cache = cache
 
-    async def issue_api_tokens(self, user: UserPrincipal, request_meta: dict[str, Any]) -> TokenBundle:
+    async def issue_api_tokens(self, user: UserPrincipal, audit_ctx: Any = None, request_meta: Any = None) -> TokenBundle:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         access_token = create_jwt(
             subject=user.user_id,
             secret=self.settings.security.api_jwt_secret.get_secret_value(),
@@ -884,7 +841,7 @@ class AuthService:
                 "client_id": None,
                 "created_at": now_utc(),
                 "expires_at": expires_at,
-                "metadata": request_meta,
+                "metadata": {},
             }
         )
         return TokenBundle(access_token=access_token, refresh_token=refresh_token, expires_in=self.settings.security.access_token_ttl_minutes * 60)
@@ -909,7 +866,8 @@ class AuthService:
             token_type="api_2fa_challenge",
         )
 
-    async def refresh_api_tokens(self, refresh_token: str, request_meta: dict[str, Any]) -> TokenBundle:
+    async def refresh_api_tokens(self, refresh_token: str, audit_ctx: Any = None, request_meta: Any = None) -> TokenBundle:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         token_hash = sha256_text(refresh_token)
         document = await self.db.collection(REFRESH_TOKENS).find_one({"token_hash": token_hash, "purpose": "api"})
         if not document:
@@ -947,7 +905,7 @@ class AuthService:
 
 
 class OAuthService:
-    def __init__(self, db: DatabaseManager, settings: Settings, users: UserService, audit: AuditService) -> None:
+    def __init__(self, db: DatabaseManager, settings: Settings, users: UserService, audit: AuditCollector) -> None:
         self.db = db
         self.settings = settings
         self.users = users
@@ -1023,8 +981,9 @@ class OAuthService:
         scopes: list[str],
         code_challenge: str,
         code_challenge_method: str,
-        request_meta: dict[str, Any],
+        audit_ctx: Any = None, request_meta: Any = None,
     ) -> str:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         method = code_challenge_method.upper()
         if method == "PLAIN" and not self.settings.oauth.allow_plain_pkce:
             raise ValueError("plain PKCE is not allowed")
@@ -1048,7 +1007,7 @@ class OAuthService:
         await self.audit.record(
             "oauth.authorize",
             actor=user,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"client_id": client_id},
             metadata={"scopes": scopes},
         )
@@ -1062,8 +1021,9 @@ class OAuthService:
         client_secret: str | None,
         redirect_uri: str,
         code_verifier: str,
-        request_meta: dict[str, Any],
+        audit_ctx: Any = None, request_meta: Any = None,
     ) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         client = await self.validate_client(client_id, redirect_uri)
         await self.authenticate_client(client_id, client_secret)
         document = await self.db.collection(OAUTH_CODES).find_one({"code": code, "client_id": client_id})
@@ -1111,13 +1071,13 @@ class OAuthService:
                 "scopes": document["scopes"],
                 "created_at": now_utc(),
                 "expires_at": now_utc() + timedelta(days=self.settings.security.oauth_refresh_token_ttl_days),
-                "metadata": request_meta,
+                "metadata": {},
             }
         )
         await self.audit.record(
             "oauth.token.issue",
             actor=user,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"client_id": client_id},
             metadata={"scopes": document["scopes"], "client_name": client["name"]},
         )
@@ -1130,7 +1090,8 @@ class OAuthService:
             "client_name": client["name"],
         }
 
-    async def refresh_token(self, *, refresh_token: str, client_id: str, client_secret: str | None, request_meta: dict[str, Any]) -> dict[str, Any]:
+    async def refresh_token(self, *, refresh_token: str, client_id: str, client_secret: str | None, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         await self.authenticate_client(client_id, client_secret)
         document = await self.db.collection(REFRESH_TOKENS).find_one({"token_hash": sha256_text(refresh_token), "purpose": "oauth", "client_id": client_id})
         if not document:
@@ -1168,7 +1129,7 @@ class OAuthService:
                 "scopes": document.get("scopes", ["mcp"]),
                 "created_at": now_utc(),
                 "expires_at": now_utc() + timedelta(days=self.settings.security.oauth_refresh_token_ttl_days),
-                "metadata": request_meta,
+                "metadata": {},
             }
         )
         return {
@@ -1230,7 +1191,7 @@ class OAuthService:
                 users.append({"user_id": user_id, "username": user_doc.get("username") if user_doc else None})
             last_call = await self.db.collection(AUDIT_EVENTS).find_one(
                 {"event_type": "mcp.tool.call", "metadata.oauth_client_id": client_id},
-                sort=[("created_at", -1)],
+                sort=[("timestamp", -1)],
             )
             services.append(
                 {
@@ -1242,7 +1203,7 @@ class OAuthService:
                     "user_count": len(users),
                     "users": users,
                     "last_token_issued_at": serialize_datetime(item["last_token_issued_at"]),
-                    "last_tool_call_at": serialize_datetime(last_call.get("created_at")) if last_call else None,
+                    "last_tool_call_at": serialize_datetime(last_call.get("created_at") or last_call.get("timestamp")) if last_call else None,
                 }
             )
         return sorted(services, key=lambda value: value["client_name"].lower())
@@ -1296,7 +1257,7 @@ class PluginRegistry:
         db: DatabaseManager,
         settings: Settings,
         permissions: PermissionCatalog,
-        audit: AuditService,
+        audit: AuditCollector,
         settings_service: SettingsService,
         rate_limiter: RateLimiter,
     ) -> None:
@@ -1385,7 +1346,8 @@ class PluginRegistry:
                 upsert=True,
             )
 
-    async def set_plugin_enabled(self, plugin_key: str, enabled: bool, *, actor: UserPrincipal, request_meta: dict[str, Any]) -> None:
+    async def set_plugin_enabled(self, plugin_key: str, enabled: bool, *, actor: UserPrincipal, audit_ctx: Any = None, request_meta: Any = None) -> None:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         if plugin_key not in self.plugins:
             raise LookupError("Plugin not found")
         current = await self.db.collection(PLUGINS).find_one({"key": plugin_key})
@@ -1399,7 +1361,7 @@ class PluginRegistry:
         await self.audit.record(
             "mcp.plugin.update",
             actor=actor,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"plugin_key": plugin_key},
             metadata={
                 "enabled": enabled,
@@ -1460,7 +1422,8 @@ class PluginRegistry:
                 )
         return documents
 
-    async def set_global_tool_enabled(self, tool_key: str, enabled: bool, *, actor: UserPrincipal, request_meta: dict[str, Any]) -> None:
+    async def set_global_tool_enabled(self, tool_key: str, enabled: bool, *, actor: UserPrincipal, audit_ctx: Any = None, request_meta: Any = None) -> None:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         tool = self.get_tool(tool_key)
         if tool is None:
             raise LookupError("Tool not found")
@@ -1478,7 +1441,7 @@ class PluginRegistry:
         await self.audit.record(
             "mcp.tool.global.update",
             actor=actor,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"tool_key": tool_key},
             metadata={
                 "enabled": enabled,
@@ -1496,8 +1459,9 @@ class PluginRegistry:
         enabled: bool,
         *,
         actor: UserPrincipal,
-        request_meta: dict[str, Any],
+        audit_ctx: Any = None, request_meta: Any = None,
     ) -> None:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         if self.get_tool(tool_key) is None:
             raise LookupError("Tool not found")
         await self.db.collection(TOOL_POLICIES).update_one(
@@ -1511,7 +1475,7 @@ class PluginRegistry:
         await self.audit.record(
             "mcp.tool.user.update",
             actor=actor,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"tool_key": tool_key, "user_id": user_id},
             metadata={"enabled": enabled},
         )
@@ -1625,7 +1589,8 @@ class PluginRegistry:
                     )
         return sorted(tools, key=lambda item: item["name"])
 
-    async def call_tool(self, user: UserPrincipal, tool_key: str, arguments: dict[str, Any], request_meta: dict[str, Any]) -> dict[str, Any]:
+    async def call_tool(self, user: UserPrincipal, tool_key: str, arguments: dict[str, Any], audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         tool = self.get_tool(tool_key)
         if tool is None:
             raise LookupError("Tool not found")
@@ -1641,7 +1606,7 @@ class PluginRegistry:
         await self.rate_limiter.enforce(policy_name, f"{user.user_id}:{tool_key}")
         if self._services is None:
             raise RuntimeError("Plugin services are not attached")
-        context = ToolExecutionContext(user=user, services=self._services, request_meta=request_meta)
+        context = ToolExecutionContext(user=user, services=self._services, audit_ctx=audit_ctx)
         result = await tool.handler(context, arguments)
         redacted_arguments = self._services.host_ops.redact_arguments(
             arguments,
@@ -1651,19 +1616,19 @@ class PluginRegistry:
         await self.audit.record(
             "mcp.tool.call",
             actor=user,
-            request_meta=request_meta,
+            audit_ctx=audit_ctx,
             target={"tool_key": tool_key},
             metadata={
                 "arguments": redacted_arguments,
                 "read_only": tool.manifest.read_only,
-                "oauth_client_id": request_meta.get("oauth_client_id"),
+                "oauth_client_id": audit_ctx.oauth_client_id if audit_ctx else None,
             },
         )
         return result if isinstance(result, dict) else {"result": result}
 
 
 class ApiKeyService:
-    def __init__(self, db: DatabaseManager, users: UserService, audit: AuditService) -> None:
+    def __init__(self, db: DatabaseManager, users: UserService, audit: AuditCollector) -> None:
         self.db = db
         self.users = users
         self.audit = audit
@@ -1676,8 +1641,9 @@ class ApiKeyService:
         token_prefix = token[:12]
         return token, token_hash, token_prefix
 
-    async def create_key(self, user: UserPrincipal, *, name: str, expires_in_days: int | None, request_meta: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    async def create_key(self, user: UserPrincipal, *, name: str, expires_in_days: int | None, audit_ctx: Any = None, request_meta: Any = None) -> tuple[str, dict[str, Any]]:
         # Enforce max 20 keys
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         count = await self.db.collection(API_KEYS).count_documents({"user_id": user.user_id, "is_active": True})
         if count >= 20:
             raise ValueError("Maximum number of API keys (20) reached")
@@ -1696,20 +1662,22 @@ class ApiKeyService:
             "is_active": True,
         }
         await self.db.collection(API_KEYS).insert_one(document)
-        await self.audit.record("account.api_key.create", actor=user, request_meta=request_meta, target={"user_id": user.user_id, "key_id": document["_id"]}, metadata={"name": document["name"]})
+        await self.audit.record("account.api_key.create", actor=user, audit_ctx=audit_ctx, target={"user_id": user.user_id, "key_id": document["_id"]}, metadata={"name": document["name"]})
         return token, document
 
     async def list_keys(self, user: UserPrincipal) -> list[dict[str, Any]]:
         cursor = self.db.collection(API_KEYS).find({"user_id": user.user_id}).sort("created_at", -1)
         return [self.to_response(item) async for item in cursor]
 
-    async def revoke_key(self, user: UserPrincipal, key_id: str, *, request_meta: dict[str, Any]) -> None:
+    async def revoke_key(self, user: UserPrincipal, key_id: str, *, audit_ctx: Any = None, request_meta: Any = None) -> None:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         result = await self.db.collection(API_KEYS).delete_one({"_id": key_id, "user_id": user.user_id})
         if result.deleted_count == 0:
             raise LookupError("API key not found")
-        await self.audit.record("account.api_key.revoke", actor=user, request_meta=request_meta, target={"user_id": user.user_id, "key_id": key_id})
+        await self.audit.record("account.api_key.revoke", actor=user, audit_ctx=audit_ctx, target={"user_id": user.user_id, "key_id": key_id})
 
-    async def update_key(self, user: UserPrincipal, key_id: str, *, name: str | None, expires_in_days: int | None, request_meta: dict[str, Any]) -> dict[str, Any]:
+    async def update_key(self, user: UserPrincipal, key_id: str, *, name: str | None, expires_in_days: int | None, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+        audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         updates: dict[str, Any] = {"updated_at": now_utc()}
         if name is not None:
             updates["name"] = name[:80].strip() or "API Key"
@@ -1723,7 +1691,7 @@ class ApiKeyService:
             raise LookupError("API key not found")
         updated = await self.db.collection(API_KEYS).find_one({"_id": key_id})
         assert updated is not None
-        await self.audit.record("account.api_key.update", actor=user, request_meta=request_meta, target={"user_id": user.user_id, "key_id": key_id})
+        await self.audit.record("account.api_key.update", actor=user, audit_ctx=audit_ctx, target={"user_id": user.user_id, "key_id": key_id})
         return self.to_response(updated)
 
     async def verify_token(self, token: str) -> UserPrincipal | None:
@@ -1765,7 +1733,8 @@ class ApplicationServices:
     host_ops: HostOpsService
     alerts: AlertingService
     permissions: PermissionCatalog
-    audit: AuditService
+    audit: AuditCollector
+    audit_archiver: AuditArchiverJob
     rate_limiter: RateLimiter
     cache: CacheManager
     settings_service: SettingsService
@@ -1817,7 +1786,10 @@ async def build_application_services(settings: Settings, logger_manager: Integri
     )
     await cache.connect()
 
-    audit = AuditService(db)
+    enricher = AuditEnricher()
+    repository = AuditRepository(db)
+    audit = AuditCollector(enricher, repository)
+    audit_archiver = AuditArchiverJob(db, settings)
     settings_service = SettingsService(db, settings, rate_limiter, audit, cache)
     await settings_service.ensure_runtime_settings()
 
@@ -1845,6 +1817,7 @@ async def build_application_services(settings: Settings, logger_manager: Integri
         alerts=alerts,
         permissions=permissions,
         audit=audit,
+        audit_archiver=audit_archiver,
         rate_limiter=rate_limiter,
         cache=cache,
         settings_service=settings_service,

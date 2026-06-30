@@ -18,7 +18,8 @@ from starlette.requests import Request
 from server.core.config import Settings
 from server.core.ratelimit import RateLimitError
 from server.models import MCPTool, UserPrincipal
-from server.services import ApplicationServices, request_meta_from_request
+from server.services import ApplicationServices
+from server.audit import audit_context_from_request
 
 
 ServiceGetter = Callable[[], ApplicationServices]
@@ -241,13 +242,13 @@ class ManagedPluginTool(Tool):
         user = _resolve_request_user(request)
 
         try:
-            request_meta = request_meta_from_request(request, services.settings)
-            request_meta["oauth_client_id"] = request.scope.get("multiplex.oauth_client_id")
+            audit_ctx = audit_context_from_request(request, services.settings)
+            pass
             result = await services.plugins.call_tool(
                 user,
                 self._tool_key,
                 arguments,
-                request_meta,
+                audit_ctx,
             )
         except Exception as exc:
             raise ToolError(str(exc)) from exc

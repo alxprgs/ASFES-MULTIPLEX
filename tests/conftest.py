@@ -81,6 +81,7 @@ async def integration_env():
 
     transport = httpx.ASGITransport(app=app)
     await mcp_gateway.refresh_tools()
+    await services.audit.start()
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         try:
             yield {
@@ -92,6 +93,7 @@ async def integration_env():
                 "mcp_gateway": mcp_gateway,
             }
         finally:
+            await services.audit.stop()
             if services.db.client is not None:
                 await services.db.client.drop_database(cfg.mongo.database)
             await shutdown_application_services(services)

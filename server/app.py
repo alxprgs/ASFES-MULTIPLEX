@@ -13,6 +13,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from server.core.config import Settings, settings
 from server.core.logging import IntegrityLogManager, Mailer, get_logger
+from server.core.middleware import AuditMetricsMiddleware
 from server.mcp import create_mcp_gateway
 from server.routes import api_router, root_router
 from server.routes.pypi import simple_router as pypi_simple_router
@@ -56,10 +57,14 @@ async def lifespan(app: FastAPI):
                 progress.update(task_id, completed=2, description="Loading plugins and permissions")
                 progress.update(task_id, completed=3, description="Starting integrity verifier")
                 services.verifier_task = asyncio.create_task(periodic_integrity_verifier(services))
+                await services.audit.start()
+                await services.audit_archiver.start()
                 progress.update(task_id, completed=4, description="Startup complete")
         else:
             services = await build_application_services(settings, logger_manager, mailer)
             services.verifier_task = asyncio.create_task(periodic_integrity_verifier(services))
+            await services.audit.start()
+            await services.audit_archiver.start()
 
         app.state.services = services
         await app.state.mcp_gateway.refresh_tools()
@@ -91,6 +96,7 @@ def create_app() -> FastAPI:
         redoc_url=f"{settings.api_prefix}/redoc",
         lifespan=lifespan,
     )
+    app.add_middleware(AuditMetricsMiddleware)
     app.add_middleware(ExactPathSlashMiddleware, path=settings.mcp_path)
     mcp_gateway = create_mcp_gateway(settings, lambda: app.state.services)
     app.state.mcp_gateway = mcp_gateway

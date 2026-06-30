@@ -10,7 +10,7 @@ from starlette.requests import HTTPConnection
 
 from server.core.ratelimit import RateLimitError
 from server.models import UserPrincipal
-from server.services import ApplicationServices, request_meta_from_request
+from server.services import ApplicationServices
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -116,8 +116,8 @@ async def enforce_api_rate_limit(
     policy_name: str | None = None,
     suffix: str | None = None,
 ) -> None:
-    request_meta = request_meta_from_request(request)
-    identifier = user.user_id if user else request_meta["ip"] or "anonymous"
+    ip = request.client.host if request.client else None
+    identifier = user.user_id if user else ip or "anonymous"
     key = f"{identifier}:{suffix or request.url.path}"
     try:
         await services.rate_limiter.enforce(policy_name or ("rest_read" if request.method in {"GET", "HEAD"} else "rest_write"), key)

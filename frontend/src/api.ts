@@ -128,17 +128,23 @@ export type ToolInfo = {
   providers: string[];
 };
 
+export type AuditActor = {
+  user_id?: string;
+  username?: string;
+  ip?: string;
+  user_agent?: string;
+};
+
 export type AuditEvent = {
   event_id: string;
   event_type: string;
-  actor_user_id: string | null;
-  actor_username: string | null;
-  target: Record<string, unknown>;
+  correlation_id: string;
+  parent_event_id: string;
+  timestamp: string;
+  archived: boolean;
+  actor: AuditActor;
+  payload: Record<string, unknown>;
   result: string;
-  ip: string | null;
-  user_agent: string | null;
-  metadata: Record<string, unknown>;
-  created_at: string;
 };
 
 export type LoginResult =

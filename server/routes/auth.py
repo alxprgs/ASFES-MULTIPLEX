@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from server.audit import audit_context_from_request
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
@@ -8,7 +9,7 @@ from server.core.deps import enforce_api_rate_limit, enforce_csrf_for_cookie_aut
 from server.core.ratelimit import RateLimitError
 from server.core.security import random_token
 from server.models import AuthTokensResponse, LoginRequest, LoginTwoFactorRequest, LogoutRequest, PasskeyBeginAuthenticationRequest, PasskeyBeginRegistrationRequest, PasskeyFinishAuthenticationRequest, PasskeyFinishRegistrationRequest, PasskeyOptionsResponse, PasskeyResponse, PasskeyUpdateRequest, RefreshRequest, RegisterRequest, RegistrationStatusResponse, TwoFactorChallengeResponse, TwoFactorDisableRequest, TwoFactorEnableRequest, TwoFactorEnableResponse, TwoFactorSetupRequest, TwoFactorSetupResponse, TwoFactorStatusResponse, UserResponse, UserPrincipal
-from server.services import ApplicationServices, request_meta_from_request
+from server.services import ApplicationServices
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -88,9 +89,9 @@ async def login(
     response: Response,
     services: ApplicationServices = Depends(get_services),
 ) -> AuthTokensResponse:
-    request_meta = request_meta_from_request(request)
+    request_meta = audit_context_from_request(request)
     try:
-        await services.rate_limiter.enforce("login", f"{request_meta['ip']}:{payload.username.lower()}")
+        await services.rate_limiter.enforce("login", f"{request_meta.actor.ip or 'anonymous'}:{payload.username.lower()}")
     except RateLimitError as exc:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many login attempts", headers={"Retry-After": str(exc.retry_after)}) from exc
     user = await services.users.authenticate(payload.username, payload.password)
@@ -98,7 +99,7 @@ async def login(
         await services.audit.record(
             "auth.login.failed",
             actor=None,
-            request_meta=request_meta,
+            audit_ctx=request_meta,
             target={"username": payload.username},
             result="denied",
         )
@@ -106,7 +107,7 @@ async def login(
     user_doc = await services.users.get_user_by_id(user.user_id)
     assert user_doc is not None
     if services.users.two_factor_enabled(user_doc):
-        await services.audit.record("auth.login.2fa_required", actor=user, request_meta=request_meta, target={"user_id": user.user_id})
+        await services.audit.record("auth.login.2fa_required", actor=user, audit_ctx=request_meta, target={"user_id": user.user_id})
         return TwoFactorChallengeResponse(
             challenge_token=services.auth.issue_2fa_challenge(user),
             expires_in=300,
@@ -114,7 +115,7 @@ async def login(
             username=user.username,
         )
     tokens = await services.auth.issue_api_tokens(user, request_meta)
-    await services.audit.record("auth.login", actor=user, request_meta=request_meta, target={"user_id": user.user_id})
+    await services.audit.record("auth.login", actor=user, audit_ctx=request_meta, target={"user_id": user.user_id})
     _set_auth_cookies(response, services, tokens)
     return _build_auth_response(services, tokens, user_doc)
 
@@ -126,13 +127,13 @@ async def login_two_factor(
     response: Response,
     services: ApplicationServices = Depends(get_services),
 ) -> AuthTokensResponse:
-    request_meta = request_meta_from_request(request)
+    request_meta = audit_context_from_request(request)
     try:
         challenge = services.auth.verify_2fa_challenge(payload.challenge_token)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Two-factor challenge is invalid or expired") from exc
     try:
-        await services.rate_limiter.enforce("login", f"{request_meta['ip']}:{challenge['sub']}:2fa")
+        await services.rate_limiter.enforce("login", f"{request_meta.actor.ip or 'anonymous'}:{challenge['sub']}:2fa")
     except RateLimitError as exc:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many two-factor attempts", headers={"Retry-After": str(exc.retry_after)}) from exc
     user_doc = await services.users.get_user_by_id(challenge["sub"])
@@ -142,14 +143,14 @@ async def login_two_factor(
         await services.audit.record(
             "auth.login.2fa_failed",
             actor=services.users.to_principal(user_doc),
-            request_meta=request_meta,
+            audit_ctx=request_meta,
             target={"user_id": user_doc["_id"]},
             result="denied",
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid two-factor code")
     user = services.users.to_principal(user_doc)
     tokens = await services.auth.issue_api_tokens(user, request_meta)
-    await services.audit.record("auth.login", actor=user, request_meta=request_meta, target={"user_id": user.user_id}, metadata={"two_factor": True})
+    await services.audit.record("auth.login", actor=user, audit_ctx=request_meta, target={"user_id": user.user_id}, metadata={"two_factor": True})
     _set_auth_cookies(response, services, tokens)
     return _build_auth_response(services, tokens, user_doc)
 
@@ -160,9 +161,9 @@ async def passkey_authentication_options(
     request: Request,
     services: ApplicationServices = Depends(get_services),
 ) -> PasskeyOptionsResponse:
-    request_meta = request_meta_from_request(request)
+    request_meta = audit_context_from_request(request)
     try:
-        await services.rate_limiter.enforce("login", f"{request_meta['ip']}:{payload.username or 'discoverable'}:passkey")
+        await services.rate_limiter.enforce("login", f"{request_meta.actor.ip or 'anonymous'}:{payload.username or 'discoverable'}:passkey")
     except RateLimitError as exc:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many passkey attempts", headers={"Retry-After": str(exc.retry_after)}) from exc
     rp_id, rp_name, origin = _webauthn_relying_party(request, services)
@@ -171,7 +172,7 @@ async def passkey_authentication_options(
             username=payload.username,
             rp_id=rp_id,
             origin=origin,
-            request_meta=request_meta,
+            audit_ctx=request_meta,
         )
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
@@ -185,12 +186,12 @@ async def passkey_authentication_verify(
     response: Response,
     services: ApplicationServices = Depends(get_services),
 ) -> AuthTokensResponse:
-    request_meta = request_meta_from_request(request)
+    request_meta = audit_context_from_request(request)
     try:
         user, user_doc = await services.users.finish_passkey_authentication(
             challenge_id=payload.challenge_id,
             credential=payload.credential,
-            request_meta=request_meta,
+            audit_ctx=request_meta,
         )
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
@@ -208,7 +209,7 @@ async def refresh_tokens(
     payload: RefreshRequest | None = Body(default=None),
     services: ApplicationServices = Depends(get_services),
 ) -> AuthTokensResponse:
-    request_meta = request_meta_from_request(request)
+    request_meta = audit_context_from_request(request)
     refresh_token = payload.refresh_token if payload is not None else request.cookies.get(services.settings.refresh_cookie_name)
     if not refresh_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token is required")
@@ -248,17 +249,17 @@ async def logout(
         
     _clear_auth_cookies(response, services)
     if current_user is not None:
-        await services.audit.record("auth.logout", actor=current_user, request_meta=request_meta_from_request(request), target={"user_id": current_user.user_id})
+        await services.audit.record("auth.logout", actor=current_user, audit_ctx=audit_context_from_request(request), target={"user_id": current_user.user_id})
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(payload: RegisterRequest, request: Request, services: ApplicationServices = Depends(get_services)) -> UserResponse:
-    request_meta = request_meta_from_request(request)
+    request_meta = audit_context_from_request(request)
     runtime = await services.settings_service.get_runtime_settings()
     if not runtime.get("registration_enabled", False):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is disabled")
     try:
-        await services.rate_limiter.enforce("register", request_meta["ip"] or "unknown")
+        await services.rate_limiter.enforce("register", request_meta.actor.ip or "unknown")
     except RateLimitError as exc:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many registrations", headers={"Retry-After": str(exc.retry_after)}) from exc
     try:
@@ -269,7 +270,7 @@ async def register(payload: RegisterRequest, request: Request, services: Applica
             tg_id=payload.tg_id,
             vk_id=payload.vk_id,
             actor=None,
-            request_meta=request_meta,
+            audit_ctx=request_meta,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -322,7 +323,7 @@ async def passkey_registration_options(
             rp_id=rp_id,
             rp_name=rp_name,
             origin=origin,
-            request_meta=request_meta_from_request(request),
+            audit_ctx=audit_context_from_request(request),
         )
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
@@ -343,7 +344,7 @@ async def passkey_registration_verify(
             challenge_id=payload.challenge_id,
             name=payload.name,
             credential=payload.credential,
-            request_meta=request_meta_from_request(request),
+            audit_ctx=audit_context_from_request(request),
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -360,7 +361,7 @@ async def rename_passkey(
 ) -> PasskeyResponse:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
     try:
-        passkey = await services.users.rename_passkey(current_user, passkey_id, payload.name, request_meta=request_meta_from_request(request))
+        passkey = await services.users.rename_passkey(current_user, passkey_id, payload.name, audit_ctx=audit_context_from_request(request))
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return PasskeyResponse.model_validate(passkey)
@@ -375,7 +376,7 @@ async def delete_passkey(
 ) -> None:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
     try:
-        await services.users.delete_passkey(current_user, passkey_id, request_meta=request_meta_from_request(request))
+        await services.users.delete_passkey(current_user, passkey_id, audit_ctx=audit_context_from_request(request))
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -404,7 +405,7 @@ async def two_factor_setup(
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
     if not await services.users.verify_password_for_user(current_user, payload.current_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is invalid")
-    setup = await services.users.begin_two_factor_setup(current_user, request_meta=request_meta_from_request(request))
+    setup = await services.users.begin_two_factor_setup(current_user, audit_ctx=audit_context_from_request(request))
     return TwoFactorSetupResponse.model_validate(setup)
 
 
@@ -417,7 +418,7 @@ async def two_factor_enable(
 ) -> TwoFactorEnableResponse:
     await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
     try:
-        user_doc, recovery_codes = await services.users.enable_two_factor(current_user, payload.code, request_meta=request_meta_from_request(request))
+        user_doc, recovery_codes = await services.users.enable_two_factor(current_user, payload.code, audit_ctx=audit_context_from_request(request))
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
@@ -438,7 +439,7 @@ async def two_factor_disable(
             current_user,
             payload.code,
             current_password=payload.current_password,
-            request_meta=request_meta_from_request(request),
+            audit_ctx=audit_context_from_request(request),
         )
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

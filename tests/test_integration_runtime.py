@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlparse
 
+import asyncio
 import httpx
 import pytest
 from fastmcp import Client
@@ -209,6 +210,7 @@ async def test_rest_oauth_and_mcp_flow_respects_user_scoping(integration_env) ->
             assert tool_call.structured_content["count"] == 1
             assert tool_call.structured_content["user"] == "alice"
 
+            await asyncio.sleep(0.5)
             connected = await client.get("/api/mcp/connected-services", headers=root_headers)
             assert connected.status_code == 200
             service = next(item for item in connected.json() if item["client_id"] == oauth_client_id)
