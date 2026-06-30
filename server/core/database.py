@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pymongo import ASCENDING, IndexModel
+from pymongo import ASCENDING, DESCENDING, IndexModel
 from pymongo.asynchronous.mongo_client import AsyncMongoClient
 
 from server.core.config import Settings
@@ -131,9 +131,9 @@ class DatabaseManager:
         audit_events = self.collection(AUDIT_EVENTS)
         await audit_events.create_indexes(
             [
-                IndexModel([("created_at", ASCENDING)]),
-                IndexModel([("actor_user_id", ASCENDING), ("created_at", ASCENDING)]),
-                IndexModel([("event_type", ASCENDING), ("created_at", ASCENDING)]),
+                IndexModel([("timestamp", DESCENDING)]),
+                IndexModel([("actor.user_id", ASCENDING), ("timestamp", DESCENDING)]),
+                IndexModel([("event_type", ASCENDING), ("timestamp", DESCENDING)]),
             ]
         )
 
