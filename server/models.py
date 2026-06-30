@@ -553,8 +553,11 @@ class PyPIStatsResponse(BaseModel):
 
 class PyPIJobStatus(BaseModel):
     job_id: str
+    job_fingerprint: str | None = None
     kind: str
     status: str  # "pending" | "running" | "done" | "error" | "cancelled"
+    lock_owner: str | None = None
+    lock_expires_at: str | None = None
     name: str | None = None
     total: int = 0
     done: int = 0
@@ -628,8 +631,11 @@ class PythonMirrorStatsResponse(BaseModel):
 
 class PythonMirrorJobStatus(BaseModel):
     job_id: str
+    job_fingerprint: str | None = None
     kind: str           # "install" | "verify" | "verify_all" | "repair"
     status: str         # "pending" | "running" | "done" | "error" | "cancelled"
+    lock_owner: str | None = None
+    lock_expires_at: str | None = None
     version: str | None = None
     total: int = 0
     done: int = 0

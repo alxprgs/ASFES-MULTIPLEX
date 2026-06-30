@@ -237,6 +237,30 @@ class AsyncPypiMirror:
                 return cached
 
         url = f"{self.cfg.api_base}/{norm}/json"
+        
+        # V3.3 Cache Stampede Protection
+        redis = self.cache._redis if self.cache is not None and self.cache.should_use_redis() else None
+        lock_key = f"pypi:meta_lock:{norm}"
+        stream_key = f"pypi:meta_events:{norm}"
+
+        if redis:
+            lock_acquired = await redis.set(lock_key, "1", nx=True, ex=30)
+            if not lock_acquired:
+                # Wait for completion event
+                last_id = "0"
+                for _ in range(30):
+                    try:
+                        streams = await redis.xread({stream_key: last_id}, count=1, block=1000)
+                        if streams:
+                            break
+                    except Exception:
+                        pass
+                # Check cache again
+                cached = await self.cache.get(cache_key)
+                if cached is not None:
+                    return cached
+                # If still nothing, proceed to fetch
+                
         try:
             async with session.get(url, proxy=self._choose_proxy(), ssl=self.cfg.verify_ssl) as resp:
                 if resp.status == 200:
@@ -248,6 +272,14 @@ class AsyncPypiMirror:
         except Exception as exc:
             logger.warning("metadata_error name=%s error=%s", norm, exc)
             return None
+        finally:
+            if redis:
+                await redis.delete(lock_key)
+                try:
+                    await redis.xadd(stream_key, {"status": "success"}, maxlen=10)
+                    await redis.expire(stream_key, 60)
+                except Exception:
+                    pass
 
     async def _check_disk_space(self, required_bytes: int) -> None:
         _, _, free = shutil.disk_usage(self.cfg.data_dir)

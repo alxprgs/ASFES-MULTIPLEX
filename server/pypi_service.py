@@ -44,7 +44,10 @@ class PyPIJob:
     job_id: str
     kind: str
     name: str | None
+    job_fingerprint: str | None = None
     status: str = "running"  # pending | running | done | error | cancelled
+    lock_owner: str | None = None
+    lock_expires_at: str | None = None
     total: int = 0
     done: int = 0
     failed: int = 0
@@ -65,8 +68,11 @@ class PyPIJob:
                 eta = (self.total - self.done) / rate
         return PyPIJobStatus(
             job_id=self.job_id,
+            job_fingerprint=self.job_fingerprint,
             kind=self.kind,
             status=self.status,
+            lock_owner=self.lock_owner,
+            lock_expires_at=self.lock_expires_at,
             name=self.name,
             total=self.total,
             done=self.done,
@@ -409,13 +415,44 @@ class PyPIMirrorService:
                     return None
 
                 local_path.parent.mkdir(parents=True, exist_ok=True)
-                await self._mirror._download_file(session, file_url, local_path)
+                
+                # V3.3 Redis Download Coordination
+                redis = self.cache._redis if self.cache.should_use_redis() else None
+                lock_key = f"pypi:download:{norm}:{version}:{filename}"
+                stream_key = f"pypi:events:{norm}:{version}:{filename}"
+                
+                if redis:
+                    # Attempt to acquire lock
+                    lock_acquired = await redis.set(lock_key, "1", nx=True, ex=300)
+                    if not lock_acquired:
+                        # Wait for completion event
+                        LOGGER.info("Waiting for other worker to download %s", filename)
+                        last_id = "0"
+                        for _ in range(60): # wait up to 60s
+                            try:
+                                streams = await redis.xread({stream_key: last_id}, count=1, block=5000)
+                                if streams:
+                                    break
+                            except Exception:
+                                pass
+                        return local_path if local_path.exists() else None
 
-                if expected_sha and not await self._mirror._verify_hash(local_path, expected_sha):
-                    LOGGER.warning("on_demand hash mismatch file=%s", filename)
-                    if local_path.exists():
-                        local_path.unlink()
-                    return None
+                try:
+                    await self._mirror._download_file(session, file_url, local_path)
+                    
+                    if expected_sha and not await self._mirror._verify_hash(local_path, expected_sha):
+                        LOGGER.warning("on_demand hash mismatch file=%s", filename)
+                        if local_path.exists():
+                            local_path.unlink()
+                        return None
+                finally:
+                    if redis:
+                        await redis.delete(lock_key)
+                        try:
+                            await redis.xadd(stream_key, {"status": "success"}, maxlen=10)
+                            await redis.expire(stream_key, 60)
+                        except Exception:
+                            pass
 
         except Exception as exc:
             LOGGER.warning("on_demand_fail file=%s error=%s", filename, exc)

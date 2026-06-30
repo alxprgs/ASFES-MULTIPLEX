@@ -240,10 +240,21 @@ class ManagedPluginTool(Tool):
         request = get_http_request()
         services = self._services_getter()
         user = _resolve_request_user(request)
+        
+        # V3.3 MCP Tool Safety Layer
+        dangerous_tools = {"host_ops.docker", "host_ops.nginx", "host_ops.firewall", "host_ops.systemd"}
+        is_dangerous = any(d in self._tool_key for d in dangerous_tools)
+        
+        redis = services.cache._redis if services.cache.should_use_redis() else None
+        lock_key = f"mcp:lock:{self._tool_key}"
+        
+        if is_dangerous and redis:
+            lock_acquired = await redis.set(lock_key, "1", nx=True, ex=60)
+            if not lock_acquired:
+                raise ToolError(f"Tool {self._tool_key} is currently locked by another process (Rate limit / Safety guard). Try again later.")
 
         try:
             audit_ctx = audit_context_from_request(request, services.settings)
-            pass
             result = await services.plugins.call_tool(
                 user,
                 self._tool_key,
@@ -252,6 +263,9 @@ class ManagedPluginTool(Tool):
             )
         except Exception as exc:
             raise ToolError(str(exc)) from exc
+        finally:
+            if is_dangerous and redis:
+                await redis.delete(lock_key)
 
         if not isinstance(result, dict):
             result = {"result": result}
