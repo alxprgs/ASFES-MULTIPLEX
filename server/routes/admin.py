@@ -9,9 +9,10 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
+
 from server.core.database import TOOL_POLICIES
 from server.core.deps import enforce_api_rate_limit, get_current_api_user, get_optional_api_user, get_services, require_permission
-from server.models import BootstrapResponse, MCPConnectedServiceResponse, PermissionDefinition, PermissionMutationRequest, PluginInfoResponse, PluginReloadRequest, ProfileUpdateRequest, RuntimeSettingsResponse, SystemUpdateOptions, SystemUpdateResponse, SystemUpdateSessionResponse, SystemUpdateSessionStartResponse, ToggleRequest, ToolInfoResponse, UserResponse, UserToolPolicyResponse, UserPrincipal
+from server.models import BootstrapResponse, MCPConnectedServiceResponse, PermissionDefinition, PermissionMutationRequest, PluginInfoResponse, PluginReloadRequest, ProfileUpdateRequest, RuntimeSettingsResponse, SystemUpdateOptions, SystemUpdateResponse, SystemUpdateSessionResponse, SystemUpdateSessionStartResponse, ToggleRequest, ToolInfoResponse, UserResponse, UserToolPolicyResponse, UserPrincipal, AuditEventListResponse
 from server.services import ApplicationServices
 
 
@@ -339,7 +340,7 @@ from fastapi.responses import StreamingResponse
 import json
 from datetime import datetime, timedelta, UTC
 
-@router.get("/audit/logs", response_model=dict)
+@router.get("/audit/logs", response_model=AuditEventListResponse)
 async def audit_logs(
     request: Request,
     services: ApplicationServices = Depends(get_services),

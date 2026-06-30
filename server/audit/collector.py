@@ -75,7 +75,8 @@ class AuditCollector:
         return await self.repository.list_events(limit=limit, skip=skip, **filters)
         
     async def export_stream(self, start_date: str, end_date: str, **filters: Any):
-        return self.repository.export_stream(start_date=start_date, end_date=end_date, **filters)
+        async for item in self.repository.export_stream(start_date=start_date, end_date=end_date, **filters):
+            yield item
 
     async def start(self) -> None:
         if self._running:

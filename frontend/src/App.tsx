@@ -954,7 +954,7 @@ function formatAuditEvent(event: AuditEvent, plugins: PluginInfo[], tools: ToolI
 
 function AuditView({ events, plugins, tools }: { events: AuditEvent[]; plugins: PluginInfo[]; tools: ToolInfo[] }) {
   const handleExport = () => {
-    window.location.href = "/api/admin/audit/logs/export";
+    window.location.href = "/api/audit/logs/export";
   };
 
   return (
