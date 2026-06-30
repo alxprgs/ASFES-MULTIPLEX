@@ -199,3 +199,4 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 runtime/multiplex_logs.db
+_deprecated/

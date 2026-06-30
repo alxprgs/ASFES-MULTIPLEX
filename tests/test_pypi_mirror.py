@@ -50,10 +50,7 @@ if "aiofiles" not in sys.modules:
     aiofiles_stub.open = _aio_open
     sys.modules["aiofiles"] = aiofiles_stub
 
-# Разрешаем импортировать dev/pypi_mirror/pypi_mirror.py как модуль pypi_mirror.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from pypi_mirror import AsyncPypiMirror, MirrorConfig
+from server.core.pypi_mirror import AsyncPypiMirror, MirrorConfig
 
 
 class FakeResponse:
@@ -352,7 +349,7 @@ def test_check_integrity_warns_on_corrupted_file(mirror, temp_dir, monkeypatch):
         mirror._verify_hash = AsyncMock(return_value=False)
 
         warn_mock = MagicMock()
-        monkeypatch.setattr("pypi_mirror.logger.warning", warn_mock)
+        monkeypatch.setattr("server.core.pypi_mirror.logger.warning", warn_mock)
 
         await mirror.check_integrity(MagicMock())
 
