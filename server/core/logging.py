@@ -167,6 +167,12 @@ class IntegrityLogManager:
         self._current_hour_key = hour_key
         self._current_file_path = self._path_for_hour(hour_key)
         self._current_file_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._db is not None:
+            self._db.execute(
+                "UPDATE log_files SET status='open', tamper_reason=NULL WHERE file_path=?",
+                (str(self._current_file_path),),
+            )
+            self._db.commit()
         return self._current_file_path
 
     def write_record(self, record: logging.LogRecord) -> None:

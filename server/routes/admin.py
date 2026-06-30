@@ -336,8 +336,6 @@ async def run_system_restart(
     return await _wait_update_result(session)
 
 
-from fastapi.responses import StreamingResponse
-import json
 from datetime import datetime, timedelta, UTC
 
 @router.get("/audit/logs", response_model=AuditEventListResponse)

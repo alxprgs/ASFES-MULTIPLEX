@@ -3,7 +3,7 @@ import logging
 from typing import Any
 
 from server.audit.enricher import AuditEnricher
-from server.audit.models import AuditActor, AuditContext, BaseAuditEventEnvelope, SystemAuditEvent
+from server.audit.models import AuditContext, BaseAuditEventEnvelope, SystemAuditEvent
 from server.audit.repository import AuditRepository
 
 

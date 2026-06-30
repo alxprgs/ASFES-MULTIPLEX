@@ -27,7 +27,7 @@ from server.core.ratelimit import RateLimitPolicy, RateLimiter
 from server.core.cache import CacheManager
 from server.core.security import TokenBundle, b64url_decode, b64url_encode, build_totp_uri, create_jwt, decode_jwt, generate_totp_secret, hash_password, now_utc, random_token, sha256_text, verify_password, verify_pkce, verify_totp_code
 from server.host_ops import HostOpsService
-from server.audit import AuditCollector, AuditContext, ensure_audit_context, AuditEnricher, AuditRepository, AuditArchiverJob
+from server.audit import AuditCollector, ensure_audit_context, AuditEnricher, AuditRepository, AuditArchiverJob
 from server.models import MCPTool, PermissionDefinition, PluginDefinition, RuntimeAvailability, ToolExecutionContext, UserPrincipal
 from server.update_manager import UpdateManager
 from server.proxy_service import ProxyService
