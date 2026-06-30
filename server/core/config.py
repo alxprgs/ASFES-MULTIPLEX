@@ -223,6 +223,26 @@ class PyPIConfig(BaseModel):
     user_agent: str = "ASFES-PyPI-Mirror/1.0"
 
 
+class PythonMirrorConfig(BaseModel):
+    """Configuration for the built-in Python distribution mirror."""
+
+    enabled: bool = True
+    data_dir: Path = BASE_DIR / "data" / "python_storage"
+    ftp_url: str = "https://www.python.org/ftp/python/"
+    parallel: int = Field(default=4, ge=1, le=20)
+    max_retries: int = Field(default=3, ge=1)
+    request_timeout: float = Field(default=60.0, gt=0)
+    connect_timeout: float = Field(default=15.0, gt=0)
+    min_safe_space_gb: float = Field(default=5.0, ge=0)
+    rate_limit_mb: float | None = None
+    verify_ssl: bool = True
+    network_mode: Literal["direct", "proxy", "mix", "fallback"] = "direct"
+    proxies: list[str] = Field(default_factory=list)
+    user_agent: str = "ASFES-Python-Mirror/1.0"
+    cache_ttl_versions: int = 3600
+    cache_ttl_files: int = 7200
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -243,6 +263,7 @@ class Settings(BaseSettings):
     oauth: OAuthConfig = Field(default_factory=OAuthConfig)
     rate_limits: RateLimitPresetConfig = Field(default_factory=RateLimitPresetConfig)
     pypi: PyPIConfig = Field(default_factory=PyPIConfig)
+    python_mirror: PythonMirrorConfig = Field(default_factory=PythonMirrorConfig)
 
     @model_validator(mode="after")
     def finalize_paths(self) -> "Settings":
@@ -281,6 +302,11 @@ class Settings(BaseSettings):
         ]
         self.pypi.data_dir = (
             self.pypi.data_dir if self.pypi.data_dir.is_absolute() else BASE_DIR / self.pypi.data_dir
+        )
+        self.python_mirror.data_dir = (
+            self.python_mirror.data_dir
+            if self.python_mirror.data_dir.is_absolute()
+            else BASE_DIR / self.python_mirror.data_dir
         )
         if self.redis.mode != "disabled" and not self.redis.url:
             raise ValueError("REDIS__URL is required when REDIS__MODE is not 'disabled'")

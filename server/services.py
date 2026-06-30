@@ -32,6 +32,7 @@ from server.models import MCPTool, PermissionDefinition, PluginDefinition, Runti
 from server.update_manager import UpdateManager
 from server.proxy_service import ProxyService
 from server.pypi_service import PyPIMirrorService
+from server.python_mirror_service import PythonMirrorService
 
 
 LOGGER = get_logger("multiplex.services")
@@ -49,6 +50,8 @@ CORE_PERMISSIONS = {
     "system.health.read": "Читать детальный статус внутренних сервисов.",
     "pypi.read": "Просматривать пакеты, статистику и статусы задач PyPI-зеркала.",
     "pypi.manage": "Устанавливать, удалять пакеты, управлять блокировками PyPI-зеркала.",
+    "python_mirror.read": "Просматривать версии Python, статистику и статусы задач зеркала.",
+    "python_mirror.manage": "Скачивать, удалять версии Python, управлять зеркалом.",
 }
 
 
@@ -1746,6 +1749,7 @@ class ApplicationServices:
     updates: UpdateManager
     proxy_service: ProxyService
     pypi_mirror: PyPIMirrorService
+    python_mirror: PythonMirrorService
     verifier_task: asyncio.Task[Any] | None = None
 
 
@@ -1808,6 +1812,14 @@ async def build_application_services(settings: Settings, logger_manager: Integri
         cache=cache,
     )
 
+    python_mirror_service = PythonMirrorService(
+        config=settings.python_mirror,
+        db=db,
+        audit=audit,
+        cache=cache,
+    )
+    await python_mirror_service.recover_jobs()
+
     services = ApplicationServices(
         settings=settings,
         db=db,
@@ -1829,6 +1841,7 @@ async def build_application_services(settings: Settings, logger_manager: Integri
         updates=updates,
         proxy_service=proxy_service,
         pypi_mirror=pypi_mirror_service,
+        python_mirror=python_mirror_service,
     )
     plugins.attach_services(services)
     await users.ensure_root_user()
@@ -1848,6 +1861,7 @@ async def shutdown_application_services(services: ApplicationServices) -> None:
         services.verifier_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await services.verifier_task
+    await services.python_mirror.shutdown()
     await services.pypi_mirror.shutdown()
     await services.rate_limiter.shutdown()
     await services.cache.close()

@@ -542,7 +542,33 @@ export const api = {
   pypiCancelJob: (jobId: string) =>
     apiFetch<{ ok: boolean; remaining_packages: string[] }>(`/pypi/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" }),
   pypiBulkDownload: () =>
-    apiFetch<PyPIJobStatus>("/pypi/bulk-download", { method: "POST" })
+    apiFetch<PyPIJobStatus>("/pypi/bulk-download", { method: "POST" }),
+
+  // ------------------------------------------------------------------
+  // Python Mirror
+  // ------------------------------------------------------------------
+  pythonMirrorStats: () =>
+    apiFetch<PythonMirrorStats>("/python-mirror/stats"),
+  pythonMirrorVersions: () =>
+    apiFetch<PythonMirrorListResponse>("/python-mirror/versions"),
+  pythonMirrorRemoteVersions: () =>
+    apiFetch<{ versions: string[] }>("/python-mirror/versions/remote"),
+  pythonMirrorVersion: (v: string) =>
+    apiFetch<PythonMirrorVersion>(`/python-mirror/versions/${encodeURIComponent(v)}`),
+  pythonMirrorInstall: (v: string) =>
+    apiFetch<PythonMirrorJobStatus>(`/python-mirror/versions/${encodeURIComponent(v)}/install`, { method: "POST" }),
+  pythonMirrorDelete: (v: string) =>
+    apiFetch<{ ok: boolean }>(`/python-mirror/versions/${encodeURIComponent(v)}`, { method: "DELETE" }),
+  pythonMirrorVerify: (v?: string) =>
+    v
+      ? apiFetch<PythonMirrorJobStatus>(`/python-mirror/versions/${encodeURIComponent(v)}/verify`, { method: "POST" })
+      : apiFetch<PythonMirrorJobStatus>("/python-mirror/verify", { method: "POST" }),
+  pythonMirrorSuggest: (p: { version_query?: string; os_type?: string; arch?: string; file_type?: string }) =>
+    apiFetch<PythonMirrorSuggestResponse>("/python-mirror/suggest", { method: "POST", body: JSON.stringify(p) }),
+  pythonMirrorJobStatus: (id: string) =>
+    apiFetch<PythonMirrorJobStatus>(`/python-mirror/jobs/${encodeURIComponent(id)}`),
+  pythonMirrorCancelJob: (id: string) =>
+    apiFetch<{ ok: boolean }>(`/python-mirror/jobs/${encodeURIComponent(id)}`, { method: "DELETE" })
 };
 
 // ---------------------------------------------------------------------------
@@ -614,3 +640,81 @@ export type PyPIBlocklist = {
   blocked_packages: string[];
   blocked_versions: Record<string, string[]>;
 };
+
+// ---------------------------------------------------------------------------
+// Python Mirror types
+// ---------------------------------------------------------------------------
+
+export type PythonMirrorFile = {
+  name: string;
+  os_type: string;
+  arch: string;
+  file_type: string;
+  size_bytes: number;
+  size_human: string;
+  md5: string | null;
+  downloaded_at: string | null;
+};
+
+export type PythonMirrorVersion = {
+  version: string;
+  files: PythonMirrorFile[];
+  files_count: number;
+  total_size_bytes: number;
+  total_size_human: string;
+};
+
+export type PythonMirrorListItem = {
+  version: string;
+  files_count: number;
+  total_size_human: string;
+};
+
+export type PythonMirrorListResponse = {
+  items: PythonMirrorListItem[];
+  count: number;
+};
+
+export type PythonMirrorStats = {
+  versions_count: number;
+  files_count: number;
+  total_size_bytes: number;
+  total_size_human: string;
+  disk_free_human: string;
+  active_jobs: number;
+};
+
+export type PythonMirrorJobStatus = {
+  job_id: string;
+  kind: string;
+  status: string;
+  version: string | null;
+  total: number;
+  done: number;
+  failed: number;
+  progress_pct: number;
+  eta_seconds: number | null;
+  current_file: string | null;
+  message: string | null;
+  retry_count: number;
+  started_at: string;
+  updated_at: string;
+  finished_at: string | null;
+};
+
+export type PythonMirrorSuggestion = {
+  version: string;
+  filename: string;
+  os_type: string;
+  arch: string;
+  file_type: string;
+  is_installed: boolean;
+  download_url: string;
+};
+
+export type PythonMirrorSuggestResponse = {
+  suggestions: PythonMirrorSuggestion[];
+  best_match: PythonMirrorSuggestion | null;
+  resolved_version: string | null;
+};
+

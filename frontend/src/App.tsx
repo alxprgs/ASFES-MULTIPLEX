@@ -25,13 +25,15 @@ import {
   Plus,
   Download,
   Upload,
-  Play
+  Play,
+  Code2
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, AuditEvent, Bootstrap, Health, MCPConnectedService, Passkey, Permission, PluginInfo, RuntimeSettings, SystemUpdateResult, SystemUpdateSession, SystemUpdateStage, ToolInfo, TwoFactorSetup, User, ApiKey, ApiKeyCreateResult, api, setCsrfCookieName, Proxy, ProxyProtocol, ProxyTgExport } from "./api";
 import { PyPIView } from "./PyPIView";
+import { PythonMirrorView } from "./PythonMirrorView";
 
-type View = "overview" | "users" | "plugins" | "tools" | "services" | "audit" | "profile" | "proxy" | "pypi";
+type View = "overview" | "users" | "plugins" | "tools" | "services" | "audit" | "profile" | "proxy" | "pypi" | "python-mirror";
 type ToastTone = "success" | "error" | "info" | "warning";
 
 type Toast = {
@@ -74,7 +76,8 @@ const navItems: Array<{ view: View; label: string; icon: ReactNode }> = [
   { view: "audit", label: "Аудит", icon: <ScrollText size={18} /> },
   { view: "profile", label: "Профиль", icon: <UserCircle size={18} /> },
   { view: "proxy", label: "Proxy Tools", icon: <Globe size={18} /> },
-  { view: "pypi", label: "PyPI", icon: <Database size={18} /> }
+  { view: "pypi", label: "PyPI", icon: <Database size={18} /> },
+  { view: "python-mirror", label: "Python Mirror", icon: <Code2 size={18} /> }
 ];
 
 const runtimeLabels: Record<"registration_enabled" | "mcp_enabled" | "redis_runtime_enabled", string> = {
@@ -2535,6 +2538,13 @@ export function App() {
         ) : null}
         {view === "pypi" ? (
           <PyPIView
+            pendingKeys={pendingActions}
+            pushToast={pushToast}
+            runAction={runAction}
+          />
+        ) : null}
+        {view === "python-mirror" ? (
+          <PythonMirrorView
             pendingKeys={pendingActions}
             pushToast={pushToast}
             runAction={runAction}

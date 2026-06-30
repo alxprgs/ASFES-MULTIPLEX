@@ -581,3 +581,91 @@ class PyPIBlocklistResponse(BaseModel):
     blocked_packages: list[str]
     blocked_versions: dict[str, list[str]]
 
+
+# ---------------------------------------------------------------------------
+# Python Mirror models
+# ---------------------------------------------------------------------------
+
+
+class PythonMirrorFile(BaseModel):
+    name: str
+    os_type: str        # "windows" | "macos" | "source"
+    arch: str           # "amd64" | "arm64" | ""
+    file_type: str      # "installer" | "zip" | "pkg" | "tarball"
+    size_bytes: int
+    size_human: str
+    md5: str | None = None
+    downloaded_at: str | None = None
+
+
+class PythonMirrorVersion(BaseModel):
+    version: str
+    files: list[PythonMirrorFile]
+    files_count: int
+    total_size_bytes: int
+    total_size_human: str
+
+
+class PythonMirrorListItem(BaseModel):
+    version: str
+    files_count: int
+    total_size_human: str
+
+
+class PythonMirrorListResponse(BaseModel):
+    items: list[PythonMirrorListItem]
+    count: int
+
+
+class PythonMirrorStatsResponse(BaseModel):
+    versions_count: int
+    files_count: int
+    total_size_bytes: int
+    total_size_human: str
+    disk_free_human: str
+    active_jobs: int
+
+
+class PythonMirrorJobStatus(BaseModel):
+    job_id: str
+    kind: str           # "install" | "verify" | "verify_all" | "repair"
+    status: str         # "pending" | "running" | "done" | "error" | "cancelled"
+    version: str | None = None
+    total: int = 0
+    done: int = 0
+    failed: int = 0
+    progress_pct: float = 0.0
+    eta_seconds: float | None = None
+    current_file: str | None = None
+    message: str | None = None
+    retry_count: int = 0
+    started_at: str
+    updated_at: str
+    finished_at: str | None = None
+
+
+class PythonMirrorInstallRequest(BaseModel):
+    version: str
+
+
+class PythonMirrorSuggestRequest(BaseModel):
+    version_query: str | None = None
+    os_type: str | None = None      # "windows" | "macos" | "source"
+    arch: str | None = None         # "amd64" | "arm64"
+    file_type: str | None = None    # "installer" | "zip" | "pkg" | "tarball"
+
+
+class PythonMirrorSuggestion(BaseModel):
+    version: str
+    filename: str
+    os_type: str
+    arch: str
+    file_type: str
+    is_installed: bool
+    download_url: str
+
+
+class PythonMirrorSuggestResponse(BaseModel):
+    suggestions: list[PythonMirrorSuggestion]
+    best_match: PythonMirrorSuggestion | None = None
+    resolved_version: str | None = None
