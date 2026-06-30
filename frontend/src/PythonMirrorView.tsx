@@ -191,11 +191,11 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
           void fetchStats();
           void fetchVersions();
           if (st.status === "done") {
-            pushToast("success", "Job completed", st.message || `Python ${st.version ?? ""} finished`);
+            pushToast("success", "Задача завершена", st.message || `Python ${st.version ?? ""} завершён`);
           } else if (st.status === "error") {
-            pushToast("error", "Job failed", st.message || `Failed for version ${st.version ?? ""}`);
+            pushToast("error", "Ошибка задачи", st.message || `Ошибка для версии ${st.version ?? ""}`);
           } else if (st.status === "cancelled") {
-            pushToast("info", "Job cancelled", `Job ${st.job_id} was cancelled`);
+            pushToast("info", "Задача отменена", `Задача ${st.job_id} была отменена`);
           }
         }
       }
@@ -302,7 +302,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
       if (cur.some((j) => j.job_id === job.job_id)) return cur;
       return [...cur, job];
     });
-    pushToast("info", "Job started", job.message || `Python ${job.version ?? ""} – ${job.kind}`);
+    pushToast("info", "Задача запущена", job.message || `Python ${job.version ?? ""} – ${job.kind}`);
   };
 
   // ---------------------------------------------------------------------------
@@ -317,21 +317,21 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
         setDownloadModalOpen(false);
         setDownloadVersion("");
       },
-      { pendingKey: `pymir:install:${v}`, errorTitle: "Failed to start install" }
+      { pendingKey: `pymir:install:${v}`, errorTitle: "Не удалось запустить установку" }
     );
   };
 
   const handleDeleteVersion = async (v: string) => {
-    if (!window.confirm(`Delete Python ${v} from mirror?`)) return;
+    if (!window.confirm(`Удалить Python ${v} из зеркала?`)) return;
     await runAction(
       async () => {
         await api.pythonMirrorDelete(v);
-        pushToast("success", "Version deleted", `Python ${v} removed from mirror`);
+        pushToast("success", "Версия удалена", `Python ${v} удален из зеркала`);
         void fetchStats();
         void fetchVersions();
         if (expandedVersion === v) setExpandedVersion(null);
       },
-      { pendingKey: `pymir:delete:${v}`, errorTitle: "Failed to delete version" }
+      { pendingKey: `pymir:delete:${v}`, errorTitle: "Не удалось удалить версию" }
     );
   };
 
@@ -341,7 +341,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
         const job = await api.pythonMirrorVerify(v);
         addActiveJob(job);
       },
-      { pendingKey: `pymir:verify:${v}`, errorTitle: "Failed to start verify" }
+      { pendingKey: `pymir:verify:${v}`, errorTitle: "Не удалось запустить проверку" }
     );
   };
 
@@ -351,7 +351,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
         const job = await api.pythonMirrorVerify();
         addActiveJob(job);
       },
-      { pendingKey: "pymir:verify-all", errorTitle: "Failed to start global verify" }
+      { pendingKey: "pymir:verify-all", errorTitle: "Не удалось запустить глобальную проверку" }
     );
   };
 
@@ -361,9 +361,9 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
         await api.pythonMirrorCancelJob(id);
         setActiveJobs((cur) => cur.filter((j) => j.job_id !== id));
         void fetchStats();
-        pushToast("info", "Job cancelled");
+        pushToast("info", "Задача отменена");
       },
-      { pendingKey: `pymir:cancel:${id}`, errorTitle: "Failed to cancel job" }
+      { pendingKey: `pymir:cancel:${id}`, errorTitle: "Не удалось отменить задачу" }
     );
   };
 
@@ -384,7 +384,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
       const detail = await api.pythonMirrorVersion(v);
       setVersionDetail((d) => ({ ...d, [v]: detail }));
     } catch (err) {
-      pushToast("error", "Failed to load version files", err instanceof Error ? err.message : String(err));
+      pushToast("error", "Не удалось загрузить файлы версии", err instanceof Error ? err.message : String(err));
     } finally {
       setLoadingDetail((d) => ({ ...d, [v]: false }));
     }
@@ -401,7 +401,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
       const res = await api.pythonMirrorRemoteVersions();
       setRemoteVersions(res.versions);
     } catch {
-      pushToast("error", "Failed to load remote versions");
+      pushToast("error", "Не удалось загрузить удаленные версии");
     } finally {
       setLoadingRemote(false);
     }
@@ -433,7 +433,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
         setPickerSuggestions(res.suggestions);
         setPickerBest(res.best_match);
       } catch (err) {
-        pushToast("error", "Suggest failed", err instanceof Error ? err.message : String(err));
+        pushToast("error", "Ошибка подбора", err instanceof Error ? err.message : String(err));
       } finally {
         setPickerLoading(false);
       }
@@ -471,31 +471,31 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
       {[
         {
           icon: <Layers size={18} color="#0b5c76" />,
-          label: "Versions",
+          label: "Сохранённые версии",
           value: stats?.versions_count ?? "—",
           accent: false
         },
         {
           icon: <Package size={18} color="#0b5c76" />,
-          label: "Files",
+          label: "Кэшированные файлы",
           value: stats?.files_count ?? "—",
           accent: false
         },
         {
           icon: <HardDrive size={18} color="#0b5c76" />,
-          label: "Mirror Size",
+          label: "Использовано места",
           value: stats?.total_size_human ?? "—",
           accent: false
         },
         {
           icon: <HardDrive size={18} color="#697782" />,
-          label: "Disk Free",
+          label: "Свободно на диске",
           value: stats?.disk_free_human ?? "—",
           accent: false
         },
         {
           icon: <Zap size={18} color={stats?.active_jobs ? "#f59e0b" : "#0b5c76"} />,
-          label: "Active Jobs",
+          label: "Активные задачи",
           value: stats?.active_jobs ?? 0,
           accent: (stats?.active_jobs ?? 0) > 0
         }
@@ -522,13 +522,13 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
         <thead>
           <tr style={{ borderBottom: "2px solid #dfe6ea", color: "#697782" }}>
-            <th style={{ padding: "8px 6px", textAlign: "left" }}>File</th>
-            <th style={{ padding: "8px 6px", textAlign: "left" }}>OS</th>
-            <th style={{ padding: "8px 6px", textAlign: "left" }}>Arch</th>
-            <th style={{ padding: "8px 6px", textAlign: "left" }}>Type</th>
-            <th style={{ padding: "8px 6px", textAlign: "left" }}>Size</th>
-            <th style={{ padding: "8px 6px", textAlign: "left" }}>Downloaded</th>
-            <th style={{ padding: "8px 6px", textAlign: "right" }}>Action</th>
+            <th style={{ padding: "8px 6px", textAlign: "left" }}>Имя</th>
+            <th style={{ padding: "8px 6px", textAlign: "left" }}>ОС</th>
+            <th style={{ padding: "8px 6px", textAlign: "left" }}>Архитектура</th>
+            <th style={{ padding: "8px 6px", textAlign: "left" }}>Тип</th>
+            <th style={{ padding: "8px 6px", textAlign: "left" }}>Размер</th>
+            <th style={{ padding: "8px 6px", textAlign: "left" }}>Скачано</th>
+            <th style={{ padding: "8px 6px", textAlign: "right" }}>Действия</th>
           </tr>
         </thead>
         <tbody>
@@ -551,7 +551,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
               <td style={{ padding: "8px 6px", textAlign: "right" }}>
                 <button
                   className="icon-button"
-                  title="Download file"
+                  title="Скачать файл"
                   onClick={() => handleFileDownload(version, f.name)}
                 >
                   <Download size={13} />
@@ -584,8 +584,8 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
           }}
         >
           <div>
-            <h2>Python Distribution Mirror</h2>
-            <p>Download and serve CPython installers for offline/air-gapped environments</p>
+            <h2>Зеркало дистрибутивов Python</h2>
+            <p>Скачивание и предоставление установщиков CPython для изолированных сред</p>
           </div>
           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
             <button
@@ -594,7 +594,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
               disabled={loadingStats}
             >
               <RefreshCw size={15} className={loadingStats ? "spin" : ""} />
-              Refresh
+              Обновить
             </button>
             <button
               className="secondary-button"
@@ -602,21 +602,21 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
               disabled={pendingKeys.has("pymir:verify-all")}
             >
               <CheckCircle size={15} />
-              Verify All
+              Проверить всё
             </button>
             <button
               className="secondary-button"
               onClick={handleOpenDownloadModal}
             >
               <Download size={15} />
-              Download Version
+              Скачать версию
             </button>
             <button
               className="primary-button"
               onClick={() => setPickerOpen(true)}
             >
               <Search size={15} />
-              Smart Picker
+              Умный подбор
             </button>
           </div>
         </div>
@@ -624,7 +624,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
         {stats ? renderStatCards() : (
           <div style={{ textAlign: "center", padding: "20px", color: "#697782" }}>
             <Loader2 size={20} className="spin" style={{ marginBottom: "6px" }} />
-            <div>Loading mirror stats…</div>
+            <div>Загрузка статистики зеркала…</div>
           </div>
         )}
       </div>
@@ -634,7 +634,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
         <div className="panel" style={{ padding: "20px", borderLeft: "4px solid #f59e0b" }}>
           <h3 style={{ display: "flex", alignItems: "center", gap: "10px", margin: "0 0 15px 0", color: "#b45309" }}>
             <Loader2 className="spin" size={18} />
-            Background jobs running…
+            Выполняются фоновые задачи…
           </h3>
           <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
             {activeJobs.map((job) => (
@@ -650,19 +650,19 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
                   <div>
                     <strong style={{ fontSize: "14px", color: "#78350f" }}>
-                      {job.kind === "install" && `Installing Python ${job.version ?? ""}`}
-                      {job.kind === "verify" && `Verifying Python ${job.version ?? ""}`}
-                      {job.kind === "verify_all" && "Global integrity verify"}
+                      {job.kind === "install" && `Установка Python ${job.version ?? ""}`}
+                      {job.kind === "verify" && `Проверка Python ${job.version ?? ""}`}
+                      {job.kind === "verify_all" && "Глобальная проверка целостности"}
                       {!["install", "verify", "verify_all"].includes(job.kind) && job.kind}
                     </strong>
                     <div style={{ fontSize: "12px", color: "#b45309", marginTop: "2px" }}>
                       {job.current_file
                         ? <span style={{ fontFamily: "monospace" }}>{job.current_file}</span>
-                        : job.message || "Preparing…"}
+                        : job.message || "Подготовка…"}
                     </div>
                     {job.retry_count > 0 && (
                       <div style={{ fontSize: "11px", color: "#ef4444", marginTop: "2px" }}>
-                        Retries: {job.retry_count}
+                        Попыток: {job.retry_count}
                       </div>
                     )}
                   </div>
@@ -670,7 +670,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                     <span className={statusBadgeClass(job.status)}>{job.status}</span>
                     <button
                       className="icon-button danger-icon"
-                      title="Cancel job"
+                      title="Отменить задачу"
                       onClick={() => void handleCancelJob(job.job_id)}
                     >
                       <X size={13} />
@@ -700,10 +700,10 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#b45309" }}>
                   <span>
-                    {job.done} / {job.total} files ({job.progress_pct}%)
-                    {job.failed > 0 && <span style={{ color: "#ef4444", marginLeft: "8px" }}>✗ {job.failed} failed</span>}
+                    {job.done} / {job.total} файлов ({job.progress_pct}%)
+                    {job.failed > 0 && <span style={{ color: "#ef4444", marginLeft: "8px" }}>✗ {job.failed} ошибок</span>}
                   </span>
-                  {job.eta_seconds !== null && <span>{fmtEta(job.eta_seconds)} remaining</span>}
+                  {job.eta_seconds !== null && <span>Осталось {fmtEta(job.eta_seconds)}</span>}
                 </div>
               </div>
             ))}
@@ -722,12 +722,12 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
           }}
         >
           <div>
-            <h2>Installed Versions</h2>
-            <p>Python releases mirrored locally</p>
+            <h2>Установленные версии</h2>
+            <p>Локально зеркалированные релизы Python</p>
           </div>
           <button
             className="icon-button"
-            title="Refresh"
+            title="Обновить"
             onClick={() => void fetchVersions()}
             disabled={loadingVersions}
           >
@@ -738,16 +738,16 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
         {loadingVersions && versions.length === 0 ? (
           <div style={{ textAlign: "center", padding: "40px", color: "#697782" }}>
             <Loader2 size={24} className="spin" style={{ marginBottom: "10px" }} />
-            <div>Loading…</div>
+            <div>Загрузка…</div>
           </div>
         ) : versions.length === 0 ? (
           <div style={{ textAlign: "center", padding: "40px", color: "#697782" }}>
-            No Python versions mirrored yet.{" "}
+            Нет зеркалированных версий Python.{" "}
             <button
               style={{ background: "none", border: "none", color: "#0b5c76", cursor: "pointer", fontWeight: 700 }}
               onClick={handleOpenDownloadModal}
             >
-              Download one now →
+              Скачать сейчас →
             </button>
           </div>
         ) : (
@@ -756,10 +756,10 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
               <thead>
                 <tr style={{ borderBottom: "2px solid #dfe6ea", color: "#697782", fontSize: "13px" }}>
                   <th style={{ padding: "10px 8px", textAlign: "left", width: "32px" }} />
-                  <th style={{ padding: "10px 8px", textAlign: "left" }}>Version</th>
-                  <th style={{ padding: "10px 8px", textAlign: "left" }}>Files</th>
-                  <th style={{ padding: "10px 8px", textAlign: "left" }}>Total Size</th>
-                  <th style={{ padding: "10px 8px", textAlign: "right" }}>Actions</th>
+                  <th style={{ padding: "10px 8px", textAlign: "left" }}>Версия</th>
+                  <th style={{ padding: "10px 8px", textAlign: "left" }}>Файлы</th>
+                  <th style={{ padding: "10px 8px", textAlign: "left" }}>Размер</th>
+                  <th style={{ padding: "10px 8px", textAlign: "right" }}>Действия</th>
                 </tr>
               </thead>
               <tbody>
@@ -778,7 +778,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                           className="icon-button"
                           style={{ width: "26px", height: "26px" }}
                           onClick={() => void handleToggleExpand(v.version)}
-                          title="Show files"
+                          title="Показать файлы"
                         >
                           {expandedVersion === v.version
                             ? <ChevronDown size={13} />
@@ -797,7 +797,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                         <div style={{ display: "flex", gap: "5px", justifyContent: "flex-end" }}>
                           <button
                             className="icon-button"
-                            title="Verify integrity"
+                            title="Проверить целостность"
                             onClick={() => void handleVerifyVersion(v.version)}
                             disabled={pendingKeys.has(`pymir:verify:${v.version}`)}
                           >
@@ -805,7 +805,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                           </button>
                           <button
                             className="icon-button danger-icon"
-                            title="Delete version"
+                            title="Удалить версию"
                             onClick={() => void handleDeleteVersion(v.version)}
                             disabled={pendingKeys.has(`pymir:delete:${v.version}`)}
                           >
@@ -849,7 +849,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
         <div className="confirm-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setDownloadModalOpen(false); }}>
           <div className="confirm-dialog" style={{ maxWidth: "480px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h2>Download Python Version</h2>
+              <h2>Скачать версию Python</h2>
               <button className="icon-button" onClick={() => setDownloadModalOpen(false)}>
                 <X size={16} />
               </button>
@@ -857,11 +857,11 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
 
             <form onSubmit={handleDownloadSubmit} className="form-grid">
               <label>
-                Python Version
+                Версия Python
                 <div style={{ display: "flex", gap: "8px" }}>
                   <input
                     type="text"
-                    placeholder="e.g. 3.12.3"
+                    placeholder="например 3.12.3"
                     value={downloadVersion}
                     onChange={(e) => setDownloadVersion(e.target.value)}
                     list="remote-versions-list"
@@ -878,14 +878,14 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
               {loadingRemote && (
                 <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#697782", fontSize: "13px" }}>
                   <Loader2 size={14} className="spin" />
-                  Loading available versions from python.org…
+                  Загрузка доступных версий с python.org…
                 </div>
               )}
 
               {remoteVersions.length > 0 && (
                 <div>
                   <div style={{ fontSize: "12px", color: "#697782", marginBottom: "8px" }}>
-                    Or select from {remoteVersions.length} available releases:
+                    Или выберите из {remoteVersions.length} доступных релизов:
                   </div>
                   <div
                     style={{
@@ -922,7 +922,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
 
               <div className="confirm-actions">
                 <button type="button" className="secondary-button" onClick={() => setDownloadModalOpen(false)}>
-                  Cancel
+                  Отмена
                 </button>
                 <button
                   type="submit"
@@ -930,7 +930,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                   disabled={!downloadVersion.trim() || pendingKeys.has(`pymir:install:${downloadVersion.trim()}`)}
                 >
                   <Download size={15} />
-                  Download
+                  Скачать
                 </button>
               </div>
             </form>
@@ -949,7 +949,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
             style={{ maxWidth: "680px", overflowY: "auto" }}
           >
             <div className="update-log-head">
-              <h2>Smart Installer Picker</h2>
+              <h2>Умный подбор Python</h2>
               <button className="icon-button" onClick={() => setPickerOpen(false)}>
                 <X size={16} />
               </button>
@@ -964,7 +964,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
               }}
             >
               <label>
-                Version query
+                Запрос версии
                 <input
                   type="text"
                   placeholder="3.12, latest…"
@@ -973,7 +973,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                 />
               </label>
               <label>
-                OS
+                ОС
                 <select
                   value={pickerOs}
                   onChange={(e) => setPickerOs(e.target.value)}
@@ -987,7 +987,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                     color: "#1f2937"
                   }}
                 >
-                  <option value="">Any</option>
+                  <option value="">Любая</option>
                   <option value="windows">🪟 Windows</option>
                   <option value="linux">🐧 Linux</option>
                   <option value="macos">🍎 macOS</option>
@@ -995,7 +995,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                 </select>
               </label>
               <label>
-                Architecture
+                Архитектура
                 <select
                   value={pickerArch}
                   onChange={(e) => setPickerArch(e.target.value)}
@@ -1009,15 +1009,15 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                     color: "#1f2937"
                   }}
                 >
-                  <option value="">Any</option>
+                  <option value="">Любая</option>
                   <option value="amd64">x86-64 / amd64</option>
-                  <option value="x86">x86 (32-bit)</option>
+                  <option value="x86">x86 (32-бит)</option>
                   <option value="arm64">ARM64</option>
                   <option value="aarch64">aarch64</option>
                 </select>
               </label>
               <label>
-                File type
+                Тип файла
                 <select
                   value={pickerFileType}
                   onChange={(e) => setPickerFileType(e.target.value)}
@@ -1031,11 +1031,11 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                     color: "#1f2937"
                   }}
                 >
-                  <option value="">Any</option>
-                  <option value="installer">Installer</option>
-                  <option value="embeddable">Embeddable</option>
-                  <option value="tarball">Tarball</option>
-                  <option value="source">Source</option>
+                  <option value="">Любой</option>
+                  <option value="installer">Установщик</option>
+                  <option value="embeddable">Встраиваемый</option>
+                  <option value="tarball">Tar-архив</option>
+                  <option value="source">Исходный код</option>
                 </select>
               </label>
             </div>
@@ -1056,7 +1056,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
               >
                 <div>
                   <div style={{ fontSize: "12px", color: "#166534", fontWeight: 700, marginBottom: "4px" }}>
-                    ⭐ Best Match
+                    ⭐ Лучшее совпадение
                   </div>
                   <div style={{ fontWeight: 700, color: "#14532d" }}>
                     Python {pickerBest.version} — {osEmoji(pickerBest.os_type)} {pickerBest.os_type} / {pickerBest.arch}
@@ -1065,7 +1065,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                     {pickerBest.filename}
                   </div>
                   {pickerBest.is_installed && (
-                    <span className="badge badge-ok" style={{ marginTop: "6px" }}>Already installed</span>
+                    <span className="badge badge-ok" style={{ marginTop: "6px" }}>Уже установлено</span>
                   )}
                 </div>
                 <button
@@ -1074,7 +1074,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                   onClick={() => void handlePickerInstall(pickerBest!)}
                 >
                   <Download size={15} />
-                  {pickerBest.is_installed ? "Installed" : "Download"}
+                  {pickerBest.is_installed ? "Установлено" : "Скачать"}
                 </button>
               </div>
             )}
@@ -1086,7 +1086,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
               </div>
             ) : pickerSuggestions.length === 0 ? (
               <div style={{ textAlign: "center", padding: "30px", color: "#697782" }}>
-                No suggestions. Try adjusting the filters.
+                Нет предложений. Попробуйте изменить фильтры.
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "340px", overflowY: "auto" }}>
@@ -1112,7 +1112,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                         &nbsp;
                         <span className="badge badge-muted">{s.file_type}</span>
                         {s.is_installed && (
-                          <span className="badge badge-ok" style={{ marginLeft: "6px" }}>✓ installed</span>
+                          <span className="badge badge-ok" style={{ marginLeft: "6px" }}>✓ установлено</span>
                         )}
                       </div>
                       <div
@@ -1136,9 +1136,9 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                       onClick={() => void handlePickerInstall(s)}
                     >
                       {s.is_installed ? (
-                        <><CheckCircle size={13} /> Ready</>
+                        <><CheckCircle size={13} /> Готово</>
                       ) : (
-                        <><Download size={13} /> Download</>
+                        <><Download size={13} /> Скачать</>
                       )}
                     </button>
                   </div>
@@ -1148,7 +1148,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
 
             <div className="confirm-actions">
               <button className="secondary-button" onClick={() => setPickerOpen(false)}>
-                Close
+                Закрыть
               </button>
             </div>
           </div>
