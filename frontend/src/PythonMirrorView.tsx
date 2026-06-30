@@ -87,7 +87,8 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
 
   // Download modal
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
-  const [downloadVersion, setDownloadVersion] = useState("");
+  const [downloadVersions, setDownloadVersions] = useState<string[]>([]);
+  const [downloadVersionInput, setDownloadVersionInput] = useState("");
   const [remoteVersions, setRemoteVersions] = useState<string[]>([]);
   const [loadingRemote, setLoadingRemote] = useState(false);
 
@@ -309,13 +310,16 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
   // Actions
   // ---------------------------------------------------------------------------
 
-  const handleInstallVersion = async (v: string) => {
+  const handleInstallVersion = async (v: string, closeAfter = true) => {
     await runAction(
       async () => {
         const job = await api.pythonMirrorInstall(v);
         addActiveJob(job);
-        setDownloadModalOpen(false);
-        setDownloadVersion("");
+        if (closeAfter) {
+          setDownloadModalOpen(false);
+          setDownloadVersions([]);
+          setDownloadVersionInput("");
+        }
       },
       { pendingKey: `pymir:install:${v}`, errorTitle: "Не удалось запустить установку" }
     );
@@ -396,6 +400,8 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
 
   const handleOpenDownloadModal = async () => {
     setDownloadModalOpen(true);
+    setDownloadVersions([]);
+    setDownloadVersionInput("");
     setLoadingRemote(true);
     try {
       const res = await api.pythonMirrorRemoteVersions();
@@ -409,9 +415,20 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
 
   const handleDownloadSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    const v = downloadVersion.trim();
-    if (!v) return;
-    await handleInstallVersion(v);
+    const versionsToInstall = new Set([...downloadVersions]);
+    const inputVal = downloadVersionInput.trim();
+    if (inputVal) {
+      versionsToInstall.add(inputVal);
+    }
+    
+    if (versionsToInstall.size === 0) return;
+    
+    for (const v of versionsToInstall) {
+      await handleInstallVersion(v, false);
+    }
+    setDownloadModalOpen(false);
+    setDownloadVersions([]);
+    setDownloadVersionInput("");
   };
 
   // ---------------------------------------------------------------------------
@@ -857,15 +874,14 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
 
             <form onSubmit={handleDownloadSubmit} className="form-grid">
               <label>
-                Версия Python
+                Версия Python (ручной ввод)
                 <div style={{ display: "flex", gap: "8px" }}>
                   <input
                     type="text"
                     placeholder="например 3.12.3"
-                    value={downloadVersion}
-                    onChange={(e) => setDownloadVersion(e.target.value)}
+                    value={downloadVersionInput}
+                    onChange={(e) => setDownloadVersionInput(e.target.value)}
                     list="remote-versions-list"
-                    required
                   />
                   <datalist id="remote-versions-list">
                     {remoteVersions.map((rv) => (
@@ -885,7 +901,7 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
               {remoteVersions.length > 0 && (
                 <div>
                   <div style={{ fontSize: "12px", color: "#697782", marginBottom: "8px" }}>
-                    Или выберите из {remoteVersions.length} доступных релизов:
+                    Или выберите одну или несколько версий для скачивания ({downloadVersions.length} выбрано):
                   </div>
                   <div
                     style={{
@@ -896,26 +912,39 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                       gap: "6px"
                     }}
                   >
-                    {remoteVersions.map((rv) => (
-                      <button
-                        key={rv}
-                        type="button"
-                        onClick={() => setDownloadVersion(rv)}
-                        style={{
-                          padding: "4px 10px",
-                          borderRadius: "6px",
-                          border: "1px solid",
-                          borderColor: downloadVersion === rv ? "#0b5c76" : "#cbd5dc",
-                          background: downloadVersion === rv ? "#e0f2fe" : "#f8fafb",
-                          color: downloadVersion === rv ? "#0b5c76" : "#34424c",
-                          fontSize: "12px",
-                          fontWeight: downloadVersion === rv ? 700 : 400,
-                          cursor: "pointer"
-                        }}
-                      >
-                        {rv}
-                      </button>
-                    ))}
+                    {remoteVersions.map((rv) => {
+                      const isSelected = downloadVersions.includes(rv);
+                      return (
+                        <button
+                          key={rv}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) {
+                              setDownloadVersions(cur => cur.filter(x => x !== rv));
+                            } else {
+                              setDownloadVersions(cur => [...cur, rv]);
+                            }
+                          }}
+                          style={{
+                            padding: "4px 10px",
+                            borderRadius: "6px",
+                            border: "1px solid",
+                            borderColor: isSelected ? "#0b5c76" : "#cbd5dc",
+                            background: isSelected ? "#e0f2fe" : "#f8fafb",
+                            color: isSelected ? "#0b5c76" : "#34424c",
+                            fontSize: "12px",
+                            fontWeight: isSelected ? 700 : 400,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px"
+                          }}
+                        >
+                          {isSelected && <CheckCircle size={12} />}
+                          {rv}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -927,10 +956,10 @@ export function PythonMirrorView({ pendingKeys, pushToast, runAction }: PythonMi
                 <button
                   type="submit"
                   className="primary-button"
-                  disabled={!downloadVersion.trim() || pendingKeys.has(`pymir:install:${downloadVersion.trim()}`)}
+                  disabled={downloadVersions.length === 0 && !downloadVersionInput.trim()}
                 >
                   <Download size={15} />
-                  Скачать
+                  Скачать ({downloadVersions.length + (downloadVersionInput.trim() && !downloadVersions.includes(downloadVersionInput.trim()) ? 1 : 0)})
                 </button>
               </div>
             </form>
