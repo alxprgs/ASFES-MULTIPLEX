@@ -438,11 +438,28 @@ class ProxyCreateFromUrlRequest(BaseModel):
 
 
 class ProxyImportProxifierRequest(BaseModel):
-    xml_content: str
+    xml_content: str = Field(..., max_length=1_048_576)
 
 
-class ProxyExportProxifierRequest(BaseModel):
+class ProxyExportRequest(BaseModel):
+    """Base model for proxy exports that require verifying current user password."""
+    current_password: str
+
+
+class ProxyExportProxifierRequest(ProxyExportRequest):
     proxy_ids: list[str]
+
+
+class ProxyExportUrlRequest(ProxyExportRequest):
+    pass
+
+
+class ProxyExportLinesRequest(ProxyExportRequest):
+    pass
+
+
+class ProxyExportTgRequest(ProxyExportRequest):
+    secret: str | None = None
 
 
 class ProxyExportProxifierResponse(BaseModel):

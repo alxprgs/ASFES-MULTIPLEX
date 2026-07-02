@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
+import socket
 import time
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -15,13 +17,71 @@ from server.core.security import now_utc
 from server.core.crypto import ProxyEncryptor
 
 
+# Networks that must never be used as proxy endpoints (SSRF guard).
+_BLOCKED_NETWORKS: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
+    ipaddress.ip_network("127.0.0.0/8"),      # IPv4 loopback
+    ipaddress.ip_network("::1/128"),           # IPv6 loopback
+    ipaddress.ip_network("10.0.0.0/8"),        # RFC 1918
+    ipaddress.ip_network("172.16.0.0/12"),     # RFC 1918
+    ipaddress.ip_network("192.168.0.0/16"),    # RFC 1918
+    ipaddress.ip_network("169.254.0.0/16"),   # Link-local / AWS IMDS
+    ipaddress.ip_network("fe80::/10"),         # IPv6 link-local
+    ipaddress.ip_network("fc00::/7"),          # IPv6 ULA
+    ipaddress.ip_network("100.64.0.0/10"),     # CGNAT
+    ipaddress.ip_network("0.0.0.0/8"),         # "This" network
+]
+
+
+def _is_blocked_ip(ip_str: str) -> bool:
+    """Return True if *ip_str* falls into a reserved / private network."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        return any(ip in net for net in _BLOCKED_NETWORKS)
+    except ValueError:
+        return True  # Malformed → reject
+
+
+def _validate_proxy_host(host: str) -> None:
+    """Raise ValueError if *host* is a blocked IP or resolves to one.
+
+    Called both at **create** time (static IP check) and at **check** time
+    (DNS resolution → re-validate resolved IPs to prevent DNS rebinding).
+    """
+    stripped = host.strip().strip("[]")
+
+    # Fast path: if the host is already an IP address, check it directly.
+    try:
+        ip = ipaddress.ip_address(stripped)
+        if _is_blocked_ip(str(ip)):
+            raise ValueError(f"Proxy host '{host}' resolves to a reserved address")
+        return
+    except ValueError as exc:
+        if "reserved" in str(exc):
+            raise
+        # Not a bare IP — treat as hostname and resolve below.
+
+    # Resolve hostname to all returned addresses and validate each one.
+    try:
+        infos = socket.getaddrinfo(stripped, None, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        # Cannot resolve at create-time — allow; will re-check at probe-time.
+        return
+    for info in infos:
+        resolved = info[4][0]
+        if _is_blocked_ip(resolved):
+            raise ValueError(
+                f"Proxy host '{host}' resolves to a reserved address: {resolved}"
+            )
+
+
 class ProxyService:
     def __init__(self, db: DatabaseManager, settings: Settings) -> None:
         self.db = db
         self.settings = settings
-        # Use SECURITY__API_JWT_SECRET as the encryption key base
-        secret_key = settings.security.api_jwt_secret.get_secret_value()
-        self.encryptor = ProxyEncryptor(secret_key)
+        # Use the dedicated SECURITY__PROXY_ENCRYPTION_KEY, NOT the JWT secret.
+        # This enforces key separation: rotating one secret does not break the other.
+        proxy_key = settings.security.proxy_encryption_key.get_secret_value()
+        self.encryptor = ProxyEncryptor(proxy_key)
 
     async def create_proxy(
         self,
@@ -38,6 +98,11 @@ class ProxyService:
         count = await self.count_proxies(user_id)
         if count >= 500:
             raise ValueError("Proxy limit exceeded (maximum 500 proxies per user)")
+
+        # SSRF guard: reject reserved / private addresses at create-time.
+        # Hostnames that cannot be resolved at this point are allowed through;
+        # they will be re-validated (with actual DNS resolution) in check_proxy_single.
+        _validate_proxy_host(host)
 
         proxy_id = uuid4().hex
         encrypted_password = self.encryptor.encrypt(password)
@@ -135,7 +200,24 @@ class ProxyService:
 
     @staticmethod
     def parse_proxifier_xml(xml_content: str) -> list[dict[str, Any]]:
-        import xml.etree.ElementTree as ET
+        # Use defusedxml to prevent Billion Laughs / XXE attacks.
+        # Falls back to stdlib ET with a warning if defusedxml is unavailable.
+        _MAX_XML_BYTES = 1_048_576  # 1 MiB hard cap
+        if len(xml_content.encode("utf-8")) > _MAX_XML_BYTES:
+            raise ValueError("XML content exceeds maximum allowed size (1 MiB)")
+
+        try:
+            import defusedxml.ElementTree as ET  # type: ignore[import]
+        except ImportError:
+            import warnings
+            import xml.etree.ElementTree as ET  # type: ignore[assignment]
+            warnings.warn(
+                "defusedxml is not installed; XML parsing may be vulnerable to "
+                "entity expansion attacks. Install: pip install defusedxml",
+                SecurityWarning,
+                stacklevel=2,
+            )
+
         try:
             root = ET.fromstring(xml_content.strip())
         except Exception as exc:
@@ -316,15 +398,27 @@ class ProxyService:
         encrypted_pass = proxy.get("password_encrypted")
         password = self.decrypt_password(encrypted_pass) if encrypted_pass else None
 
+        # SSRF guard: re-validate host with DNS resolution at check-time.
+        # This catches DNS rebinding and cases where a hostname changed after creation.
+        try:
+            _validate_proxy_host(host)
+        except ValueError as exc:
+            return {
+                "checked_at": datetime.now(UTC).isoformat(),
+                "ok": False,
+                "avg_latency_ms": None,
+                "details": {"ssrf_guard": {"ok": False, "latency_ms": None, "external_ip": None, "error": str(exc)}},
+            }
+
         auth_str = ""
         if username:
             auth_str = f"{username}:{password}@" if password else f"{username}@"
-        
+
         # Build transport proxy config
         # Map https protocol to http scheme since httpx expects TLS proxy for https://
         scheme = "http" if protocol in ("http", "https") else protocol
         proxy_url = f"{scheme}://{auth_str}{host}:{port}"
-        
+
         targets = {
             "ipify": "https://api.ipify.org",
             "google": "https://www.google.com",
@@ -339,13 +433,15 @@ class ProxyService:
             nonlocal ok
             start = time.perf_counter()
             try:
-                # Use httpx AsyncClient with socks5/http proxy support
-                # Timeout is partitioned per endpoint or total
-                # Note: socksio package allows socks5 support automatically in httpx
-                async with httpx.AsyncClient(proxy=proxy_url, verify=False) as client:
+                # follow_redirects=False: prevents a redirect from the proxy
+                # target from routing through private addresses.
+                async with httpx.AsyncClient(
+                    proxy=proxy_url,
+                    verify=False,
+                    follow_redirects=False,
+                ) as client:
                     resp = await client.get(target_url, timeout=timeout)
                     latency = int((time.perf_counter() - start) * 1000)
-                    # Any response means proxy routing worked!
                     external_ip = resp.text.strip() if target_name == "ipify" else None
                     results[target_name] = {
                         "ok": True,

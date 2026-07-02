@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status, BackgroundTasks
 
 from server.core.deps import get_current_api_user, get_services, enforce_api_rate_limit
+from server.audit import audit_context_from_request
 from server.models import (
     ProxyResponse,
     ProxyCreateRequest,
@@ -10,6 +11,9 @@ from server.models import (
     ProxyImportProxifierRequest,
     ProxyExportProxifierRequest,
     ProxyExportProxifierResponse,
+    ProxyExportUrlRequest,
+    ProxyExportLinesRequest,
+    ProxyExportTgRequest,
     ProxyBulkImportResult,
     ProxyCheckResult,
     ProxyCheckDetail,
@@ -158,7 +162,9 @@ async def export_proxifier(
     current_user: UserPrincipal = Depends(get_current_api_user),
     services: ApplicationServices = Depends(get_services),
 ):
-    await enforce_api_rate_limit(request, services, user=current_user, suffix="proxy_read")
+    await enforce_api_rate_limit(request, services, user=current_user, suffix="proxy_export")
+    if not await services.users.verify_password_for_user(current_user, payload.current_password):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Password verification failed")
     proxies_to_export = []
     for pid in payload.proxy_ids:
         p = await services.proxy_service.get_proxy(current_user.user_id, pid)
@@ -176,6 +182,15 @@ async def export_proxifier(
             })
             
     xml = services.proxy_service.export_as_proxifier_xml(proxies_to_export)
+    
+    await services.audit.record(
+        "proxy.export",
+        actor=current_user,
+        audit_ctx=audit_context_from_request(request),
+        target={"user_id": current_user.user_id},
+        metadata={"format": "proxifier", "count": len(proxies_to_export)},
+    )
+    
     return ProxyExportProxifierResponse(xml_content=xml)
 
 
@@ -236,14 +251,18 @@ async def check_all_proxies(
     return {"status": "started"}
 
 
-@router.get("/proxies/{proxy_id}/export/url")
+@router.post("/proxies/{proxy_id}/export/url")
 async def export_url(
     request: Request,
     proxy_id: str,
+    payload: ProxyExportUrlRequest,
     current_user: UserPrincipal = Depends(get_current_api_user),
     services: ApplicationServices = Depends(get_services),
 ):
-    await enforce_api_rate_limit(request, services, user=current_user, suffix="proxy_read")
+    await enforce_api_rate_limit(request, services, user=current_user, suffix="proxy_export")
+    if not await services.users.verify_password_for_user(current_user, payload.current_password):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Password verification failed")
+
     p = await services.proxy_service.get_proxy(current_user.user_id, proxy_id)
     if not p:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proxy not found")
@@ -253,17 +272,29 @@ async def export_url(
         plain_pass = services.proxy_service.decrypt_password(p["password_encrypted"])
         
     formatted = services.proxy_service.export_as_url(p, plain_pass)
+    
+    await services.audit.record(
+        "proxy.export",
+        actor=current_user,
+        audit_ctx=audit_context_from_request(request),
+        target={"proxy_id": proxy_id},
+        metadata={"format": "url"},
+    )
     return {"url": formatted}
 
 
-@router.get("/proxies/{proxy_id}/export/lines")
+@router.post("/proxies/{proxy_id}/export/lines")
 async def export_lines(
     request: Request,
     proxy_id: str,
+    payload: ProxyExportLinesRequest,
     current_user: UserPrincipal = Depends(get_current_api_user),
     services: ApplicationServices = Depends(get_services),
 ):
-    await enforce_api_rate_limit(request, services, user=current_user, suffix="proxy_read")
+    await enforce_api_rate_limit(request, services, user=current_user, suffix="proxy_export")
+    if not await services.users.verify_password_for_user(current_user, payload.current_password):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Password verification failed")
+
     p = await services.proxy_service.get_proxy(current_user.user_id, proxy_id)
     if not p:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proxy not found")
@@ -273,18 +304,29 @@ async def export_lines(
         plain_pass = services.proxy_service.decrypt_password(p["password_encrypted"])
         
     formatted = services.proxy_service.export_as_lines(p, plain_pass)
+
+    await services.audit.record(
+        "proxy.export",
+        actor=current_user,
+        audit_ctx=audit_context_from_request(request),
+        target={"proxy_id": proxy_id},
+        metadata={"format": "lines"},
+    )
     return {"lines": formatted}
 
 
-@router.get("/proxies/{proxy_id}/export/tg", response_model=ProxyTgExportResponse)
+@router.post("/proxies/{proxy_id}/export/tg", response_model=ProxyTgExportResponse)
 async def export_tg(
     request: Request,
     proxy_id: str,
-    secret: str | None = None,
+    payload: ProxyExportTgRequest,
     current_user: UserPrincipal = Depends(get_current_api_user),
     services: ApplicationServices = Depends(get_services),
 ):
-    await enforce_api_rate_limit(request, services, user=current_user, suffix="proxy_read")
+    await enforce_api_rate_limit(request, services, user=current_user, suffix="proxy_export")
+    if not await services.users.verify_password_for_user(current_user, payload.current_password):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Password verification failed")
+
     p = await services.proxy_service.get_proxy(current_user.user_id, proxy_id)
     if not p:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proxy not found")
@@ -295,5 +337,16 @@ async def export_tg(
             detail="TG proxy export is only supported for SOCKS5 proxies",
         )
         
-    res = services.proxy_service.export_as_tg_proxy(p, secret)
-    return ProxyTgExportResponse(deep_link=res["deep_link"], web_url=res["web_url"])
+    res = services.proxy_service.export_as_tg_proxy(p, payload.secret)
+
+    await services.audit.record(
+        "proxy.export",
+        actor=current_user,
+        audit_ctx=audit_context_from_request(request),
+        target={"proxy_id": proxy_id},
+        metadata={"format": "tg"},
+    )
+    return ProxyTgExportResponse(
+        deep_link=res["deep_link"],
+        web_url=res["web_url"],
+    )

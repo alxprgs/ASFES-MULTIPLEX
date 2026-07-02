@@ -88,12 +88,16 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    docs_url = f"{settings.api_prefix}/docs" if settings.api_docs_enabled else None
+    openapi_url = f"{settings.api_prefix}/openapi.json" if settings.api_docs_enabled else None
+    redoc_url = f"{settings.api_prefix}/redoc" if settings.api_docs_enabled else None
+
     app = FastAPI(
         title=settings.app.name,
         version=settings.app.version,
-        docs_url=f"{settings.api_prefix}/docs",
-        openapi_url=f"{settings.api_prefix}/openapi.json",
-        redoc_url=f"{settings.api_prefix}/redoc",
+        docs_url=docs_url,
+        openapi_url=openapi_url,
+        redoc_url=redoc_url,
         lifespan=lifespan,
     )
     app.add_middleware(AuditMetricsMiddleware)
@@ -113,6 +117,11 @@ def mount_frontend(app: FastAPI, app_settings: Settings) -> None:
     assets_dir = frontend_dist / "assets"
     app.mount("/assets", StaticFiles(directory=str(assets_dir), check_dir=False), name="frontend-assets")
 
+    _ALLOWED_EXTENSIONS = {
+        ".html", ".js", ".css", ".svg", ".png", ".ico", ".webp",
+        ".woff", ".woff2", ".ttf", ".eot", ".json", ".txt", ".xml",
+    }
+
     @app.get("/", include_in_schema=False)
     @app.get("/{frontend_path:path}", include_in_schema=False)
     async def serve_frontend(frontend_path: str = "") -> FileResponse:
@@ -128,6 +137,19 @@ def mount_frontend(app: FastAPI, app_settings: Settings) -> None:
 
         if frontend_path:
             file_path = frontend_dist / frontend_path
+            
+            # Additional layer of defense against path traversal
+            try:
+                file_path = file_path.resolve()
+                file_path.relative_to(frontend_dist.resolve())
+            except ValueError:
+                raise HTTPException(status_code=403, detail="Forbidden")
+
+            # Block sensitive file extensions (e.g. .map)
+            suffix = file_path.suffix.lower()
+            if suffix and suffix not in _ALLOWED_EXTENSIONS:
+                raise HTTPException(status_code=403, detail="Forbidden")
+
             if file_path.exists() and file_path.is_file():
                 return FileResponse(file_path)
 

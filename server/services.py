@@ -82,8 +82,8 @@ def validate_runtime_security(settings: Settings) -> None:
         raise RuntimeError("Production mode requires custom SECURITY secrets and ROOT password")
     validate_password_strength(settings.root.password.get_secret_value(), settings)
     if settings.is_production and str(settings.app.public_base_url).startswith("https://"):
-        if not settings.security.cookie_secure and not settings.security.allow_insecure_cookies:
-            raise RuntimeError("Production HTTPS mode requires SECURITY__COOKIE_SECURE=true")
+        if not settings.effective_cookie_secure:
+            raise RuntimeError("Production HTTPS mode requires Secure cookies (effective_cookie_secure=True)")
 
 
 def serialize_datetime(value: Any) -> str | None:

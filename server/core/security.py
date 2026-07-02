@@ -134,6 +134,7 @@ def decode_jwt(token: str, secret: str, *, issuer: str, audience: str, token_typ
             issuer=issuer,
             audience=audience,
             options={"require": ["exp", "iat", "nbf", "iss", "aud"]},
+            leeway=10,  # 10-second tolerance for NTP clock skew between issuer/verifier
         )
     except jwt.PyJWTError as exc:
         raise SecurityError("Invalid JWT") from exc

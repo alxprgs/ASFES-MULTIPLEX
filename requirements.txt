@@ -27,3 +27,4 @@ uvicorn>=0.42,<1
 webauthn>=2.2,<3
 socksio>=1.0,<2
 cryptography>=45.0.1,<50
+defusedxml>=0.7,<1

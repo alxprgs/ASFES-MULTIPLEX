@@ -900,10 +900,11 @@ class PythonMirrorService:
         ver_dir.mkdir(parents=True, exist_ok=True)
 
         # 4. Download each file
-        for f in files:
+        sem = asyncio.Semaphore(self.cfg.parallel)
+        job_lock = asyncio.Lock()
+
+        async def _download_task(f) -> None:
             dest = ver_dir / f.filename
-            job.current_file = f.filename
-            job.updated_at = datetime.now(UTC)
 
             # Check if already downloaded and valid
             if dest.exists():
@@ -912,39 +913,53 @@ class PythonMirrorService:
                 cached_md5 = cached_meta.get("md5")
                 if cached_md5 and f.md5 and cached_md5 == f.md5:
                     LOGGER.debug("skip_already_cached file=%s", f.filename)
-                    job.done += 1
-                    await self._persist_job(job)
-                    continue
+                    async with job_lock:
+                        job.current_file = f.filename
+                        job.updated_at = datetime.now(UTC)
+                        job.done += 1
+                        await self._persist_job(job)
+                    return
 
             # Download
-            for attempt in range(self.cfg.max_retries):
-                try:
-                    actual_md5 = await self._download_engine.download(
-                        session=session,
-                        url=f.download_url,
-                        dest=dest,
-                        expected_md5=f.md5,
-                    )
-                    await self._update_version_cache(
-                        version, f.filename, actual_md5, dest.stat().st_size
-                    )
-                    job.done += 1
+            async with sem:
+                async with job_lock:
+                    job.current_file = f.filename
+                    job.updated_at = datetime.now(UTC)
                     await self._persist_job(job)
-                    break
-                except IntegrityError as exc:
-                    LOGGER.warning("integrity_error file=%s attempt=%d error=%s",
-                                   f.filename, attempt + 1, exc)
-                    if attempt == self.cfg.max_retries - 1:
-                        job.failed += 1
-                        await self._persist_job(job)
-                except Exception as exc:
-                    LOGGER.warning("download_error file=%s attempt=%d error=%s",
-                                   f.filename, attempt + 1, exc)
-                    if attempt < self.cfg.max_retries - 1:
-                        await asyncio.sleep(2 ** attempt)
-                    else:
-                        job.failed += 1
-                        await self._persist_job(job)
+
+                for attempt in range(self.cfg.max_retries):
+                    try:
+                        actual_md5 = await self._download_engine.download(
+                            session=session,
+                            url=f.download_url,
+                            dest=dest,
+                            expected_md5=f.md5,
+                        )
+                        await self._update_version_cache(
+                            version, f.filename, actual_md5, dest.stat().st_size
+                        )
+                        async with job_lock:
+                            job.done += 1
+                            await self._persist_job(job)
+                        break
+                    except IntegrityError as exc:
+                        LOGGER.warning("integrity_error file=%s attempt=%d error=%s",
+                                       f.filename, attempt + 1, exc)
+                        if attempt == self.cfg.max_retries - 1:
+                            async with job_lock:
+                                job.failed += 1
+                                await self._persist_job(job)
+                    except Exception as exc:
+                        LOGGER.warning("download_error file=%s attempt=%d error=%s",
+                                       f.filename, attempt + 1, exc)
+                        if attempt < self.cfg.max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)
+                        else:
+                            async with job_lock:
+                                job.failed += 1
+                                await self._persist_job(job)
+
+        await asyncio.gather(*(_download_task(f) for f in files))
 
         job.status = "done" if job.failed == 0 else "error"
         job.message = (

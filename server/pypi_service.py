@@ -394,6 +394,16 @@ class PyPIMirrorService:
         if not self.config.on_demand_proxy:
             return None
 
+        # On-demand: check disk space before downloading (minimum 500MB free)
+        import shutil
+        try:
+            usage = shutil.disk_usage(str(self._mirror._storage_dir))
+            if usage.free < 500 * 1024 * 1024:
+                LOGGER.error("Not enough disk space for on-demand proxy (less than 500MB free)")
+                return None
+        except Exception as exc:
+            LOGGER.warning("Could not check disk space: %s", exc)
+
         # On-demand: download the specific file
         try:
             async with aiohttp.ClientSession(

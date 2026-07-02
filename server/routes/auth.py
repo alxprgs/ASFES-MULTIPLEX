@@ -28,7 +28,7 @@ def _build_auth_response(services: ApplicationServices, tokens, user_doc: dict) 
 def _set_auth_cookies(response: Response, services: ApplicationServices, tokens) -> str:
     csrf_token = random_token(24)
     same_site = services.settings.security.cookie_samesite
-    secure = services.settings.security.cookie_secure
+    secure = services.settings.effective_cookie_secure
     response.set_cookie(
         services.settings.access_cookie_name,
         tokens.access_token,
@@ -61,7 +61,7 @@ def _set_auth_cookies(response: Response, services: ApplicationServices, tokens)
 
 def _clear_auth_cookies(response: Response, services: ApplicationServices) -> None:
     same_site = services.settings.security.cookie_samesite
-    secure = services.settings.security.cookie_secure
+    secure = services.settings.effective_cookie_secure
     for cookie_name in (
         services.settings.access_cookie_name,
         services.settings.refresh_cookie_name,

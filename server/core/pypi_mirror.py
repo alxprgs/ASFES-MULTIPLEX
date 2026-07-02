@@ -329,31 +329,38 @@ class AsyncPypiMirror:
         ver_dir = self._get_ver_dir(norm, ver)
         ver_dir.mkdir(parents=True, exist_ok=True)
 
-        success = True
-        for file_info in release_files:
+        sem = asyncio.Semaphore(self.cfg.parallel)
+
+        async def _download_task(file_info: dict) -> bool:
             file_url = file_info.get("url")
             file_name = file_info.get("filename")
             expected_hash = (file_info.get("digests") or {}).get("sha256")
             if not file_url or not file_name or not expected_hash:
-                success = False
-                continue
+                return False
 
             dest = ver_dir / file_name
             if await self._verify_hash(dest, expected_hash):
-                continue
+                return True
 
             await self._check_disk_space(int(file_info.get("size", 0)))
-            try:
-                await self._download_file(session, file_url, dest)
-                if not await self._verify_hash(dest, expected_hash):
-                    success = False
-                    if dest.exists():
-                        dest.unlink()
-            except Exception as exc:
-                logger.error("download_error file=%s error=%s", file_name, exc)
-                success = False
+            
+            async with sem:
+                try:
+                    await self._download_file(session, file_url, dest)
+                    if not await self._verify_hash(dest, expected_hash):
+                        if dest.exists():
+                            dest.unlink()
+                        return False
+                    return True
+                except Exception as exc:
+                    logger.error("download_error file=%s error=%s", file_name, exc)
+                    return False
 
-        return success
+        if not release_files:
+            return True
+
+        results = await asyncio.gather(*(_download_task(f) for f in release_files))
+        return all(results)
 
     async def download_all_versions(self, session: aiohttp.ClientSession, name: str) -> None:
         norm = normalize_package_name(name)

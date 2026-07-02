@@ -164,11 +164,13 @@ import secrets
 print(secrets.token_urlsafe(48))
 print(secrets.token_urlsafe(48))
 print(secrets.token_urlsafe(48))
+print(secrets.token_urlsafe(48))
 PY
 )"
 API_SECRET="$(sed -n '1p' <<<"${SECRET_VALUES}")"
 OAUTH_SECRET="$(sed -n '2p' <<<"${SECRET_VALUES}")"
 PASSWORD_PEPPER="$(sed -n '3p' <<<"${SECRET_VALUES}")"
+PROXY_KEY="$(sed -n '4p' <<<"${SECRET_VALUES}")"
 
 cat >"${ENV_FILE}" <<EOF
 APP__NAME=ASFES Multiplex
@@ -224,6 +226,7 @@ HOST_OPS__PORT_PROBE_ALLOWED_HOSTS=["127.0.0.1","::1","localhost"]
 SECURITY__API_JWT_SECRET=${API_SECRET}
 SECURITY__OAUTH_JWT_SECRET=${OAUTH_SECRET}
 SECURITY__PASSWORD_PEPPER=${PASSWORD_PEPPER}
+SECURITY__PROXY_ENCRYPTION_KEY=${PROXY_KEY}
 SECURITY__ACCESS_TOKEN_TTL_MINUTES=15
 SECURITY__REFRESH_TOKEN_TTL_DAYS=30
 SECURITY__OAUTH_ACCESS_TOKEN_TTL_MINUTES=30

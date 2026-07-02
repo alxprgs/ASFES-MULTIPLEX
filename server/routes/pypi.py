@@ -419,6 +419,7 @@ async def simple_index(
 ) -> HTMLResponse:
     """PEP 503 root index: lists all packages available on this mirror."""
     _check_enabled(services)
+    await enforce_api_rate_limit(request, services, policy_name="pypi_simple")
     html = await services.pypi_mirror.simple_api_root_html()
     return HTMLResponse(content=html)
 
@@ -438,6 +439,7 @@ async def simple_package(
     Blocked packages return 404 (pip interprets this as 'not found').
     """
     _check_enabled(services)
+    await enforce_api_rate_limit(request, services, policy_name="pypi_simple")
     try:
         html = await services.pypi_mirror.simple_api_package_html(name)
     except ValueError:
@@ -468,6 +470,7 @@ async def simple_file(
     Returns 403 if the version is blocked, 404 if not found.
     """
     _check_enabled(services)
+    await enforce_api_rate_limit(request, services, policy_name="pypi_simple")
     try:
         file_path = await services.pypi_mirror.get_file_path(name, version, filename)
     except PermissionError as exc:

@@ -32,6 +32,11 @@ async def import_profile(context: ToolExecutionContext, arguments: dict[str, Any
     name = str(require_argument(arguments, "name"))
     vpn_type = str(require_argument(arguments, "vpn_type")).lower()
     source_path = context.services.host_ops.resolve_managed_path(str(require_argument(arguments, "source_path")), roots=context.services.host_ops.managed_file_roots())
+    
+    _ALLOWED_VPN_EXTS = {".conf", ".ovpn", ".json", ".txt"}
+    if source_path.suffix.lower() not in _ALLOWED_VPN_EXTS:
+        raise RuntimeError(f"Invalid VPN profile extension. Allowed: {', '.join(_ALLOWED_VPN_EXTS)}")
+
     target_dir = _profile_dir(context)
     target_config = target_dir / f"{name}{source_path.suffix or '.conf'}"
     target_config.write_text(source_path.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")

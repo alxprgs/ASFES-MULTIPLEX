@@ -405,7 +405,10 @@ class UpdateManager:
     def _restart_command(self) -> tuple[list[str], Path, int]:
         if os.name == "nt":
             return ([sys.executable, "-c", "print('restart is unavailable on Windows')"], BASE_DIR, 30)
-        return (self._bash_command(f"nohup bash -c \"sleep 1; systemctl restart '{SERVICE_NAME}'\" >/dev/null 2>&1 &"), BASE_DIR, 60)
+        # Use --no-block so systemctl queues the restart job and returns immediately.
+        # This captures synchronous errors (e.g. missing service, missing permissions)
+        # without blocking and dying mid-command.
+        return (["systemctl", "restart", "--no-block", SERVICE_NAME], BASE_DIR, 60)
 
     def _rsync_script(self) -> str:
         excludes = " ".join(

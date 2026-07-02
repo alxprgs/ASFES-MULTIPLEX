@@ -88,7 +88,7 @@ def test_decode_jwt_missing_and_expired() -> None:
         issuer="iss",
         audience="aud",
         token_type="access",
-        ttl=timedelta(seconds=-5),
+        ttl=timedelta(seconds=-15),
     )
     with pytest.raises(SecurityError) as exc:
         decode_jwt(expired_token, secret, issuer="iss", audience="aud")
