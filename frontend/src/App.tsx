@@ -2444,6 +2444,26 @@ export function App() {
             <span>{health?.mongodb || "mongo"}</span>
             <SlidersHorizontal size={18} />
             <span>{runtime?.mcp_enabled ? "MCP включён" : "MCP отключён"}</span>
+            {runtime?.mcp_enabled && bootstrap?.mcp_path ? (() => {
+              const baseUrl = window.location.origin;
+              const mcpUrl = `${baseUrl.replace(/\/$/, "")}${bootstrap.mcp_path}`;
+              const config = btoa(JSON.stringify({ url: mcpUrl }));
+              const name = encodeURIComponent(bootstrap.app_name || "ASFES Multiplex");
+              const href = `lmstudio://add_mcp?name=${name}&config=${config}`;
+              return (
+                <>
+                  <span className="status-strip-sep" />
+                  <a href={href} className="lms-button" title={`Добавить MCP-сервер в LM Studio\n${mcpUrl}`}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                      <path d="M2 17l10 5 10-5" />
+                      <path d="M2 12l10 5 10-5" />
+                    </svg>
+                    Add to LM Studio
+                  </a>
+                </>
+              );
+            })() : null}
           </div>
         </header>
         <ErrorBanner message={error} />

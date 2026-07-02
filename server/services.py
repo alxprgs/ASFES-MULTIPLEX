@@ -1220,14 +1220,16 @@ class OAuthService:
             token_type="oauth_access",
         )
 
-    def authorization_server_metadata(self) -> dict[str, Any]:
+    def authorization_server_metadata(self, base_url: str | None = None) -> dict[str, Any]:
+        base = base_url.rstrip("/") if base_url else self.settings.public_base_url
+        oauth_issuer = f"{base}{self.settings.oauth.issuer_path}"
         return {
-            "issuer": self.settings.oauth_issuer,
-            "authorization_endpoint": self.settings.authorization_endpoint,
-            "token_endpoint": self.settings.token_endpoint,
-            "registration_endpoint": f"{self.settings.oauth_issuer}/register",
-            "revocation_endpoint": self.settings.revocation_endpoint,
-            "jwks_uri": self.settings.jwks_uri,
+            "issuer": oauth_issuer,
+            "authorization_endpoint": f"{base}{self.settings.oauth.authorization_path}",
+            "token_endpoint": f"{base}{self.settings.oauth.token_path}",
+            "registration_endpoint": f"{oauth_issuer}/register",
+            "revocation_endpoint": f"{base}{self.settings.oauth.revocation_path}",
+            "jwks_uri": f"{base}{self.settings.oauth.jwks_path}",
             "response_types_supported": ["code"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
             "token_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
@@ -1235,10 +1237,11 @@ class OAuthService:
             "scopes_supported": self.settings.oauth.supported_scopes,
         }
 
-    def protected_resource_metadata(self) -> dict[str, Any]:
+    def protected_resource_metadata(self, base_url: str | None = None) -> dict[str, Any]:
+        base = base_url.rstrip("/") if base_url else self.settings.public_base_url
         return {
-            "resource": f"{self.settings.public_base_url}{self.settings.mcp_path}",
-            "authorization_servers": [self.settings.oauth_issuer],
+            "resource": f"{base}{self.settings.mcp_path}",
+            "authorization_servers": [f"{base}{self.settings.oauth.issuer_path}"],
             "bearer_methods_supported": ["header"],
             "scopes_supported": self.settings.oauth.supported_scopes,
         }
