@@ -420,7 +420,7 @@ class ProxyService:
         proxy_url = f"{scheme}://{auth_str}{host}:{port}"
 
         targets = {
-            "ipify": "https://api.ipify.org",
+            "ip_api": "http://ip-api.com/json",
             "google": "https://www.google.com",
             "telegram": "https://t.me",
         }
@@ -428,9 +428,11 @@ class ProxyService:
         results = {}
         ok = False
         latencies = []
+        country_res = None
+        provider_res = None
 
         async def _test_url(target_name: str, target_url: str) -> None:
-            nonlocal ok
+            nonlocal ok, country_res, provider_res
             start = time.perf_counter()
             try:
                 # follow_redirects=False: prevents a redirect from the proxy
@@ -442,7 +444,16 @@ class ProxyService:
                 ) as client:
                     resp = await client.get(target_url, timeout=timeout)
                     latency = int((time.perf_counter() - start) * 1000)
-                    external_ip = resp.text.strip() if target_name == "ipify" else None
+                    external_ip = None
+                    if target_name == "ip_api":
+                        try:
+                            data = resp.json()
+                            external_ip = data.get("query")
+                            country_res = data.get("country")
+                            provider_res = data.get("isp")
+                        except Exception:
+                            external_ip = resp.text.strip()
+                            
                     results[target_name] = {
                         "ok": True,
                         "latency_ms": latency,
@@ -472,6 +483,8 @@ class ProxyService:
             "ok": ok,
             "avg_latency_ms": avg_latency,
             "details": results,
+            "country": country_res,
+            "provider": provider_res,
         }
 
     async def check_all_background(self, user_id: str, proxy_ids: list[str] | None = None) -> None:

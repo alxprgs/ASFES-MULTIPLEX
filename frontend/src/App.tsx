@@ -67,6 +67,33 @@ type UpdateFlowState = {
   restartMessage: string | null;
 };
 
+async function safeCopyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise((resolve, reject) => {
+    try {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.top = "0";
+      textArea.style.left = "0";
+      textArea.style.position = "fixed";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      const successful = document.execCommand("copy");
+      document.body.removeChild(textArea);
+      if (successful) {
+        resolve();
+      } else {
+        reject(new Error("execCommand copy failed"));
+      }
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 const navItems: Array<{ view: View; label: string; icon: ReactNode }> = [
   { view: "overview", label: "Обзор", icon: <Activity size={18} /> },
   { view: "users", label: "Пользователи", icon: <Users size={18} /> },
@@ -1080,7 +1107,7 @@ function ApiKeysPanel() {
 
   function copyToClipboard() {
     if (!createdToken) return;
-    navigator.clipboard.writeText(createdToken);
+    void safeCopyToClipboard(createdToken);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -1494,6 +1521,181 @@ function ProfileView({
   );
 }
 
+
+function PasswordPromptModal({
+  onConfirm,
+  onCancel
+}: {
+  onConfirm: (password: string) => void;
+  onCancel: () => void;
+}) {
+  const [password, setPassword] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  return (
+    <div className="confirm-backdrop" role="presentation" onMouseDown={onCancel} style={{ zIndex: 100 }}>
+      <section className="confirm-dialog" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()} style={{ maxWidth: "400px", width: "100%", padding: "20px" }}>
+        <h2>Требуется пароль</h2>
+        <p style={{ color: "#697782", marginBottom: "16px", fontSize: "14px" }}>Для экспорта или просмотра паролей прокси введите пароль от вашего аккаунта.</p>
+        <form onSubmit={(e) => { e.preventDefault(); onConfirm(password); }}>
+          <input
+            ref={inputRef}
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Пароль"
+            required
+            style={{
+              width: "100%", padding: "8px 12px", borderRadius: "6px", border: "1px solid #dfe6ea", marginBottom: "16px", outline: "none", boxSizing: "border-box"
+            }}
+          />
+          <div className="confirm-actions" style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            <button type="button" className="secondary-button" onClick={onCancel}>Отмена</button>
+            <button type="submit" className="primary-button">Подтвердить</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function ProxyDetailsModal({
+  proxy,
+  onClose,
+  pushToast,
+  requestPassword
+}: {
+  proxy: Proxy;
+  onClose: () => void;
+  pushToast: (tone: ToastTone, title: string, message?: string) => void;
+  requestPassword: () => Promise<string>;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [password, setPassword] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [loadingUrl, setLoadingUrl] = useState(false);
+
+  async function handleReveal() {
+    if (url) {
+      setShowPassword(!showPassword);
+      return;
+    }
+    setLoadingUrl(true);
+    try {
+      const pwd = await requestPassword();
+      const res = await api.exportProxyUrl(proxy.proxy_id, pwd);
+      setUrl(res.url);
+      try {
+        const parsed = new URL(res.url);
+        setPassword(decodeURIComponent(parsed.password) || null);
+      } catch {
+        setPassword(null);
+      }
+      setShowPassword(true);
+    } catch (err) {
+      if (err instanceof Error && err.message !== "Отменено пользователем") {
+        pushToast("error", "Ошибка загрузки данных", err.message);
+      }
+    } finally {
+      setLoadingUrl(false);
+    }
+  }
+
+  function copyText(text: string, label: string) {
+    void safeCopyToClipboard(text);
+    pushToast("success", `${label} скопирован(а)`);
+  }
+
+  const maskedUrl = url ? url.replace(password || "", "*".repeat(password?.length || 8)) : "";
+  const displayUrl = showPassword ? url : maskedUrl;
+
+  return (
+    <div className="confirm-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="confirm-dialog" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()} style={{ maxWidth: "500px", width: "100%", padding: "20px" }}>
+        <h2>{proxy.label || "Без названия"}</h2>
+        <p style={{ color: "#697782", marginBottom: "16px" }}>Детали прокси-сервера</p>
+        
+        <div style={{ display: "grid", gap: "12px", fontSize: "14px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px", background: "#f8fafb", borderRadius: "6px" }}>
+            <div>
+              <span style={{ color: "#697782", display: "block", fontSize: "12px" }}>Адрес сервера</span>
+              <strong>{proxy.host}</strong>
+            </div>
+            <button type="button" className="icon-button" onClick={() => copyText(proxy.host, "Адрес сервера")}><Copy size={16}/></button>
+          </div>
+          
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px", background: "#f8fafb", borderRadius: "6px" }}>
+            <div>
+              <span style={{ color: "#697782", display: "block", fontSize: "12px" }}>Порт сервера</span>
+              <strong>{proxy.port}</strong>
+            </div>
+            <button type="button" className="icon-button" onClick={() => copyText(String(proxy.port), "Порт")}><Copy size={16}/></button>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px", background: "#f8fafb", borderRadius: "6px" }}>
+            <div>
+              <span style={{ color: "#697782", display: "block", fontSize: "12px" }}>Логин</span>
+              <strong>{proxy.username || "—"}</strong>
+            </div>
+            {proxy.username && <button type="button" className="icon-button" onClick={() => copyText(proxy.username!, "Логин")}><Copy size={16}/></button>}
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px", background: "#f8fafb", borderRadius: "6px" }}>
+            <div>
+              <span style={{ color: "#697782", display: "block", fontSize: "12px" }}>Пароль</span>
+              {loadingUrl ? <Loader2 size={14} className="spin"/> : 
+                <strong>{url ? (password ? (showPassword ? password : "•".repeat(password.length)) : "—") : "Скрыт"}</strong>
+              }
+            </div>
+            <div style={{ display: "flex", gap: "4px" }}>
+              {!url ? (
+                <button type="button" className="secondary-button" style={{ padding: "4px 8px" }} onClick={handleReveal}>Показать</button>
+              ) : (
+                password && <button type="button" className="secondary-button" style={{ padding: "4px 8px" }} onClick={() => setShowPassword(!showPassword)}>{showPassword ? "Скрыть" : "Показать"}</button>
+              )}
+              {password && <button type="button" className="icon-button" onClick={() => copyText(password!, "Пароль")}><Copy size={16}/></button>}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px", background: "#f8fafb", borderRadius: "6px" }}>
+            <div style={{ flex: 1, overflow: "hidden" }}>
+              <span style={{ color: "#697782", display: "block", fontSize: "12px" }}>Полная ссылка</span>
+              {loadingUrl ? <Loader2 size={14} className="spin"/> : 
+                <code style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis" }}>{url ? displayUrl : "Скрыта"}</code>
+              }
+            </div>
+            <div style={{ display: "flex", gap: "4px", marginLeft: "8px" }}>
+              {url && <button type="button" className="icon-button" onClick={() => copyText(displayUrl!, "Полная ссылка")}><Copy size={16}/></button>}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginTop: "8px" }}>
+            <div style={{ padding: "8px", background: "#f8fafb", borderRadius: "6px" }}>
+              <span style={{ color: "#697782", display: "block", fontSize: "12px" }}>Страна</span>
+              <strong>{proxy.last_check?.country || "Неизвестно"}</strong>
+            </div>
+            <div style={{ padding: "8px", background: "#f8fafb", borderRadius: "6px" }}>
+              <span style={{ color: "#697782", display: "block", fontSize: "12px" }}>Провайдер</span>
+              <strong>{proxy.last_check?.provider || "Неизвестно"}</strong>
+            </div>
+            <div style={{ padding: "8px", background: "#f8fafb", borderRadius: "6px" }}>
+              <span style={{ color: "#697782", display: "block", fontSize: "12px" }}>PING</span>
+              <strong>{proxy.last_check?.avg_latency_ms ? `${proxy.last_check.avg_latency_ms} мс` : "—"}</strong>
+            </div>
+          </div>
+        </div>
+        <div className="confirm-actions" style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
+          <button type="button" className="secondary-button" onClick={onClose}>Закрыть</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function ProxyToolsView({
   pendingKeys,
   pushToast,
@@ -1530,6 +1732,21 @@ export function ProxyToolsView({
   const [tgExportProxy, setTgExportProxy] = useState<Proxy | null>(null);
   const [tgSecret, setTgSecret] = useState("");
   const [tgLinks, setTgLinks] = useState<ProxyTgExport | null>(null);
+
+  // Password Prompt Modal
+  const [passwordPrompt, setPasswordPrompt] = useState<{
+    resolve: (pwd: string) => void;
+    reject: (err: Error) => void;
+  } | null>(null);
+
+  async function requestPassword(): Promise<string> {
+    return new Promise((resolve, reject) => {
+      setPasswordPrompt({ resolve, reject });
+    });
+  }
+
+  // Details Modal
+  const [detailsProxy, setDetailsProxy] = useState<Proxy | null>(null);
 
   const loadProxies = useCallback(async () => {
     setLoading(true);
@@ -1705,40 +1922,45 @@ export function ProxyToolsView({
 
   async function handleExportUrls() {
     if (selectedIds.size === 0) return;
+    setExportDropdownOpen(false);
     try {
+      const pwd = await requestPassword();
       const lines: string[] = [];
       for (const id of Array.from(selectedIds)) {
-        const res = await api.exportProxyUrl(id);
+        const res = await api.exportProxyUrl(id, pwd);
         lines.push(res.url);
       }
-      await navigator.clipboard.writeText(lines.join("\n"));
+      await safeCopyToClipboard(lines.join("\n"));
       pushToast("success", "Ссылки экспортированы в буфер обмена");
     } catch (err) {
+      if (err instanceof Error && err.message === "Отменено пользователем") return;
       pushToast("error", "Ошибка при копировании", err instanceof Error ? err.message : String(err));
     }
-    setExportDropdownOpen(false);
   }
 
   async function handleExportLines() {
     if (selectedIds.size === 0) return;
+    setExportDropdownOpen(false);
     try {
+      const pwd = await requestPassword();
       const blocks: string[] = [];
       for (const id of Array.from(selectedIds)) {
-        const res = await api.exportProxyLines(id);
+        const res = await api.exportProxyLines(id, pwd);
         blocks.push(res.lines);
       }
-      await navigator.clipboard.writeText(blocks.join("\n\n"));
+      await safeCopyToClipboard(blocks.join("\n\n"));
       pushToast("success", "Данные прокси экспортированы в буфер обмена");
     } catch (err) {
+      if (err instanceof Error && err.message === "Отменено пользователем") return;
       pushToast("error", "Ошибка при копировании", err instanceof Error ? err.message : String(err));
     }
-    setExportDropdownOpen(false);
   }
 
   async function handleExportProxifier() {
     if (selectedIds.size === 0) return;
     try {
-      const res = await api.exportProxifier(Array.from(selectedIds));
+      const pwd = await requestPassword();
+      const res = await api.exportProxifier(Array.from(selectedIds), pwd);
       const blob = new Blob([res.xml_content], { type: "application/xml" });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -1765,7 +1987,8 @@ export function ProxyToolsView({
     e.preventDefault();
     if (!tgExportProxy) return;
     try {
-      const res = await api.exportProxyTg(tgExportProxy.proxy_id, tgSecret || undefined);
+      const pwd = await requestPassword();
+      const res = await api.exportProxyTg(tgExportProxy.proxy_id, pwd, tgSecret || undefined);
       setTgLinks(res);
     } catch (err) {
       pushToast("error", "Ошибка генерации TG Proxy", err instanceof Error ? err.message : String(err));
@@ -1925,7 +2148,14 @@ export function ProxyToolsView({
                   <td style={{ padding: "10px 8px" }}>
                     <input type="checkbox" checked={selectedIds.has(p.proxy_id)} onChange={(e) => handleSelectRow(p.proxy_id, e.target.checked)} />
                   </td>
-                  <td style={{ padding: "10px 8px", fontWeight: "bold" }}>{p.label || "Без названия"}</td>
+                  <td style={{ padding: "10px 8px", fontWeight: "bold" }}>
+                    <span 
+                      style={{ color: "#0b5c76", cursor: "pointer", textDecoration: "underline" }}
+                      onClick={() => setDetailsProxy(p)}
+                    >
+                      {p.label || "Без названия"}
+                    </span>
+                  </td>
                   <td style={{ padding: "10px 8px" }}>
                     <Badge tone={p.protocol === "socks5" ? "ok" : "warn"}>{p.protocol.toUpperCase()}</Badge>
                   </td>
@@ -2024,7 +2254,7 @@ export function ProxyToolsView({
                       {tgLinks.deep_link}
                     </code>
                     <button className="icon-button" onClick={() => {
-                      void navigator.clipboard.writeText(tgLinks.deep_link);
+                      void safeCopyToClipboard(tgLinks.deep_link);
                       pushToast("success", "Deep Link скопирован");
                     }}>
                       <Copy size={14} />
@@ -2038,7 +2268,7 @@ export function ProxyToolsView({
                       {tgLinks.web_url}
                     </code>
                     <button className="icon-button" onClick={() => {
-                      void navigator.clipboard.writeText(tgLinks.web_url);
+                      void safeCopyToClipboard(tgLinks.web_url);
                       pushToast("success", "Web URL скопирован");
                     }}>
                       <Copy size={14} />
@@ -2053,6 +2283,16 @@ export function ProxyToolsView({
             </div>
           </section>
         </div>
+      )}
+
+      {/* DETAILS DIALOG */}
+      {detailsProxy && (
+        <ProxyDetailsModal 
+          proxy={detailsProxy} 
+          onClose={() => setDetailsProxy(null)} 
+          pushToast={pushToast} 
+          requestPassword={requestPassword}
+        />
       )}
     </section>
   );

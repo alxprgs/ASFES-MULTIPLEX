@@ -198,6 +198,8 @@ export type ProxyCheckResult = {
   ok: boolean;
   avg_latency_ms: number | null;
   details: Record<string, ProxyCheckDetail>;
+  country?: string | null;
+  provider?: string | null;
 };
 
 export type Proxy = {
@@ -478,16 +480,15 @@ export const api = {
     apiFetch<ProxyCheckResult>(`/proxy/proxies/${encodeURIComponent(proxyId)}/check`, { method: "POST" }),
   checkAllProxies: () =>
     apiFetch<{ status: string }>("/proxy/proxies/check-all", { method: "POST" }),
-  exportProxyUrl: (proxyId: string) =>
-    apiFetch<{ url: string }>(`/proxy/proxies/${encodeURIComponent(proxyId)}/export/url`),
-  exportProxyTg: (proxyId: string, secret?: string) => {
-    const q = secret ? `?secret=${encodeURIComponent(secret)}` : "";
-    return apiFetch<ProxyTgExport>(`/proxy/proxies/${encodeURIComponent(proxyId)}/export/tg${q}`);
+  exportProxyUrl: (proxyId: string, currentPassword: string) =>
+    apiFetch<{ url: string }>(`/proxy/proxies/${encodeURIComponent(proxyId)}/export/url`, { method: "POST", body: JSON.stringify({ current_password: currentPassword }) }),
+  exportProxyTg: (proxyId: string, currentPassword: string, secret?: string) => {
+    return apiFetch<ProxyTgExport>(`/proxy/proxies/${encodeURIComponent(proxyId)}/export/tg`, { method: "POST", body: JSON.stringify({ current_password: currentPassword, secret: secret || undefined }) });
   },
-  exportProxyLines: (proxyId: string) =>
-    apiFetch<{ lines: string }>(`/proxy/proxies/${encodeURIComponent(proxyId)}/export/lines`),
-  exportProxifier: (proxyIds: string[]) =>
-    apiFetch<{ xml_content: string }>("/proxy/proxies/export/proxifier", { method: "POST", body: JSON.stringify({ proxy_ids: proxyIds }) }),
+  exportProxyLines: (proxyId: string, currentPassword: string) =>
+    apiFetch<{ lines: string }>(`/proxy/proxies/${encodeURIComponent(proxyId)}/export/lines`, { method: "POST", body: JSON.stringify({ current_password: currentPassword }) }),
+  exportProxifier: (proxyIds: string[], currentPassword: string) =>
+    apiFetch<{ xml_content: string }>("/proxy/proxies/export/proxifier", { method: "POST", body: JSON.stringify({ proxy_ids: proxyIds, current_password: currentPassword }) }),
 
   // ------------------------------------------------------------------
   // PyPI Mirror

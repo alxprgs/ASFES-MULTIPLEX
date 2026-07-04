@@ -152,7 +152,12 @@ export function PyPIView({ pendingKeys, pushToast, runAction }: PyPIViewProps) {
       return;
     }
     try {
-      const res = await api.exportProxyUrl(proxyId);
+      const pwd = window.prompt("Введите пароль от аккаунта для получения данных прокси:");
+      if (pwd === null) {
+        setCmdProxyUrl("");
+        return;
+      }
+      const res = await api.exportProxyUrl(proxyId, pwd);
       setCmdProxyUrl(res.url);
     } catch (err) {
       console.error("Failed to get proxy URL", err);

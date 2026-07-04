@@ -477,6 +477,8 @@ class ProxyCheckResult(BaseModel):
     ok: bool
     avg_latency_ms: int | None = None
     details: dict[str, ProxyCheckDetail]
+    country: str | None = None
+    provider: str | None = None
 
 
 class ProxyResponse(BaseModel):
