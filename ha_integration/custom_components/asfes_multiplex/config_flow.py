@@ -95,7 +95,7 @@ class AsfesMultiplexConfigFlow(ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_HOST, default="http://192.168.1.100:8000"): TextSelector(
+                vol.Required(CONF_HOST, default="http://192.168.0.100:8000"): TextSelector(
                     TextSelectorConfig(type=TextSelectorType.URL)
                 ),
                 vol.Required("username"): TextSelector(
