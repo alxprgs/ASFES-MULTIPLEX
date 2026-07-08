@@ -37,6 +37,7 @@ ASFES Multiplex — централизованный control plane для упр
   - [Audit Log (журнал аудита)](#-audit-log-журнал-аудита)
   - [Update Manager (обновления)](#-update-manager-обновления)
   - [React Admin UI](#-react-admin-ui)
+  - [Home Assistant Integration](#-home-assistant-integration)
 - [Первый запуск](#-первый-запуск)
   - [Windows / PowerShell](#windows--powershell)
   - [Debian / Ubuntu](#debianubuntu-production)
@@ -333,8 +334,18 @@ PYPI__NETWORK_MODE=direct    # direct | proxy | mix
 | **Proxy** | Управление прокси-серверами, проверка работоспособности |
 | **Alerts** | Правила алертов, история событий |
 | **Audit** | Журнал событий с фильтрацией |
-| **Profile** | Профиль, смена пароля, 2FA, Passkeys, API-ключи |
+| **Profile** | Профиль, смена пароля, 2FA, Passkeys, API-ключи, подключения Home Assistant |
 | **System Update** | Обновление системы, перезапуск сервиса |
+
+---
+
+### 🏡 Home Assistant Integration
+
+Полноценная интеграция для мониторинга и управления ASFES Multiplex прямо из Home Assistant:
+- **Состояние и сенсоры**: 11 сенсоров (загрузка CPU, RAM, диска, uptime, температура, сеть, запущенные контейнеры Docker и процессы, активные подключения Redis/MongoDB) и 6 бинарных сенсоров состояния внутренних сервисов.
+- **Управление (Switches)**: включение/выключение регистрации, MCP и Redis (управляется флагом `HA__SWITCHES_ENABLED` на сервере).
+- **Действия (Buttons)**: перезагрузка плагинов, обновление кэша зеркал Python/PyPI, а также системный перезапуск Multiplex и Docker (управляется флагом `HA__DESTRUCTIVE_BUTTONS_ENABLED` на сервере).
+- **Повышенная безопасность**: полная изоляция JWT-токенов интеграции от стандартных токенов API, ротация refresh-токенов и защита от атак повторного воспроизведения (replay attacks). Управление активными сессиями интеграции доступно прямо из профиля пользователя.
 
 ---
 
@@ -629,6 +640,7 @@ cd ..
 | `GET` | `/pypi/simple/<pkg>/` | pip Simple API | optional |
 | `GET/POST` | `/api/proxy/*` | Управление прокси | ✅ |
 | `GET/POST` | `/api/python-mirror/*` | Управление Python-зеркалом | ✅ |
+| `GET/POST/DELETE` | `/api/ha/*` | Интеграция Home Assistant | ✅ HA Bearer / API JWT |
 | `*` | `/mcp/*` | MCP Gateway (FastMCP) | OAuth |
 | `GET` | `/*` | React SPA (catch-all) | — |
 

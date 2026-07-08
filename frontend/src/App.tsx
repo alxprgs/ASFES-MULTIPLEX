@@ -29,7 +29,7 @@ import {
   Code2
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, AuditEvent, Bootstrap, Health, MCPConnectedService, Passkey, Permission, PluginInfo, RuntimeSettings, SystemUpdateResult, SystemUpdateSession, SystemUpdateStage, ToolInfo, TwoFactorSetup, User, ApiKey, ApiKeyCreateResult, api, setCsrfCookieName, Proxy, ProxyProtocol, ProxyTgExport } from "./api";
+import { ApiError, AuditEvent, Bootstrap, Health, MCPConnectedService, Passkey, Permission, PluginInfo, RuntimeSettings, SystemUpdateResult, SystemUpdateSession, SystemUpdateStage, ToolInfo, TwoFactorSetup, User, ApiKey, ApiKeyCreateResult, api, setCsrfCookieName, Proxy, ProxyProtocol, ProxyTgExport, HAConnectionInfo } from "./api";
 import { PyPIView } from "./PyPIView";
 import { PythonMirrorView } from "./PythonMirrorView";
 
@@ -1228,6 +1228,105 @@ function ApiKeysPanel() {
 }
 
 
+function HomeAssistantPanel() {
+  const [connections, setConnections] = useState<HAConnectionInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busyJtis, setBusyJtis] = useState<Record<string, boolean>>({});
+
+  const fetchConnections = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await api.haConnections();
+      setConnections(res.connections);
+      setError(null);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось загрузить подключения Home Assistant");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchConnections();
+  }, [fetchConnections]);
+
+  const handleRevoke = async (jti: string) => {
+    setBusyJtis((prev) => ({ ...prev, [jti]: true }));
+    try {
+      await api.haRevokeConnection(jti);
+      await fetchConnections();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось отозвать подключение");
+    } finally {
+      setBusyJtis((prev) => ({ ...prev, [jti]: false }));
+    }
+  };
+
+  return (
+    <div className="panel narrow">
+      <div className="panel-head">
+        <div>
+          <h2>Подключения Home Assistant</h2>
+          <p>Интеграции, подключенные к вашему аккаунту</p>
+        </div>
+        <button
+          className="icon-button"
+          onClick={fetchConnections}
+          disabled={loading}
+          title="Обновить"
+        >
+          <RefreshCw size={16} className={loading ? "spin" : ""} />
+        </button>
+      </div>
+
+      <ErrorBanner message={error} />
+
+      {loading && connections.length === 0 ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: "16px" }}>
+          <Loader2 size={24} className="spin" />
+        </div>
+      ) : connections.length > 0 ? (
+        <div className="passkey-list" style={{ marginTop: "16px" }}>
+          {connections.map((item) => (
+            <div className="passkey-row" key={item.jti}>
+              <div>
+                <strong>{item.account_label}</strong>
+                <small style={{ display: "block", color: "var(--color-text-muted)", marginTop: "4px" }}>
+                  IP: {item.client_ip || "Неизвестен"}
+                </small>
+                <small style={{ display: "block", color: "var(--color-text-muted)", marginTop: "2px" }}>
+                  Создано: {formatDate(item.created_at)}
+                  {item.last_used_at ? ` · Активность: ${formatDate(item.last_used_at)}` : ""}
+                </small>
+              </div>
+              <div className="passkey-actions">
+                <button
+                  className="icon-button danger-icon"
+                  title="Отозвать подключение"
+                  disabled={busyJtis[item.jti]}
+                  onClick={() => handleRevoke(item.jti)}
+                >
+                  {busyJtis[item.jti] ? (
+                    <Loader2 size={16} className="spin" />
+                  ) : (
+                    <Trash2 size={16} />
+                  )}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p style={{ textAlign: "center", color: "var(--color-text-muted)", marginTop: "16px" }}>
+          Нет активных подключений Home Assistant.
+        </p>
+      )}
+    </div>
+  );
+}
+
+
 function ProfileView({
   user,
   onSave,
@@ -1517,6 +1616,7 @@ function ProfileView({
         </div>
       </div>
       <ApiKeysPanel />
+      <HomeAssistantPanel />
     </section>
   );
 }

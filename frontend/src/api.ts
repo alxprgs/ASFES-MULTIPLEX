@@ -569,7 +569,31 @@ export const api = {
   pythonMirrorJobStatus: (id: string) =>
     apiFetch<PythonMirrorJobStatus>(`/python-mirror/jobs/${encodeURIComponent(id)}`),
   pythonMirrorCancelJob: (id: string) =>
-    apiFetch<{ ok: boolean }>(`/python-mirror/jobs/${encodeURIComponent(id)}`, { method: "DELETE" })
+    apiFetch<{ ok: boolean }>(`/python-mirror/jobs/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  // ------------------------------------------------------------------
+  // Home Assistant
+  // ------------------------------------------------------------------
+  haConnections: () => apiFetch<HAConnectionListResponse>("/ha/connections"),
+  haRevokeConnection: (jti: string) =>
+    apiFetch<void>(`/ha/connections/${encodeURIComponent(jti)}`, { method: "DELETE" }),
+};
+
+// ---------------------------------------------------------------------------
+// Home Assistant types
+// ---------------------------------------------------------------------------
+
+export type HAConnectionInfo = {
+  jti: string;
+  account_label: string;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string;
+  client_ip: string | null;
+};
+
+export type HAConnectionListResponse = {
+  connections: HAConnectionInfo[];
 };
 
 // ---------------------------------------------------------------------------

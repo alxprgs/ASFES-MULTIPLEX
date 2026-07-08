@@ -1,0 +1,12 @@
+{
+  "domain": "asfes_multiplex",
+  "name": "ASFES Multiplex",
+  "version": "1.0.0",
+  "documentation": "https://github.com/proshar/ASFES-MULTIPLEX",
+  "issue_tracker": "https://github.com/proshar/ASFES-MULTIPLEX/issues",
+  "codeowners": [],
+  "requirements": ["httpx>=0.27.0"],
+  "iot_class": "local_polling",
+  "config_flow": true,
+  "single_config_entry": false
+}

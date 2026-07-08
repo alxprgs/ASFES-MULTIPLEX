@@ -85,6 +85,7 @@ from server.update_manager import UpdateManager
 from server.proxy_service import ProxyService
 from server.pypi_service import PyPIMirrorService
 from server.python_mirror_service import PythonMirrorService
+from server.ha_service import HAService
 
 
 LOGGER = get_logger("multiplex.services")
@@ -104,6 +105,8 @@ CORE_PERMISSIONS = {
     "pypi.manage": "Устанавливать, удалять пакеты, управлять блокировками PyPI-зеркала.",
     "python_mirror.read": "Просматривать версии Python, статистику и статусы задач зеркала.",
     "python_mirror.manage": "Скачивать, удалять версии Python, управлять зеркалом.",
+    "ha.write": "Управлять переключателями и безопасными действиями через HA-интеграцию.",
+    "ha.admin": "Выполнять деструктивные операции через HA-интеграцию (перезапуск, Docker).",
 }
 
 
@@ -2222,6 +2225,7 @@ class ApplicationServices:
     proxy_service: ProxyService
     pypi_mirror: PyPIMirrorService
     python_mirror: PythonMirrorService
+    ha_service: HAService
     verifier_task: asyncio.Task[Any] | None = None
 
 
@@ -2261,6 +2265,26 @@ def build_rate_limit_policies(settings: Settings) -> dict[str, RateLimitPolicy]:
             "mcp_write",
             settings.rate_limits.mcp_write_limit,
             settings.rate_limits.mcp_write_window_seconds,
+        ),
+        "ha_auth": RateLimitPolicy(
+            "ha_auth",
+            settings.rate_limits.ha_auth_limit,
+            settings.rate_limits.ha_auth_window_seconds,
+        ),
+        "ha_read": RateLimitPolicy(
+            "ha_read",
+            settings.rate_limits.ha_read_limit,
+            settings.rate_limits.ha_read_window_seconds,
+        ),
+        "ha_write": RateLimitPolicy(
+            "ha_write",
+            settings.rate_limits.ha_write_limit,
+            settings.rate_limits.ha_write_window_seconds,
+        ),
+        "ha_admin": RateLimitPolicy(
+            "ha_admin",
+            settings.rate_limits.ha_admin_limit,
+            settings.rate_limits.ha_admin_window_seconds,
         ),
     }
 
@@ -2328,6 +2352,12 @@ async def build_application_services(
     )
     await python_mirror_service.recover_jobs()
 
+    ha_svc = HAService(
+        db=db,
+        settings_obj=settings,
+        issuer=settings.security_issuer,
+    )
+
     services = ApplicationServices(
         settings=settings,
         db=db,
@@ -2350,6 +2380,7 @@ async def build_application_services(
         proxy_service=proxy_service,
         pypi_mirror=pypi_mirror_service,
         python_mirror=python_mirror_service,
+        ha_service=ha_svc,
     )
     plugins.attach_services(services)
     await users.ensure_root_user()

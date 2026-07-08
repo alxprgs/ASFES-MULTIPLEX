@@ -239,6 +239,36 @@ class RateLimitPresetConfig(BaseModel):
     # PyPI Simple API: anonymous/public access rate limit per IP
     pypi_simple_limit: int = 120
     pypi_simple_window_seconds: int = 60
+    # Home Assistant integration rate limits
+    ha_auth_limit: int = 5
+    ha_auth_window_seconds: int = 60
+    ha_read_limit: int = 120
+    ha_read_window_seconds: int = 60
+    ha_write_limit: int = 20
+    ha_write_window_seconds: int = 60
+    ha_admin_limit: int = 1
+    ha_admin_window_seconds: int = 120
+
+
+class HAConfig(BaseModel):
+    """Configuration for the Home Assistant integration API."""
+
+    enabled: bool = True
+    # Access token TTL for HA (minutes)
+    access_token_ttl_minutes: int = 30
+    # Refresh token TTL for HA (days)
+    refresh_token_ttl_days: int = 365
+    # Recommended polling interval hint returned to HA (seconds)
+    default_poll_interval_seconds: int = 30
+    # Separate JWT secret for HA access tokens — must NOT reuse SECURITY__API_JWT_SECRET.
+    # Generate with: openssl rand -hex 32
+    jwt_secret: SecretStr = SecretStr("ChangeThisHaJwtSecretImmediately")
+    # Separate JWT secret for HA refresh tokens
+    refresh_jwt_secret: SecretStr = SecretStr("ChangeThisHaRefreshJwtSecretImmediately")
+    # Allow switch operations (disabled by default for safety)
+    switches_enabled: bool = False
+    # Allow destructive buttons: restart_multiplex, restart_docker
+    destructive_buttons_enabled: bool = False
 
 
 class PyPIConfig(BaseModel):
@@ -303,6 +333,7 @@ class Settings(BaseSettings):
     rate_limits: RateLimitPresetConfig = Field(default_factory=RateLimitPresetConfig)
     pypi: PyPIConfig = Field(default_factory=PyPIConfig)
     python_mirror: PythonMirrorConfig = Field(default_factory=PythonMirrorConfig)
+    ha: HAConfig = Field(default_factory=HAConfig)
 
     @model_validator(mode="after")
     def finalize_paths(self) -> "Settings":

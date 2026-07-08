@@ -22,6 +22,9 @@ PASSKEYS = "passkeys"
 PASSKEY_CHALLENGES = "passkey_challenges"
 API_KEYS = "api_keys"
 PROXIES = "proxies"
+HA_ACCESS_TOKENS = "ha_access_tokens"
+HA_REFRESH_TOKENS = "ha_refresh_tokens"
+SYSTEM_CONFIG = "system_config"
 
 
 class DatabaseManager:
@@ -204,4 +207,27 @@ class DatabaseManager:
                 ),
                 IndexModel([("created_at", ASCENDING)]),
             ]
+        )
+
+        ha_access_tokens = self.collection(HA_ACCESS_TOKENS)
+        await ha_access_tokens.create_indexes(
+            [
+                IndexModel([("jti", ASCENDING)], unique=True),
+                IndexModel([("user_id", ASCENDING)]),
+                IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0),
+            ]
+        )
+
+        ha_refresh_tokens = self.collection(HA_REFRESH_TOKENS)
+        await ha_refresh_tokens.create_indexes(
+            [
+                IndexModel([("jti", ASCENDING)], unique=True),
+                IndexModel([("user_id", ASCENDING)]),
+                IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0),
+            ]
+        )
+
+        system_config = self.collection(SYSTEM_CONFIG)
+        await system_config.create_indexes(
+            [IndexModel([("key", ASCENDING)], unique=True)]
         )

@@ -1,0 +1,52 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to ASFES Multiplex",
+        "description": "Enter your ASFES Multiplex server details.",
+        "data": {
+          "host": "Server URL",
+          "username": "Username",
+          "password": "Password",
+          "account_label": "Connection Label"
+        }
+      },
+      "2fa": {
+        "title": "Two-Factor Authentication",
+        "description": "Enter the 6-digit code from your authenticator app.",
+        "data": {
+          "totp_code": "Authentication Code"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate ASFES Multiplex",
+        "description": "Your authentication token has expired. Please re-enter your credentials.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to ASFES Multiplex server",
+      "invalid_auth": "Invalid username or password",
+      "invalid_totp": "Invalid or expired authentication code",
+      "token_expired": "Authentication token has expired",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "This ASFES Multiplex server is already configured",
+      "reauth_successful": "Re-authentication was successful"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ASFES Multiplex Options",
+        "data": {
+          "poll_interval": "Update Interval (seconds)"
+        }
+      }
+    }
+  }
+}

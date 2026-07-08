@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Callable
-
+import asyncio
 import hmac
+from typing import Callable
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -170,3 +170,95 @@ async def enforce_api_rate_limit(
             detail=f"Rate limit exceeded for {exc.policy_name}",
             headers={"Retry-After": str(exc.retry_after)},
         ) from exc
+
+
+# ── Home Assistant Integration Dependencies ────────────────────────────────
+
+
+async def get_current_ha_user(
+    request: Request,
+    services: ApplicationServices = Depends(get_services),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> UserPrincipal:
+    """Validate a HA-specific Bearer token.
+
+    Accepts ONLY tokens with:
+    - audience="home-assistant"
+    - token_type="ha_access"
+    - signed with HA__JWT_SECRET
+
+    Rejects: standard API JWT, OAuth tokens, cookie auth, API keys.
+    This ensures HA tokens cannot be used on regular API endpoints and vice versa.
+    """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="HA bearer token required",
+        )
+
+    from server.core.security import SecurityError  # noqa: PLC0415
+
+    try:
+        payload = services.ha_service.verify_ha_access_token(credentials.credentials)
+    except SecurityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired HA token",
+        ) from exc
+
+    jti = payload.get("jti", "")
+    if await services.ha_service.is_access_token_revoked(jti):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="HA token has been revoked",
+        )
+
+    # Fire-and-forget: update last_used_at without blocking the request
+    asyncio.create_task(services.ha_service.touch_access_token(jti))  # noqa: RUF006
+
+    user = await services.users.get_user_by_id(payload["sub"])
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User does not exist",
+        )
+
+    request.state.ha_token_jti = jti
+    return services.users.to_principal(user)
+
+
+async def require_ha_write(
+    request: Request,
+    user: UserPrincipal = Depends(get_current_ha_user),
+    services: ApplicationServices = Depends(get_services),
+) -> UserPrincipal:
+    """Require ha.write permission and HA__SWITCHES_ENABLED=true."""
+    if not services.settings.ha.switches_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="HA write operations are disabled (HA__SWITCHES_ENABLED=false)",
+        )
+    if not user.is_root and "ha.write" not in user.permissions:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission 'ha.write' required",
+        )
+    return user
+
+
+async def require_ha_admin(
+    user: UserPrincipal = Depends(get_current_ha_user),
+    services: ApplicationServices = Depends(get_services),
+) -> UserPrincipal:
+    """Require ha.admin permission and HA__DESTRUCTIVE_BUTTONS_ENABLED=true."""
+    if not services.settings.ha.destructive_buttons_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Destructive HA operations are disabled",
+        )
+    if not user.is_root and "ha.admin" not in user.permissions:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission 'ha.admin' required",
+        )
+    return user

@@ -700,3 +700,154 @@ class PythonMirrorSuggestResponse(BaseModel):
     suggestions: list[PythonMirrorSuggestion]
     best_match: PythonMirrorSuggestion | None = None
     resolved_version: str | None = None
+
+
+# ─── Home Assistant Integration Models ───────────────────────────────────────
+
+
+class HATokenRequest(BaseModel):
+    """Request body for HA primary authentication."""
+
+    username: str
+    password: str
+    account_label: str = "Home Assistant"
+
+
+class HATwoFactorRequest(BaseModel):
+    """Request body for completing HA 2FA challenge."""
+
+    challenge_token: str
+    totp_code: str
+
+
+class HARefreshRequest(BaseModel):
+    """Request body for refreshing HA access token."""
+
+    refresh_token: str
+
+
+class HARevokeRequest(BaseModel):
+    """Request body for revoking HA refresh token (logout)."""
+
+    refresh_token: str
+
+
+class HATokenResponse(BaseModel):
+    """Response returned on successful HA authentication or token refresh."""
+
+    token_type: str = "Bearer"
+    access_token: str
+    refresh_token: str
+    expires_in: int
+    account_label: str
+
+
+class HAChallengeResponse(BaseModel):
+    """Response when 2FA verification is required."""
+
+    challenge_required: bool = True
+    challenge_token: str
+    message: str = "TOTP verification required"
+
+
+class HASensorsData(BaseModel):
+    """Sensor values for HA integration."""
+
+    cpu_usage: float
+    ram_usage: float
+    disk_usage: float
+    uptime_seconds: int
+    # Absolute network counters (bytes since OS boot) — HA calculates rate itself
+    network_rx_bytes: int
+    network_tx_bytes: int
+    # None if temperature sensors are unavailable on this platform
+    temperature: float | None
+    docker_containers_running: int
+    running_processes: int
+    # None if Redis / Mongo info unavailable
+    redis_connected_clients: int | None
+    mongo_connected_clients: int | None
+
+
+class HABinarySensorsData(BaseModel):
+    """Binary sensor states for HA integration."""
+
+    mongodb_online: bool
+    redis_online: bool
+    api_healthy: bool
+    mcp_healthy: bool
+    python_mirror_running: bool
+    pypi_mirror_running: bool
+
+
+class HASwitchesData(BaseModel):
+    """Switch states for HA integration. Fields are None when switches are disabled."""
+
+    enable_registration: bool | None = None
+    enable_mcp: bool | None = None
+    enable_redis: bool | None = None
+
+
+class HAStateMeta(BaseModel):
+    """Metadata included in HA state response."""
+
+    server_time: str
+    poll_interval_hint: int
+    destructive_buttons_enabled: bool
+
+
+class HAStateResponse(BaseModel):
+    """Combined state response for HA polling (single endpoint)."""
+
+    sensors: HASensorsData
+    binary_sensors: HABinarySensorsData
+    switches: HASwitchesData
+    meta: HAStateMeta
+
+
+class HADiagnosticsResponse(BaseModel):
+    """Device diagnostics for HA Device Registry."""
+
+    firmware: str
+    software_version: str
+    serial: str
+    manufacturer: str = "ASFES"
+    model: str = "Multiplex Control Plane"
+    os: str
+    os_version: str
+    python_version: str
+    hostname: str
+    uptime_seconds: int
+    cpu_architecture: str
+    ram_total_gb: float
+    disk_total_gb: float
+
+
+class HASwitchSetRequest(BaseModel):
+    """Request body to toggle an HA switch."""
+
+    value: bool
+
+
+class HAButtonResponse(BaseModel):
+    """Response after pressing an HA button."""
+
+    success: bool
+    message: str
+
+
+class HAConnectionInfo(BaseModel):
+    """HA connection metadata shown in the user profile."""
+
+    jti: str
+    account_label: str
+    created_at: str
+    last_used_at: str | None
+    expires_at: str
+    client_ip: str | None
+
+
+class HAConnectionListResponse(BaseModel):
+    """List of active HA connections for a user."""
+
+    connections: list[HAConnectionInfo]
