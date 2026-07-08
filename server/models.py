@@ -7,6 +7,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 if TYPE_CHECKING:
     from server.services import ApplicationServices
+    from server.audit import AuditContext
 
 
 class PermissionDefinition(BaseModel):
@@ -278,7 +279,9 @@ class OAuthClientCreateRequest(BaseModel):
 class OAuthDynamicClientRegistrationRequest(BaseModel):
     client_name: str = "MCP Client"
     redirect_uris: list[str]
-    grant_types: list[str] = Field(default_factory=lambda: ["authorization_code", "refresh_token"])
+    grant_types: list[str] = Field(
+        default_factory=lambda: ["authorization_code", "refresh_token"]
+    )
     response_types: list[str] = Field(default_factory=lambda: ["code"])
     token_endpoint_auth_method: str = "none"
     scope: str | None = None
@@ -365,7 +368,9 @@ class ToolExecutionContext:
 
 
 ToolHandler = Callable[[ToolExecutionContext, dict[str, Any]], Awaitable[Any]]
-AvailabilityHandler = Callable[["ApplicationServices"], Awaitable["RuntimeAvailability"]]
+AvailabilityHandler = Callable[
+    ["ApplicationServices"], Awaitable["RuntimeAvailability"]
+]
 
 
 @dataclass(slots=True)
@@ -443,6 +448,7 @@ class ProxyImportProxifierRequest(BaseModel):
 
 class ProxyExportRequest(BaseModel):
     """Base model for proxy exports that require verifying current user password."""
+
     current_password: str
 
 
@@ -611,9 +617,9 @@ class PyPIBlocklistResponse(BaseModel):
 
 class PythonMirrorFile(BaseModel):
     name: str
-    os_type: str        # "windows" | "macos" | "source"
-    arch: str           # "amd64" | "arm64" | ""
-    file_type: str      # "installer" | "zip" | "pkg" | "tarball"
+    os_type: str  # "windows" | "macos" | "source"
+    arch: str  # "amd64" | "arm64" | ""
+    file_type: str  # "installer" | "zip" | "pkg" | "tarball"
     size_bytes: int
     size_human: str
     md5: str | None = None
@@ -651,8 +657,8 @@ class PythonMirrorStatsResponse(BaseModel):
 class PythonMirrorJobStatus(BaseModel):
     job_id: str
     job_fingerprint: str | None = None
-    kind: str           # "install" | "verify" | "verify_all" | "repair"
-    status: str         # "pending" | "running" | "done" | "error" | "cancelled"
+    kind: str  # "install" | "verify" | "verify_all" | "repair"
+    status: str  # "pending" | "running" | "done" | "error" | "cancelled"
     lock_owner: str | None = None
     lock_expires_at: str | None = None
     version: str | None = None
@@ -675,9 +681,9 @@ class PythonMirrorInstallRequest(BaseModel):
 
 class PythonMirrorSuggestRequest(BaseModel):
     version_query: str | None = None
-    os_type: str | None = None      # "windows" | "macos" | "source"
-    arch: str | None = None         # "amd64" | "arm64"
-    file_type: str | None = None    # "installer" | "zip" | "pkg" | "tarball"
+    os_type: str | None = None  # "windows" | "macos" | "source"
+    arch: str | None = None  # "amd64" | "arm64"
+    file_type: str | None = None  # "installer" | "zip" | "pkg" | "tarball"
 
 
 class PythonMirrorSuggestion(BaseModel):

@@ -44,7 +44,9 @@ def test_redact_arguments_and_truncate_strings(workspace: Path) -> None:
         "password": "super-secret",
         "nested": {"content": "x" * 64, "safe": "ok"},
     }
-    redacted = host_ops.redact_arguments(payload, sensitive_fields=["content"], max_string_length=16)
+    redacted = host_ops.redact_arguments(
+        payload, sensitive_fields=["content"], max_string_length=16
+    )
     assert redacted["password"] == "[REDACTED]"
     assert redacted["nested"]["content"] == "[REDACTED]"
     assert redacted["nested"]["safe"] == "ok"
@@ -55,7 +57,9 @@ def test_atomic_write_creates_backup(workspace: Path) -> None:
     managed_root = host_ops.managed_file_roots()[0]
     target = managed_root / "sample.txt"
     target.write_text("before", encoding="utf-8")
-    result = host_ops.atomic_write_text("sample.txt", "after", roots=host_ops.managed_file_roots())
+    result = host_ops.atomic_write_text(
+        "sample.txt", "after", roots=host_ops.managed_file_roots()
+    )
     assert result["backup_created"] is True
     assert target.read_text(encoding="utf-8") == "after"
     assert any(host_ops.backup_directory().iterdir())
@@ -72,7 +76,9 @@ def test_atomic_write_blocks_symlink_escape(workspace: Path) -> None:
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"Symlinks are unavailable: {exc}")
     with pytest.raises(HostOpsError):
-        host_ops.atomic_write_text("link.txt", "changed", roots=host_ops.managed_file_roots())
+        host_ops.atomic_write_text(
+            "link.txt", "changed", roots=host_ops.managed_file_roots()
+        )
 
 
 @pytest.mark.asyncio

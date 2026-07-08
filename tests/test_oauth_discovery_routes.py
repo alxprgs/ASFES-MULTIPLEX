@@ -19,7 +19,9 @@ def test_exact_mcp_path_is_rewritten_before_routing() -> None:
     async def mcp_probe() -> Response:
         return Response(
             status_code=401,
-            headers={"WWW-Authenticate": 'Bearer resource_metadata="http://testserver/.well-known/oauth-protected-resource/mcp"'},
+            headers={
+                "WWW-Authenticate": 'Bearer resource_metadata="http://testserver/.well-known/oauth-protected-resource/mcp"'
+            },
         )
 
     client = TestClient(app)
@@ -57,7 +59,9 @@ def test_oauth_well_known_metadata_routes_without_runtime_services() -> None:
 
     mcp_path_metadata = client.get("/.well-known/oauth-authorization-server/mcp")
     assert mcp_path_metadata.status_code == 200
-    assert mcp_path_metadata.json()["authorization_endpoint"] == cfg.authorization_endpoint
+    assert (
+        mcp_path_metadata.json()["authorization_endpoint"] == cfg.authorization_endpoint
+    )
 
     resource_nested_metadata = client.get("/mcp/.well-known/oauth-authorization-server")
     assert resource_nested_metadata.status_code == 200

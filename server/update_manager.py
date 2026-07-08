@@ -73,7 +73,11 @@ class UpdateSession:
             "session_id": self.session_id,
             "kind": self.kind,
             "status": self.status,
-            "stages": [self.stages[key].to_dict() for key in UPDATE_STAGES if key in self.stages],
+            "stages": [
+                self.stages[key].to_dict()
+                for key in UPDATE_STAGES
+                if key in self.stages
+            ],
             "result": self.result.to_dict() if self.result else None,
             "error": self.error,
             "requires_restart": self.requires_restart,
@@ -91,16 +95,28 @@ class UpdateManager:
     async def start_check(self) -> UpdateSession:
         return await self._start_session("check", self._run_check)
 
-    async def start_update(self, stages: list[str], force_stages: list[str]) -> UpdateSession:
+    async def start_update(
+        self, stages: list[str], force_stages: list[str]
+    ) -> UpdateSession:
         if not stages:
             raise ValueError("Update stages are required")
         normalized_stages = self._normalize_stages(stages)
         normalized_force = self._normalize_stages(force_stages)
-        normalized_stages = self._with_required_restart(normalized_stages, normalized_force)
-        return await self._start_session("update", self._run_update, normalized_stages, normalized_force, block_active=True)
+        normalized_stages = self._with_required_restart(
+            normalized_stages, normalized_force
+        )
+        return await self._start_session(
+            "update",
+            self._run_update,
+            normalized_stages,
+            normalized_force,
+            block_active=True,
+        )
 
     async def start_restart(self) -> UpdateSession:
-        return await self._start_session("restart", self._run_update, ["restart"], ["restart"], block_active=True)
+        return await self._start_session(
+            "restart", self._run_update, ["restart"], ["restart"], block_active=True
+        )
 
     def get_session(self, session_id: str) -> UpdateSession | None:
         return self.sessions.get(session_id)
@@ -109,7 +125,10 @@ class UpdateManager:
         index = 0
         while True:
             async with session.condition:
-                while index >= len(session.events) and session.status not in {"success", "error"}:
+                while index >= len(session.events) and session.status not in {
+                    "success",
+                    "error",
+                }:
                     await session.condition.wait()
                 pending = session.events[index:]
                 index = len(session.events)
@@ -119,7 +138,9 @@ class UpdateManager:
             if finished:
                 return
 
-    async def _start_session(self, kind: str, runner, *args: Any, block_active: bool = False) -> UpdateSession:
+    async def _start_session(
+        self, kind: str, runner, *args: Any, block_active: bool = False
+    ) -> UpdateSession:
         async with self._lock:
             if block_active and self._active_session() is not None:
                 raise RuntimeError("Update session is already running")
@@ -159,10 +180,14 @@ class UpdateManager:
                 normalized.append(stage)
         return normalized
 
-    def _with_required_restart(self, stages: list[str], force_stages: list[str]) -> list[str]:
+    def _with_required_restart(
+        self, stages: list[str], force_stages: list[str]
+    ) -> list[str]:
         if "restart" in stages:
             return stages
-        if "restart" in force_stages or any(stage in stages for stage in ("code", "python")):
+        if "restart" in force_stages or any(
+            stage in stages for stage in ("code", "python")
+        ):
             return [*stages, "restart"]
         return stages
 
@@ -180,7 +205,9 @@ class UpdateManager:
             session.stages["frontend"].needed = frontend_needed
             session.stages["restart"].status = "success"
             session.stages["restart"].needed = False
-            session.stages["restart"].detail = "Перезапуск будет предложен только при запуске обновления"
+            session.stages[
+                "restart"
+            ].detail = "Перезапуск будет предложен только при запуске обновления"
             session.requires_restart = code_needed or python_needed
             await self._set_status(session, "success")
         except Exception as exc:
@@ -188,7 +215,9 @@ class UpdateManager:
             await self._emit(session, "error", {"message": str(exc)})
             await self._set_status(session, "error")
 
-    async def _run_update(self, session: UpdateSession, stages: list[str], force_stages: list[str]) -> None:
+    async def _run_update(
+        self, session: UpdateSession, stages: list[str], force_stages: list[str]
+    ) -> None:
         started = time.monotonic()
         stdout_parts: list[str] = []
         stderr_parts: list[str] = []
@@ -199,7 +228,9 @@ class UpdateManager:
                 state = session.stages[stage]
                 state.forced = stage in force_stages
                 state.needed = True
-                await self._run_stage(session, stage, stdout_parts, stderr_parts, command_names)
+                await self._run_stage(
+                    session, stage, stdout_parts, stderr_parts, command_names
+                )
             session.requires_restart = "restart" in stages
             session.result = CommandResult(
                 command=command_names or [session.kind],
@@ -209,7 +240,14 @@ class UpdateManager:
                 truncated=False,
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
-            await self._emit(session, "result", {"result": session.result.to_dict(), "requires_restart": session.requires_restart})
+            await self._emit(
+                session,
+                "result",
+                {
+                    "result": session.result.to_dict(),
+                    "requires_restart": session.requires_restart,
+                },
+            )
             await self._set_status(session, "success")
         except Exception as exc:
             session.error = str(exc)
@@ -221,7 +259,11 @@ class UpdateManager:
                 truncated=False,
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
-            await self._emit(session, "error", {"message": str(exc), "result": session.result.to_dict()})
+            await self._emit(
+                session,
+                "error",
+                {"message": str(exc), "result": session.result.to_dict()},
+            )
             await self._set_status(session, "error")
 
     async def _run_stage(
@@ -245,13 +287,19 @@ class UpdateManager:
             commands = [self._restart_command()]
         for command, cwd, timeout in commands:
             command_names.append(" ".join(command))
-            result = await self._run_command(session, command, cwd=cwd, timeout_seconds=timeout)
+            result = await self._run_command(
+                session, command, cwd=cwd, timeout_seconds=timeout
+            )
             stdout_parts.append(result.stdout)
             stderr_parts.append(result.stderr)
             state.returncode = result.returncode
             if result.returncode != 0:
                 state.status = "error"
-                state.detail = result.stderr.strip() or result.stdout.strip() or f"Command exited with code {result.returncode}"
+                state.detail = (
+                    result.stderr.strip()
+                    or result.stdout.strip()
+                    or f"Command exited with code {result.returncode}"
+                )
                 await self._emit(session, "stage", {"stage": state.to_dict()})
                 raise RuntimeError(state.detail)
         state.status = "success"
@@ -266,10 +314,18 @@ class UpdateManager:
             state.detail = "Git-репозиторий не найден"
             await self._emit(session, "stage", {"stage": state.to_dict()})
             return {"needed": False, "changed_files": []}
-        await self._run_command(session, self._git_command("fetch", "--all", "--prune"), cwd=BASE_DIR, timeout_seconds=180, emit_logs=False)
+        await self._run_command(
+            session,
+            self._git_command("fetch", "--all", "--prune"),
+            cwd=BASE_DIR,
+            timeout_seconds=180,
+            emit_logs=False,
+        )
         upstream = await self._run_command(
             session,
-            self._git_command("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"),
+            self._git_command(
+                "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"
+            ),
             cwd=BASE_DIR,
             timeout_seconds=30,
             success_codes={0, 128},
@@ -280,9 +336,23 @@ class UpdateManager:
             state.detail = "Upstream-ветка не настроена"
             await self._emit(session, "stage", {"stage": state.to_dict()})
             return {"needed": False, "changed_files": []}
-        diff = await self._run_command(session, self._git_command("rev-list", "--count", "HEAD..@{u}"), cwd=BASE_DIR, timeout_seconds=30, emit_logs=False)
-        changed = await self._run_command(session, self._git_command("diff", "--name-only", "HEAD..@{u}"), cwd=BASE_DIR, timeout_seconds=30, emit_logs=False)
-        changed_files = [line.strip() for line in changed.stdout.splitlines() if line.strip()]
+        diff = await self._run_command(
+            session,
+            self._git_command("rev-list", "--count", "HEAD..@{u}"),
+            cwd=BASE_DIR,
+            timeout_seconds=30,
+            emit_logs=False,
+        )
+        changed = await self._run_command(
+            session,
+            self._git_command("diff", "--name-only", "HEAD..@{u}"),
+            cwd=BASE_DIR,
+            timeout_seconds=30,
+            emit_logs=False,
+        )
+        changed_files = [
+            line.strip() for line in changed.stdout.splitlines() if line.strip()
+        ]
         needed = int((diff.stdout.strip() or "0").splitlines()[-1]) > 0
         state.status = "success"
         state.detail = "Доступны изменения кода" if needed else "Код актуален"
@@ -294,10 +364,24 @@ class UpdateManager:
         state.status = "running"
         await self._emit(session, "stage", {"stage": state.to_dict()})
         python_bin = self._python_bin()
-        requirements = INSTALL_DIR / "requirements.txt" if os.name != "nt" else BASE_DIR / "requirements.txt"
+        requirements = (
+            INSTALL_DIR / "requirements.txt"
+            if os.name != "nt"
+            else BASE_DIR / "requirements.txt"
+        )
         result = await self._run_command(
             session,
-            [str(python_bin), "-m", "pip", "install", "--dry-run", "--report", "-", "-r", str(requirements)],
+            [
+                str(python_bin),
+                "-m",
+                "pip",
+                "install",
+                "--dry-run",
+                "--report",
+                "-",
+                "-r",
+                str(requirements),
+            ],
             cwd=BASE_DIR,
             timeout_seconds=180,
             success_codes={0},
@@ -311,11 +395,17 @@ class UpdateManager:
         install_count = len(installs) if isinstance(installs, list) else 0
         needed = install_count > 0
         state.status = "success"
-        state.detail = f"Python-пакетов к установке: {install_count}" if needed else "Python-зависимости актуальны"
+        state.detail = (
+            f"Python-пакетов к установке: {install_count}"
+            if needed
+            else "Python-зависимости актуальны"
+        )
         await self._emit(session, "stage", {"stage": state.to_dict()})
         return needed
 
-    async def _check_frontend(self, session: UpdateSession, changed_files: list[str] | None = None) -> bool:
+    async def _check_frontend(
+        self, session: UpdateSession, changed_files: list[str] | None = None
+    ) -> bool:
         state = session.stages["frontend"]
         state.status = "running"
         await self._emit(session, "stage", {"stage": state.to_dict()})
@@ -325,7 +415,14 @@ class UpdateManager:
             state.detail = "npm не найден"
             await self._emit(session, "stage", {"stage": state.to_dict()})
             return False
-        result = await self._run_command(session, [npm, "outdated", "--json"], cwd=BASE_DIR / "frontend", timeout_seconds=120, success_codes={0, 1}, emit_logs=False)
+        result = await self._run_command(
+            session,
+            [npm, "outdated", "--json"],
+            cwd=BASE_DIR / "frontend",
+            timeout_seconds=120,
+            success_codes={0, 1},
+            emit_logs=False,
+        )
         try:
             packages = json.loads(result.stdout or "{}")
         except json.JSONDecodeError:
@@ -344,7 +441,11 @@ class UpdateManager:
         return needed
 
     def _frontend_changed(self, changed_files: list[str]) -> bool:
-        return any(line.startswith("frontend/") or line in {"package-lock.json", "frontend/package-lock.json"} for line in changed_files)
+        return any(
+            line.startswith("frontend/")
+            or line in {"package-lock.json", "frontend/package-lock.json"}
+            for line in changed_files
+        )
 
     def _actionable_npm_packages(self, packages: Any) -> dict[str, Any]:
         if not isinstance(packages, dict):
@@ -352,7 +453,10 @@ class UpdateManager:
         return {
             name: info
             for name, info in packages.items()
-            if isinstance(info, dict) and info.get("wanted") and info.get("current") and info.get("wanted") != info.get("current")
+            if isinstance(info, dict)
+            and info.get("wanted")
+            and info.get("current")
+            and info.get("wanted") != info.get("current")
         }
 
     def _extract_pip_report(self, stdout: str) -> dict[str, Any]:
@@ -371,10 +475,12 @@ class UpdateManager:
     def _code_commands(self) -> list[tuple[list[str], Path, int]]:
         commands: list[tuple[list[str], Path, int]] = []
         if (BASE_DIR / ".git").exists():
-            commands.extend([
-                (self._git_command("fetch", "--all", "--prune"), BASE_DIR, 180),
-                (self._git_command("pull", "--ff-only"), BASE_DIR, 180),
-            ])
+            commands.extend(
+                [
+                    (self._git_command("fetch", "--all", "--prune"), BASE_DIR, 180),
+                    (self._git_command("pull", "--ff-only"), BASE_DIR, 180),
+                ]
+            )
         if os.name != "nt":
             commands.append((self._bash_command(self._rsync_script()), BASE_DIR, 300))
         return commands
@@ -382,15 +488,47 @@ class UpdateManager:
     def _python_commands(self) -> list[tuple[list[str], Path, int]]:
         python_bin = self._python_bin()
         if os.name != "nt":
-            create_venv = f"test -x '{python_bin}' || python3 -m venv '{INSTALL_DIR / '.venv'}'"
+            create_venv = (
+                f"test -x '{python_bin}' || python3 -m venv '{INSTALL_DIR / '.venv'}'"
+            )
             return [
                 (self._bash_command(create_venv), BASE_DIR, 120),
-                ([str(python_bin), "-m", "pip", "install", "--upgrade", "pip"], BASE_DIR, 300),
-                ([str(python_bin), "-m", "pip", "install", "-r", str(INSTALL_DIR / "requirements.txt")], BASE_DIR, 600),
+                (
+                    [str(python_bin), "-m", "pip", "install", "--upgrade", "pip"],
+                    BASE_DIR,
+                    300,
+                ),
+                (
+                    [
+                        str(python_bin),
+                        "-m",
+                        "pip",
+                        "install",
+                        "-r",
+                        str(INSTALL_DIR / "requirements.txt"),
+                    ],
+                    BASE_DIR,
+                    600,
+                ),
             ]
         return [
-            ([str(python_bin), "-m", "pip", "install", "--upgrade", "pip"], BASE_DIR, 300),
-            ([str(python_bin), "-m", "pip", "install", "-r", str(BASE_DIR / "requirements.txt")], BASE_DIR, 600),
+            (
+                [str(python_bin), "-m", "pip", "install", "--upgrade", "pip"],
+                BASE_DIR,
+                300,
+            ),
+            (
+                [
+                    str(python_bin),
+                    "-m",
+                    "pip",
+                    "install",
+                    "-r",
+                    str(BASE_DIR / "requirements.txt"),
+                ],
+                BASE_DIR,
+                600,
+            ),
         ]
 
     def _frontend_commands(self) -> list[tuple[list[str], Path, int]]:
@@ -404,7 +542,11 @@ class UpdateManager:
 
     def _restart_command(self) -> tuple[list[str], Path, int]:
         if os.name == "nt":
-            return ([sys.executable, "-c", "print('restart is unavailable on Windows')"], BASE_DIR, 30)
+            return (
+                [sys.executable, "-c", "print('restart is unavailable on Windows')"],
+                BASE_DIR,
+                30,
+            )
         # Use --no-block so systemctl queues the restart job and returns immediately.
         # This captures synchronous errors (e.g. missing service, missing permissions)
         # without blocking and dying mid-command.
@@ -436,7 +578,11 @@ class UpdateManager:
         return ["/bin/bash", "-lc", script]
 
     def _python_bin(self) -> Path:
-        return INSTALL_DIR / ".venv" / "bin" / "python" if os.name != "nt" else Path(sys.executable)
+        return (
+            INSTALL_DIR / ".venv" / "bin" / "python"
+            if os.name != "nt"
+            else Path(sys.executable)
+        )
 
     def _executable(self, alias: str) -> str | None:
         return shutil.which(alias)
@@ -456,7 +602,9 @@ class UpdateManager:
         stdout_parts: list[str] = []
         stderr_parts: list[str] = []
         if emit_logs:
-            await self._emit(session, "log", {"stream": "system", "line": f"$ {' '.join(command)}"})
+            await self._emit(
+                session, "log", {"stream": "system", "line": f"$ {' '.join(command)}"}
+            )
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -469,7 +617,9 @@ class UpdateManager:
         assert process.stdout is not None
         assert process.stderr is not None
 
-        async def read_stream(stream: asyncio.StreamReader, name: str, target: list[str]) -> None:
+        async def read_stream(
+            stream: asyncio.StreamReader, name: str, target: list[str]
+        ) -> None:
             while True:
                 line = await stream.readline()
                 if not line:
@@ -477,14 +627,25 @@ class UpdateManager:
                 text = line.decode("utf-8", errors="replace")
                 target.append(text)
                 if emit_logs:
-                    await self._emit(session, "log", {"stream": name, "line": text.rstrip("\n")})
+                    await self._emit(
+                        session, "log", {"stream": name, "line": text.rstrip("\n")}
+                    )
 
         try:
-            await asyncio.wait_for(asyncio.gather(read_stream(process.stdout, "stdout", stdout_parts), read_stream(process.stderr, "stderr", stderr_parts), process.wait()), timeout=timeout_seconds)
+            await asyncio.wait_for(
+                asyncio.gather(
+                    read_stream(process.stdout, "stdout", stdout_parts),
+                    read_stream(process.stderr, "stderr", stderr_parts),
+                    process.wait(),
+                ),
+                timeout=timeout_seconds,
+            )
         except asyncio.TimeoutError as exc:
             process.kill()
             await process.wait()
-            raise RuntimeError(f"Command timed out after {timeout_seconds} seconds: {' '.join(command)}") from exc
+            raise RuntimeError(
+                f"Command timed out after {timeout_seconds} seconds: {' '.join(command)}"
+            ) from exc
         returncode = process.returncode if process.returncode is not None else 1
         result = CommandResult(
             command=command,
@@ -495,11 +656,17 @@ class UpdateManager:
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         if returncode not in success_codes:
-            detail = result.stderr.strip() or result.stdout.strip() or f"Command exited with code {returncode}"
+            detail = (
+                result.stderr.strip()
+                or result.stdout.strip()
+                or f"Command exited with code {returncode}"
+            )
             raise RuntimeError(detail)
         return result
 
-    async def _run_command_silent(self, command: list[str], *, cwd: Path, timeout_seconds: int) -> CommandResult:
+    async def _run_command_silent(
+        self, command: list[str], *, cwd: Path, timeout_seconds: int
+    ) -> CommandResult:
         started = time.monotonic()
         try:
             process = await asyncio.create_subprocess_exec(
@@ -508,9 +675,17 @@ class UpdateManager:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=timeout_seconds
+            )
         except Exception as exc:
-            return CommandResult(command=command, returncode=1, stdout="", stderr=str(exc), duration_ms=int((time.monotonic() - started) * 1000))
+            return CommandResult(
+                command=command,
+                returncode=1,
+                stdout="",
+                stderr=str(exc),
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
         return CommandResult(
             command=command,
             returncode=process.returncode or 0,
@@ -522,9 +697,13 @@ class UpdateManager:
     async def _set_status(self, session: UpdateSession, status: str) -> None:
         session.status = status
         session.updated_at = now_utc()
-        await self._emit(session, "status", {"status": status, "session": session.to_dict()})
+        await self._emit(
+            session, "status", {"status": status, "session": session.to_dict()}
+        )
 
-    async def _emit(self, session: UpdateSession, event_type: str, payload: dict[str, Any]) -> None:
+    async def _emit(
+        self, session: UpdateSession, event_type: str, payload: dict[str, Any]
+    ) -> None:
         session.updated_at = now_utc()
         event = {"type": event_type, **payload}
         if event_type == "log":

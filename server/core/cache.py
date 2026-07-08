@@ -38,9 +38,12 @@ class CacheManager:
     async def connect(self) -> None:
         if self.should_use_redis():
             if not self.redis_url:
-                raise RuntimeError("REDIS__URL must be configured when Redis is enabled")
+                raise RuntimeError(
+                    "REDIS__URL must be configured when Redis is enabled"
+                )
             try:
                 from redis.asyncio import from_url
+
                 self._redis = from_url(self.redis_url, decode_responses=True)
                 await self._redis.ping()
                 LOGGER.info("Connected to Redis cache")
@@ -48,7 +51,9 @@ class CacheManager:
                 LOGGER.error("Failed to connect to Redis cache: %s", exc)
                 self._redis = None
                 if self.redis_mode == "required":
-                    raise RuntimeError("Redis connection failed but mode is required") from exc
+                    raise RuntimeError(
+                        "Redis connection failed but mode is required"
+                    ) from exc
 
     async def close(self) -> None:
         if self._redis is not None:
@@ -57,7 +62,9 @@ class CacheManager:
 
     async def set_runtime_enabled(self, enabled: bool) -> None:
         if self.redis_mode == "required" and not enabled:
-            raise ValueError("Redis runtime disable is forbidden when REDIS__MODE=required")
+            raise ValueError(
+                "Redis runtime disable is forbidden when REDIS__MODE=required"
+            )
         self.redis_runtime_enabled = enabled
         if self.should_use_redis():
             if not self._redis:

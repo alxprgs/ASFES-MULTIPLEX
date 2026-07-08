@@ -61,7 +61,9 @@ from arduino_mirror import AsyncArduinoMirror, MirrorConfig
 
 
 class FakeResponse:
-    def __init__(self, *, status=200, headers=None, text_data="", chunks=None, raise_exc=None):
+    def __init__(
+        self, *, status=200, headers=None, text_data="", chunks=None, raise_exc=None
+    ):
         self.status = status
         self.headers = headers or {}
         self._text_data = text_data
@@ -91,7 +93,9 @@ class FakeResponse:
 
 
 class FakeSession:
-    def __init__(self, *, get_response=None, head_response=None, get_exc=None, head_exc=None):
+    def __init__(
+        self, *, get_response=None, head_response=None, get_exc=None, head_exc=None
+    ):
         self._get_response = get_response
         self._head_response = head_response
         self._get_exc = get_exc
@@ -216,7 +220,9 @@ def test_extract_downloadable_resources(mirror):
     </body></html>
     """
     soup = __import__("bs4").BeautifulSoup(html, "html.parser")
-    resources = mirror._extract_downloadable_resources(soup, "https://docs.arduino.cc/hardware/uno-r4-wifi/")
+    resources = mirror._extract_downloadable_resources(
+        soup, "https://docs.arduino.cc/hardware/uno-r4-wifi/"
+    )
 
     assert len(resources) == 2
     assert resources[0]["url"].endswith("ABX00087-full-pinout.pdf")
@@ -232,7 +238,9 @@ def test_extract_feature_cards(mirror):
     </body></html>
     """
     soup = __import__("bs4").BeautifulSoup(html, "html.parser")
-    cards = mirror._extract_feature_cards(soup, "https://docs.arduino.cc/hardware/uno-r4-wifi/")
+    cards = mirror._extract_feature_cards(
+        soup, "https://docs.arduino.cc/hardware/uno-r4-wifi/"
+    )
 
     assert len(cards) >= 2
     assert any(card["title"] == "LED Matrix" for card in cards)
@@ -280,13 +288,17 @@ def test_download_file_success_and_rate_limit(temp_dir, monkeypatch):
         mirror = AsyncArduinoMirror(cfg)
         dest = temp_dir / "demo.bin"
 
-        response = FakeResponse(headers={"Content-Length": "6"}, chunks=[b"abc", b"def"])
+        response = FakeResponse(
+            headers={"Content-Length": "6"}, chunks=[b"abc", b"def"]
+        )
         session = FakeSession(get_response=response)
 
         rate_mock = AsyncMock()
         monkeypatch.setattr(mirror, "_apply_rate_limit", rate_mock)
 
-        await mirror._download_file(session, "https://docs.arduino.cc/assets/demo.bin", dest)
+        await mirror._download_file(
+            session, "https://docs.arduino.cc/assets/demo.bin", dest
+        )
         assert dest.read_bytes() == b"abcdef"
         assert rate_mock.await_count >= 1
 
@@ -299,7 +311,10 @@ def test_download_asset_temp_rename(mirror, temp_dir, monkeypatch):
         dest_dir.mkdir(parents=True, exist_ok=True)
 
         response = FakeResponse(headers={"Content-Length": "4"}, chunks=[b"data"])
-        head = FakeResponse(status=200, headers={"Content-Disposition": 'attachment; filename="sample.pdf"'})
+        head = FakeResponse(
+            status=200,
+            headers={"Content-Disposition": 'attachment; filename="sample.pdf"'},
+        )
         session = FakeSession(get_response=response, head_response=head)
 
         calls = []
@@ -468,10 +483,17 @@ def test_link_localization(mirror):
     target_page.write_text("# demo\n", encoding="utf-8")
     target_asset.write_bytes(b"img")
 
-    page_url = mirror._normalize_url("https://docs.arduino.cc/tutorials/uno-r4-wifi/led-matrix/")
-    asset_url = mirror._normalize_url("https://docs.arduino.cc/tutorials/uno-r4-wifi/assets/img.png")
+    page_url = mirror._normalize_url(
+        "https://docs.arduino.cc/tutorials/uno-r4-wifi/led-matrix/"
+    )
+    asset_url = mirror._normalize_url(
+        "https://docs.arduino.cc/tutorials/uno-r4-wifi/assets/img.png"
+    )
     mirror.url_to_local_path[page_url] = str(target_page)
-    mirror._assets_by_url[asset_url] = {"local_path": str(target_asset), "normalized_url": asset_url}
+    mirror._assets_by_url[asset_url] = {
+        "local_path": str(target_asset),
+        "normalized_url": asset_url,
+    }
 
     md = (
         "See [LED Matrix](https://docs.arduino.cc/tutorials/uno-r4-wifi/led-matrix/)"

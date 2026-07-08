@@ -3,10 +3,10 @@ Control Plane Guard (v3.3)
 Protects the system from API overloads, queue pressure, and batch storms.
 Reads metrics from Redis to provide backpressure.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel
@@ -46,7 +46,7 @@ class ControlPlaneGuard:
         pypi_depth = await self.get_queue_depth("queue:pypi_tasks")
         batch_depth = await self.get_queue_depth("queue:batch_tasks")
         mcp_depth = await self.get_queue_depth("queue:mcp_tasks")
-        
+
         # Simple heuristic for failure ratio based on a cached counter
         failed_count = 0
         total_count = 1
@@ -58,10 +58,10 @@ class ControlPlaneGuard:
 
         failed_job_ratio = failed_count / total_count
         overloaded = (
-            pypi_depth > self.MAX_QUEUE_DEPTH or
-            batch_depth > self.MAX_QUEUE_DEPTH or
-            mcp_depth > self.MAX_QUEUE_DEPTH or
-            failed_job_ratio > 0.5
+            pypi_depth > self.MAX_QUEUE_DEPTH
+            or batch_depth > self.MAX_QUEUE_DEPTH
+            or mcp_depth > self.MAX_QUEUE_DEPTH
+            or failed_job_ratio > 0.5
         )
 
         return ControlPlaneMetrics(
@@ -81,7 +81,7 @@ class ControlPlaneGuard:
             raise HTTPException(
                 status_code=429,
                 detail="SYSTEM_BACKPRESSURE",
-                headers={"Retry-After": "10", "X-System-Load": "high"}
+                headers={"Retry-After": "10", "X-System-Load": "high"},
             )
 
     async def record_job_result(self, failed: bool) -> None:
@@ -90,17 +90,20 @@ class ControlPlaneGuard:
         """
         if not self.cache.should_use_redis() or self.cache._redis is None:
             return
-        
+
         try:
-            val = await self.cache.get("metrics:failed_jobs_window") or {"failed": 0, "total": 0}
+            val = await self.cache.get("metrics:failed_jobs_window") or {
+                "failed": 0,
+                "total": 0,
+            }
             val["total"] += 1
             if failed:
                 val["failed"] += 1
-                
+
             if val["total"] > 100:
                 val["total"] = val["total"] // 2
                 val["failed"] = val["failed"] // 2
-                
+
             await self.cache.set("metrics:failed_jobs_window", val, ttl_seconds=3600)
         except Exception:
             pass

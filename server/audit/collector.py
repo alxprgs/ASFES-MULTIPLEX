@@ -12,12 +12,16 @@ LOGGER = logging.getLogger("multiplex.audit.collector")
 
 class AuditCollector:
     """Thin pipeline manager with backpressure and drop strategy."""
-    
-    def __init__(self, enricher: AuditEnricher, repository: AuditRepository, max_size: int = 5000) -> None:
+
+    def __init__(
+        self, enricher: AuditEnricher, repository: AuditRepository, max_size: int = 5000
+    ) -> None:
         self.enricher = enricher
         self.repository = repository
         self.max_size = max_size
-        self._queue: asyncio.Queue[BaseAuditEventEnvelope] = asyncio.Queue(maxsize=max_size)
+        self._queue: asyncio.Queue[BaseAuditEventEnvelope] = asyncio.Queue(
+            maxsize=max_size
+        )
         self._dropped_events = 0
         self._worker_task: asyncio.Task[Any] | None = None
         self._running = False
@@ -38,7 +42,7 @@ class AuditCollector:
         self,
         event_type: str,
         *,
-        actor: Any, # UserPrincipal
+        actor: Any,  # UserPrincipal
         audit_ctx: AuditContext | None = None,
         request_meta: AuditContext | None = None,
         target: dict[str, Any] | None = None,
@@ -49,7 +53,7 @@ class AuditCollector:
         ctx = audit_ctx or request_meta
         if ctx is None:
             raise ValueError("Either audit_ctx or request_meta must be provided")
-        
+
         # Merge principal with context actor
         current_actor = ctx.actor.model_copy()
         if actor:
@@ -59,7 +63,8 @@ class AuditCollector:
         event = SystemAuditEvent.create(
             event_type=event_type,
             correlation_id=ctx.correlation_id,
-            parent_event_id=ctx.parent_event_id or ctx.correlation_id, # Link to parent boundary
+            parent_event_id=ctx.parent_event_id
+            or ctx.correlation_id,  # Link to parent boundary
             actor=current_actor,
             source=ctx.source,
             target=target,
@@ -70,12 +75,15 @@ class AuditCollector:
         # return dummy doc for legacy compatibility
         return {"event_id": event.event_id}
 
-
-    async def list_events(self, limit: int = 50, skip: int = 0, **filters: Any) -> list[dict[str, Any]]:
+    async def list_events(
+        self, limit: int = 50, skip: int = 0, **filters: Any
+    ) -> list[dict[str, Any]]:
         return await self.repository.list_events(limit=limit, skip=skip, **filters)
-        
+
     async def export_stream(self, start_date: str, end_date: str, **filters: Any):
-        async for item in self.repository.export_stream(start_date=start_date, end_date=end_date, **filters):
+        async for item in self.repository.export_stream(
+            start_date=start_date, end_date=end_date, **filters
+        ):
             yield item
 
     async def start(self) -> None:
@@ -93,7 +101,7 @@ class AuditCollector:
                 await self._worker_task
             except asyncio.CancelledError:
                 pass
-        
+
         # Flush remaining
         await self._flush()
         LOGGER.info("AuditCollector worker stopped")
@@ -105,7 +113,7 @@ class AuditCollector:
                 first_item = await self._queue.get()
                 batch = [first_item]
                 self._queue.task_done()
-                
+
                 # Drain queue up to 100 items
                 while len(batch) < 100:
                     try:
@@ -114,20 +122,24 @@ class AuditCollector:
                         self._queue.task_done()
                     except asyncio.QueueEmpty:
                         break
-                        
+
                 await self._insert_batch_with_circuit_breaker(batch)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 LOGGER.error(f"AuditCollector worker error: {e}", exc_info=True)
                 await asyncio.sleep(1.0)  # Backoff on error
-                
-    async def _insert_batch_with_circuit_breaker(self, batch: list[BaseAuditEventEnvelope]) -> None:
+
+    async def _insert_batch_with_circuit_breaker(
+        self, batch: list[BaseAuditEventEnvelope]
+    ) -> None:
         try:
             # simple attempt
             await asyncio.wait_for(self.repository.insert_many(batch), timeout=5.0)
         except asyncio.TimeoutError:
-            LOGGER.error(f"MongoDB write timeout when inserting {len(batch)} audit events")
+            LOGGER.error(
+                f"MongoDB write timeout when inserting {len(batch)} audit events"
+            )
             # In a real circuit breaker, we'd toggle state. For now we just log and potentially drop if queue fills.
             # We don't re-enqueue to avoid poison pills or infinite loops.
         except Exception as e:

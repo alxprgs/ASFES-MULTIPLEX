@@ -15,7 +15,9 @@ def test_spa_fallback_serves_frontend_without_capturing_api_paths() -> None:
     try:
         assets_dir = frontend_dist / "assets"
         assets_dir.mkdir(parents=True)
-        (frontend_dist / "index.html").write_text("<main>ASFES Multiplex UI</main>", encoding="utf-8")
+        (frontend_dist / "index.html").write_text(
+            "<main>ASFES Multiplex UI</main>", encoding="utf-8"
+        )
 
         cfg = base_settings.model_copy(deep=True)
         cfg.app.frontend_dist = frontend_dist

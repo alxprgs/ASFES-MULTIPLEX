@@ -5,7 +5,15 @@ from pathlib import Path
 import tomllib
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field, HttpUrl, SecretStr, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    EmailStr,
+    Field,
+    HttpUrl,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -86,7 +94,9 @@ class SMTPConfig(BaseModel):
             if not value
         ]
         if missing:
-            raise ValueError(f"SMTP is enabled but missing required settings: {', '.join(missing)}")
+            raise ValueError(
+                f"SMTP is enabled but missing required settings: {', '.join(missing)}"
+            )
         return self
 
 
@@ -120,8 +130,12 @@ class LoggingConfig(BaseModel):
 
 
 class HostOpsConfig(BaseModel):
-    managed_file_roots: list[Path] = Field(default_factory=lambda: [BASE_DIR / "data", BASE_DIR / "runtime"])
-    managed_log_roots: list[Path] = Field(default_factory=lambda: [BASE_DIR / "runtime" / "logs"])
+    managed_file_roots: list[Path] = Field(
+        default_factory=lambda: [BASE_DIR / "data", BASE_DIR / "runtime"]
+    )
+    managed_log_roots: list[Path] = Field(
+        default_factory=lambda: [BASE_DIR / "runtime" / "logs"]
+    )
     backup_directory: Path = BASE_DIR / "runtime" / "backups"
     command_timeout_seconds: int = 30
     max_output_bytes: int = 65536
@@ -131,9 +145,13 @@ class HostOpsConfig(BaseModel):
     database_profiles_directory: Path = BASE_DIR / "data" / "profiles" / "databases"
     vpn_profiles_directory: Path = BASE_DIR / "data" / "profiles" / "vpn"
     ssl_profiles_directory: Path = BASE_DIR / "data" / "profiles" / "ssl"
-    nginx_config_paths: list[Path] = Field(default_factory=lambda: [BASE_DIR / "data" / "nginx"])
+    nginx_config_paths: list[Path] = Field(
+        default_factory=lambda: [BASE_DIR / "data" / "nginx"]
+    )
     process_allowed_executables: list[str] = Field(default_factory=list)
-    port_probe_allowed_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "::1", "localhost"])
+    port_probe_allowed_hosts: list[str] = Field(
+        default_factory=lambda: ["127.0.0.1", "::1", "localhost"]
+    )
 
 
 class SecurityConfig(BaseModel):
@@ -185,7 +203,14 @@ class OAuthConfig(BaseModel):
     require_pkce: bool = True
     allow_plain_pkce: bool = False
 
-    @field_validator("issuer_path", "authorization_path", "token_path", "revocation_path", "clients_path", "jwks_path")
+    @field_validator(
+        "issuer_path",
+        "authorization_path",
+        "token_path",
+        "revocation_path",
+        "clients_path",
+        "jwks_path",
+    )
     @classmethod
     def validate_paths(cls, value: str) -> str:
         if not value.startswith("/"):
@@ -282,19 +307,33 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def finalize_paths(self) -> "Settings":
         self.app.version = read_project_version()
-        self.app.frontend_dist = self.app.frontend_dist if self.app.frontend_dist.is_absolute() else BASE_DIR / self.app.frontend_dist
-        self.logging.directory = self.logging.directory if self.logging.directory.is_absolute() else BASE_DIR / self.logging.directory
+        self.app.frontend_dist = (
+            self.app.frontend_dist
+            if self.app.frontend_dist.is_absolute()
+            else BASE_DIR / self.app.frontend_dist
+        )
+        self.logging.directory = (
+            self.logging.directory
+            if self.logging.directory.is_absolute()
+            else BASE_DIR / self.logging.directory
+        )
         self.logging.sqlite_path = (
-            self.logging.sqlite_path if self.logging.sqlite_path.is_absolute() else BASE_DIR / self.logging.sqlite_path
+            self.logging.sqlite_path
+            if self.logging.sqlite_path.is_absolute()
+            else BASE_DIR / self.logging.sqlite_path
         )
         self.host_ops.managed_file_roots = [
-            path if path.is_absolute() else BASE_DIR / path for path in self.host_ops.managed_file_roots
+            path if path.is_absolute() else BASE_DIR / path
+            for path in self.host_ops.managed_file_roots
         ]
         self.host_ops.managed_log_roots = [
-            path if path.is_absolute() else BASE_DIR / path for path in self.host_ops.managed_log_roots
+            path if path.is_absolute() else BASE_DIR / path
+            for path in self.host_ops.managed_log_roots
         ]
         self.host_ops.backup_directory = (
-            self.host_ops.backup_directory if self.host_ops.backup_directory.is_absolute() else BASE_DIR / self.host_ops.backup_directory
+            self.host_ops.backup_directory
+            if self.host_ops.backup_directory.is_absolute()
+            else BASE_DIR / self.host_ops.backup_directory
         )
         self.host_ops.database_profiles_directory = (
             self.host_ops.database_profiles_directory
@@ -312,10 +351,13 @@ class Settings(BaseSettings):
             else BASE_DIR / self.host_ops.ssl_profiles_directory
         )
         self.host_ops.nginx_config_paths = [
-            path if path.is_absolute() else BASE_DIR / path for path in self.host_ops.nginx_config_paths
+            path if path.is_absolute() else BASE_DIR / path
+            for path in self.host_ops.nginx_config_paths
         ]
         self.pypi.data_dir = (
-            self.pypi.data_dir if self.pypi.data_dir.is_absolute() else BASE_DIR / self.pypi.data_dir
+            self.pypi.data_dir
+            if self.pypi.data_dir.is_absolute()
+            else BASE_DIR / self.pypi.data_dir
         )
         self.python_mirror.data_dir = (
             self.python_mirror.data_dir
@@ -323,7 +365,9 @@ class Settings(BaseSettings):
             else BASE_DIR / self.python_mirror.data_dir
         )
         if self.redis.mode != "disabled" and not self.redis.url:
-            raise ValueError("REDIS__URL is required when REDIS__MODE is not 'disabled'")
+            raise ValueError(
+                "REDIS__URL is required when REDIS__MODE is not 'disabled'"
+            )
         if self.app.mcp_path == self.app.api_prefix:
             raise ValueError("APP__MCP_PATH and APP__API_PREFIX must differ")
         return self

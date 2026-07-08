@@ -11,7 +11,9 @@ router = APIRouter()
 
 
 @router.get("/health", response_model=HealthResponse)
-async def healthcheck(services: ApplicationServices = Depends(get_services)) -> HealthResponse:
+async def healthcheck(
+    services: ApplicationServices = Depends(get_services),
+) -> HealthResponse:
     mongodb = await _mongodb_status(services)
     return HealthResponse(status="ok" if mongodb == "ok" else "degraded")
 
@@ -24,7 +26,12 @@ async def healthcheck_details(
     mongodb = await _mongodb_status(services)
     runtime = await services.settings_service.get_runtime_settings()
     redis = "enabled" if services.rate_limiter.should_use_redis() else "disabled"
-    return HealthDetailsResponse(status="ok" if mongodb == "ok" else "degraded", mongodb=mongodb, redis=redis, mcp_enabled=bool(runtime.get("mcp_enabled", True)))
+    return HealthDetailsResponse(
+        status="ok" if mongodb == "ok" else "degraded",
+        mongodb=mongodb,
+        redis=redis,
+        mcp_enabled=bool(runtime.get("mcp_enabled", True)),
+    )
 
 
 async def _mongodb_status(services: ApplicationServices) -> str:

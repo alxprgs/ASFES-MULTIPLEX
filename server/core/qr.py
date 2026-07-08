@@ -66,7 +66,10 @@ def _build_codewords(text: str) -> list[int]:
     while len(bits) % 8:
         bits.append(0)
 
-    codewords = [sum(bit << (7 - index) for index, bit in enumerate(bits[offset : offset + 8])) for offset in range(0, len(bits), 8)]
+    codewords = [
+        sum(bit << (7 - index) for index, bit in enumerate(bits[offset : offset + 8]))
+        for offset in range(0, len(bits), 8)
+    ]
     pad = 0xEC
     while len(codewords) < 136:
         codewords.append(pad)
@@ -83,28 +86,47 @@ def _build_codewords(text: str) -> list[int]:
 
 
 def _empty_matrix(size: int) -> tuple[list[list[bool]], list[list[bool]]]:
-    return ([[False] * size for _ in range(size)], [[False] * size for _ in range(size)])
+    return (
+        [[False] * size for _ in range(size)],
+        [[False] * size for _ in range(size)],
+    )
 
 
-def _set_module(matrix: list[list[bool]], reserved: list[list[bool]], x: int, y: int, value: bool, *, reserve: bool = True) -> None:
+def _set_module(
+    matrix: list[list[bool]],
+    reserved: list[list[bool]],
+    x: int,
+    y: int,
+    value: bool,
+    *,
+    reserve: bool = True,
+) -> None:
     if 0 <= x < len(matrix) and 0 <= y < len(matrix):
         matrix[y][x] = value
         if reserve:
             reserved[y][x] = True
 
 
-def _finder(matrix: list[list[bool]], reserved: list[list[bool]], x: int, y: int) -> None:
+def _finder(
+    matrix: list[list[bool]], reserved: list[list[bool]], x: int, y: int
+) -> None:
     for dy in range(-1, 8):
         for dx in range(-1, 8):
             xx = x + dx
             yy = y + dy
             if not (0 <= xx < len(matrix) and 0 <= yy < len(matrix)):
                 continue
-            value = 0 <= dx <= 6 and 0 <= dy <= 6 and (dx in {0, 6} or dy in {0, 6} or (2 <= dx <= 4 and 2 <= dy <= 4))
+            value = (
+                0 <= dx <= 6
+                and 0 <= dy <= 6
+                and (dx in {0, 6} or dy in {0, 6} or (2 <= dx <= 4 and 2 <= dy <= 4))
+            )
             _set_module(matrix, reserved, xx, yy, value)
 
 
-def _alignment(matrix: list[list[bool]], reserved: list[list[bool]], center_x: int, center_y: int) -> None:
+def _alignment(
+    matrix: list[list[bool]], reserved: list[list[bool]], center_x: int, center_y: int
+) -> None:
     for dy in range(-2, 3):
         for dx in range(-2, 3):
             value = max(abs(dx), abs(dy)) != 1
@@ -136,8 +158,12 @@ def _draw_function_patterns() -> tuple[list[list[bool]], list[list[bool]]]:
     return matrix, reserved
 
 
-def _place_data(matrix: list[list[bool]], reserved: list[list[bool]], codewords: Iterable[int]) -> None:
-    bits = [(byte >> shift) & 1 == 1 for byte in codewords for shift in range(7, -1, -1)]
+def _place_data(
+    matrix: list[list[bool]], reserved: list[list[bool]], codewords: Iterable[int]
+) -> None:
+    bits = [
+        (byte >> shift) & 1 == 1 for byte in codewords for shift in range(7, -1, -1)
+    ]
     bit_index = 0
     size = len(matrix)
     upward = True
@@ -177,7 +203,9 @@ def _mask(mask: int, x: int, y: int) -> bool:
     )
 
 
-def _masked(matrix: list[list[bool]], reserved: list[list[bool]], mask: int) -> list[list[bool]]:
+def _masked(
+    matrix: list[list[bool]], reserved: list[list[bool]], mask: int
+) -> list[list[bool]]:
     size = len(matrix)
     result = [row[:] for row in matrix]
     for y in range(size):
@@ -240,7 +268,11 @@ def _penalty(matrix: list[list[bool]]) -> int:
     for y in range(size - 1):
         for x in range(size - 1):
             color = matrix[y][x]
-            if matrix[y][x + 1] == color and matrix[y + 1][x] == color and matrix[y + 1][x + 1] == color:
+            if (
+                matrix[y][x + 1] == color
+                and matrix[y + 1][x] == color
+                and matrix[y + 1][x + 1] == color
+            ):
                 total += 3
     dark = sum(1 for row in matrix for value in row if value)
     total += abs(dark * 20 - size * size * 10) // (size * size) * 10
@@ -262,7 +294,9 @@ def qr_svg(text: str, *, scale: int = 5, border: int = 4) -> str:
     for y, row in enumerate(matrix):
         for x, value in enumerate(row):
             if value:
-                rects.append(f'<rect x="{(x + border) * scale}" y="{(y + border) * scale}" width="{scale}" height="{scale}"/>')
+                rects.append(
+                    f'<rect x="{(x + border) * scale}" y="{(y + border) * scale}" width="{scale}" height="{scale}"/>'
+                )
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {side} {side}" width="{side}" height="{side}" role="img">'
         f'<rect width="100%" height="100%" fill="#fff"/>'

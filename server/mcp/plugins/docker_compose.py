@@ -4,8 +4,21 @@ import json
 from pathlib import Path
 from typing import Any
 
-from server.mcp.plugins._common import command_result_payload, parse_json_lines, require_argument, string_list_argument
-from server.models import MCPTool, MCPToolManifest, PermissionDefinition, PluginDefinition, PluginManifest, RuntimeAvailability, ToolExecutionContext
+from server.mcp.plugins._common import (
+    command_result_payload,
+    parse_json_lines,
+    require_argument,
+    string_list_argument,
+)
+from server.models import (
+    MCPTool,
+    MCPToolManifest,
+    PermissionDefinition,
+    PluginDefinition,
+    PluginManifest,
+    RuntimeAvailability,
+    ToolExecutionContext,
+)
 
 
 async def _compose_availability(services) -> RuntimeAvailability:
@@ -16,9 +29,17 @@ async def _compose_availability(services) -> RuntimeAvailability:
         except Exception:
             result = None
         if result and result.returncode == 0:
-            return RuntimeAvailability(available=True, required_backends=["docker"], providers=["docker compose"])
+            return RuntimeAvailability(
+                available=True,
+                required_backends=["docker"],
+                providers=["docker compose"],
+            )
     if host_ops.command_exists("docker-compose"):
-        return RuntimeAvailability(available=True, required_backends=["docker-compose"], providers=["docker-compose"])
+        return RuntimeAvailability(
+            available=True,
+            required_backends=["docker-compose"],
+            providers=["docker-compose"],
+        )
     return RuntimeAvailability(
         available=False,
         reason="Neither 'docker compose' nor legacy 'docker-compose' is available",
@@ -27,12 +48,18 @@ async def _compose_availability(services) -> RuntimeAvailability:
     )
 
 
-def _resolve_project_dir(context: ToolExecutionContext, arguments: dict[str, Any]) -> Path:
+def _resolve_project_dir(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> Path:
     project_dir = require_argument(arguments, "project_dir")
-    return context.services.host_ops.resolve_managed_path(str(project_dir), roots=context.services.host_ops.managed_file_roots())
+    return context.services.host_ops.resolve_managed_path(
+        str(project_dir), roots=context.services.host_ops.managed_file_roots()
+    )
 
 
-async def _compose_command(context: ToolExecutionContext, arguments: dict[str, Any], *extra: str):
+async def _compose_command(
+    context: ToolExecutionContext, arguments: dict[str, Any], *extra: str
+):
     project_dir = _resolve_project_dir(context, arguments)
     files = string_list_argument(arguments, "files")
     services = string_list_argument(arguments, "services")
@@ -40,18 +67,28 @@ async def _compose_command(context: ToolExecutionContext, arguments: dict[str, A
     if not availability.available:
         raise RuntimeError(availability.reason or "Docker Compose is unavailable")
     if "docker compose" in availability.providers:
-        command = [context.services.host_ops.executable_path("docker") or "docker", "compose"]
+        command = [
+            context.services.host_ops.executable_path("docker") or "docker",
+            "compose",
+        ]
     else:
-        command = [context.services.host_ops.executable_path("docker-compose") or "docker-compose"]
+        command = [
+            context.services.host_ops.executable_path("docker-compose")
+            or "docker-compose"
+        ]
     for compose_file in files:
-        resolved = context.services.host_ops.resolve_managed_path(compose_file, roots=context.services.host_ops.managed_file_roots())
+        resolved = context.services.host_ops.resolve_managed_path(
+            compose_file, roots=context.services.host_ops.managed_file_roots()
+        )
         command.extend(["-f", str(resolved)])
     command.extend(extra)
     command.extend(services)
     return await context.services.host_ops.run(command, cwd=project_dir, check=False)
 
 
-async def compose_ps(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def compose_ps(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     result = await _compose_command(context, arguments, "ps", "--format", "json")
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "docker compose ps failed")
@@ -64,22 +101,32 @@ async def compose_ps(context: ToolExecutionContext, arguments: dict[str, Any]) -
     return command_result_payload(result, services=containers, count=len(containers))
 
 
-async def compose_config(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def compose_config(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     result = await _compose_command(context, arguments, "config")
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "docker compose config failed")
     return command_result_payload(result, config=result.stdout)
 
 
-async def compose_logs(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def compose_logs(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     tail_lines = int(arguments.get("tail_lines") or 200)
-    result = await _compose_command(context, arguments, "logs", "--tail", str(max(1, tail_lines)))
+    result = await _compose_command(
+        context, arguments, "logs", "--tail", str(max(1, tail_lines))
+    )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "docker compose logs failed")
-    return command_result_payload(result, logs=result.stdout, tail_lines=max(1, tail_lines))
+    return command_result_payload(
+        result, logs=result.stdout, tail_lines=max(1, tail_lines)
+    )
 
 
-async def compose_up(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def compose_up(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     extra = ["up"]
     if arguments.get("detach", True):
         extra.append("-d")
@@ -89,14 +136,18 @@ async def compose_up(context: ToolExecutionContext, arguments: dict[str, Any]) -
     return command_result_payload(result, changed=True)
 
 
-async def compose_down(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def compose_down(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     result = await _compose_command(context, arguments, "down")
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "docker compose down failed")
     return command_result_payload(result, changed=True)
 
 
-async def compose_restart(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def compose_restart(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     result = await _compose_command(context, arguments, "restart")
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "docker compose restart failed")
@@ -110,8 +161,14 @@ PLUGIN = PluginDefinition(
         version="1.0.0",
         description="Управляет многоконтейнерными compose-проектами через Docker Compose или docker-compose.",
         permissions=[
-            PermissionDefinition(key="docker.compose.read", description="Просматривать Docker Compose-проекты и логи."),
-            PermissionDefinition(key="docker.compose.write", description="Запускать, останавливать и перезапускать Docker Compose-проекты."),
+            PermissionDefinition(
+                key="docker.compose.read",
+                description="Просматривать Docker Compose-проекты и логи.",
+            ),
+            PermissionDefinition(
+                key="docker.compose.write",
+                description="Запускать, останавливать и перезапускать Docker Compose-проекты.",
+            ),
         ],
         required_backends=["docker", "docker-compose"],
         providers=["docker compose", "docker-compose"],
@@ -126,9 +183,20 @@ PLUGIN = PluginDefinition(
                     "type": "object",
                     "required": ["project_dir"],
                     "properties": {
-                        "project_dir": {"type": "string", "description": "Управляемый путь к директории compose-проекта."},
-                        "files": {"type": "array", "items": {"type": "string"}, "description": "Необязательные compose-файлы."},
-                        "services": {"type": "array", "items": {"type": "string"}, "description": "Необязательный фильтр по именам сервисов."},
+                        "project_dir": {
+                            "type": "string",
+                            "description": "Управляемый путь к директории compose-проекта.",
+                        },
+                        "files": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Необязательные compose-файлы.",
+                        },
+                        "services": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Необязательный фильтр по именам сервисов.",
+                        },
                     },
                     "additionalProperties": False,
                 },

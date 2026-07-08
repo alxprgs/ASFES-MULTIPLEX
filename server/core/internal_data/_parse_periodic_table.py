@@ -402,7 +402,9 @@ def _canonical_structure_key(title: str) -> str | None:
     return None
 
 
-def _section_record(title: str, summary: str | None, raw_text: str | None, url: str) -> dict[str, Any]:
+def _section_record(
+    title: str, summary: str | None, raw_text: str | None, url: str
+) -> dict[str, Any]:
     return {
         "title": title,
         "summary": summary,
@@ -475,21 +477,40 @@ def _remember_field(
         canonical_values[key] = parsed_value
 
 
-def _parse_combined_row(label: str, value: str, raw_fields: dict[str, list[dict[str, Any]]], canonical_values: dict[str, Any]) -> bool:
+def _parse_combined_row(
+    label: str,
+    value: str,
+    raw_fields: dict[str, list[dict[str, Any]]],
+    canonical_values: dict[str, Any],
+) -> bool:
     normalized = _normalize_label(label)
     handled = False
-    if ("название" in normalized and "символ" in normalized and "номер" in normalized) or (
-        "name" in normalized and "symbol" in normalized and "number" in normalized
-    ):
+    if (
+        "название" in normalized and "символ" in normalized and "номер" in normalized
+    ) or ("name" in normalized and "symbol" in normalized and "number" in normalized):
         cleaned_value = _clean_text(value)
         atomic_match = re.search(r"(\d{1,3})\s*$", cleaned_value)
         symbol_match = re.search(r"\(([A-Z][a-z]?)\)", cleaned_value)
         name_part = cleaned_value.split(",", 1)[0]
         name_part = name_part.split("/", 1)[0].strip()
         if name_part:
-            _remember_field(raw_fields, canonical_values, key="name", label=label, raw_value=value, parsed_value=name_part)
+            _remember_field(
+                raw_fields,
+                canonical_values,
+                key="name",
+                label=label,
+                raw_value=value,
+                parsed_value=name_part,
+            )
         if symbol_match:
-            _remember_field(raw_fields, canonical_values, key="symbol", label=label, raw_value=value, parsed_value=symbol_match.group(1))
+            _remember_field(
+                raw_fields,
+                canonical_values,
+                key="symbol",
+                label=label,
+                raw_value=value,
+                parsed_value=symbol_match.group(1),
+            )
         if atomic_match:
             _remember_field(
                 raw_fields,
@@ -504,13 +525,36 @@ def _parse_combined_row(label: str, value: str, raw_fields: dict[str, list[dict[
         "group" in normalized and "period" in normalized and "block" in normalized
     ):
         numbers = re.findall(r"\b([1-9]\d?|1[01]\d|118)\b", value)
-        block_match = re.search(r"\b([spdf])(?:-|\s)?(?:element|элемент|block)?\b", value.lower())
+        block_match = re.search(
+            r"\b([spdf])(?:-|\s)?(?:element|элемент|block)?\b", value.lower()
+        )
         if numbers:
-            _remember_field(raw_fields, canonical_values, key="group", label=label, raw_value=value, parsed_value=int(numbers[0]))
+            _remember_field(
+                raw_fields,
+                canonical_values,
+                key="group",
+                label=label,
+                raw_value=value,
+                parsed_value=int(numbers[0]),
+            )
         if len(numbers) > 1:
-            _remember_field(raw_fields, canonical_values, key="period", label=label, raw_value=value, parsed_value=int(numbers[1]))
+            _remember_field(
+                raw_fields,
+                canonical_values,
+                key="period",
+                label=label,
+                raw_value=value,
+                parsed_value=int(numbers[1]),
+            )
         if block_match:
-            _remember_field(raw_fields, canonical_values, key="block", label=label, raw_value=value, parsed_value=block_match.group(1))
+            _remember_field(
+                raw_fields,
+                canonical_values,
+                key="block",
+                label=label,
+                raw_value=value,
+                parsed_value=block_match.group(1),
+            )
         handled = True
     return handled
 
@@ -520,7 +564,9 @@ def _candidate_element_urls(soup: BeautifulSoup, base_url: str) -> list[str]:
     seen: set[str] = set()
     for cell in soup.select("table td, table th"):
         cell_text = _tag_text(cell)
-        has_atomic_number = re.search(r"\b([1-9]\d?|1[01]\d|118)\b", cell_text) is not None
+        has_atomic_number = (
+            re.search(r"\b([1-9]\d?|1[01]\d|118)\b", cell_text) is not None
+        )
         links = cell.select("a[href]")
         if not links:
             continue
@@ -582,7 +628,10 @@ def _parse_isotope_table(container: Tag | None) -> list[dict[str, Any]]:
         values = [_tag_text(cell) for cell in cells]
         if not any(values):
             continue
-        if any("изотоп" in value.lower() or "isotope" in value.lower() for value in values[:2]):
+        if any(
+            "изотоп" in value.lower() or "isotope" in value.lower()
+            for value in values[:2]
+        ):
             continue
         isotopes.append(
             {
@@ -629,10 +678,19 @@ def parse_element_page(html: str, *, language: str, url: str) -> dict[str, Any] 
         if canonical_key is None:
             continue
         parsed_value = _normalize_property_value(canonical_key, value)
-        _remember_field(raw_fields, canonical_values, key=canonical_key, label=label, raw_value=value, parsed_value=parsed_value)
+        _remember_field(
+            raw_fields,
+            canonical_values,
+            key=canonical_key,
+            label=label,
+            raw_value=value,
+            parsed_value=parsed_value,
+        )
 
     atomic_number = canonical_values.get("atomic_number")
-    if not isinstance(atomic_number, int) or not (1 <= atomic_number <= EXPECTED_ELEMENT_COUNT):
+    if not isinstance(atomic_number, int) or not (
+        1 <= atomic_number <= EXPECTED_ELEMENT_COUNT
+    ):
         return None
 
     symbol = canonical_values.get("symbol") or _best_symbol_from_title(title)
@@ -642,7 +700,9 @@ def parse_element_page(html: str, *, language: str, url: str) -> dict[str, Any] 
 
     heading_lookup = {
         _heading_title(tag): tag
-        for tag in soup.select(".mw-parser-output h2, .mw-parser-output h3, .mw-parser-output h4")
+        for tag in soup.select(
+            ".mw-parser-output h2, .mw-parser-output h3, .mw-parser-output h4"
+        )
     }
     for block in _collect_section_blocks(soup):
         title_text = block["title"]
@@ -659,9 +719,18 @@ def parse_element_page(html: str, *, language: str, url: str) -> dict[str, Any] 
             sections[canonical_key] = record
             if canonical_key == "production":
                 raw_lower = (raw_text or "").lower()
-                if any(token in raw_lower for token in ("домаш", "home")) and sections["production_home"] is None:
+                if (
+                    any(token in raw_lower for token in ("домаш", "home"))
+                    and sections["production_home"] is None
+                ):
                     sections["production_home"] = record
-                if any(token in raw_lower for token in ("лаборатор", "laborator", "lab ")) and sections["production_laboratory"] is None:
+                if (
+                    any(
+                        token in raw_lower
+                        for token in ("лаборатор", "laborator", "lab ")
+                    )
+                    and sections["production_laboratory"] is None
+                ):
                     sections["production_laboratory"] = record
         elif raw_text:
             sections["additional_sections"].append(record)
@@ -672,7 +741,15 @@ def parse_element_page(html: str, *, language: str, url: str) -> dict[str, Any] 
 
     properties: dict[str, Any] = {}
     for key, value in canonical_values.items():
-        if key in {"atomic_number", "symbol", "group", "period", "block", "name", "category"}:
+        if key in {
+            "atomic_number",
+            "symbol",
+            "group",
+            "period",
+            "block",
+            "name",
+            "category",
+        }:
             continue
         properties[key] = value
 
@@ -725,17 +802,26 @@ def _merge_property_values(primary: Any, fallback: Any) -> Any:
     return fallback
 
 
-def _merge_section_records(primary: dict[str, Any] | None, fallback: dict[str, Any] | None) -> dict[str, Any] | None:
+def _merge_section_records(
+    primary: dict[str, Any] | None, fallback: dict[str, Any] | None
+) -> dict[str, Any] | None:
     return primary or fallback
 
 
-def merge_element_records(ru_record: dict[str, Any] | None, en_record: dict[str, Any] | None, generated_at: str) -> dict[str, Any]:
+def merge_element_records(
+    ru_record: dict[str, Any] | None,
+    en_record: dict[str, Any] | None,
+    generated_at: str,
+) -> dict[str, Any]:
     source = ru_record or en_record
     if source is None:
         raise ValueError("At least one source record is required")
 
     atomic_number = source["atomic_number"]
-    symbol = _prefer_primary(ru_record.get("symbol") if ru_record else None, en_record.get("symbol") if en_record else None)
+    symbol = _prefer_primary(
+        ru_record.get("symbol") if ru_record else None,
+        en_record.get("symbol") if en_record else None,
+    )
     classification = {
         "group": _prefer_primary(
             ru_record["classification"].get("group") if ru_record else None,
@@ -786,7 +872,13 @@ def merge_element_records(ru_record: dict[str, Any] | None, en_record: dict[str,
             seen_additional.add(marker)
             sections["additional_sections"].append(item)
 
-    isotopes = ru_record["isotopes"] if ru_record and ru_record["isotopes"] else en_record["isotopes"] if en_record else []
+    isotopes = (
+        ru_record["isotopes"]
+        if ru_record and ru_record["isotopes"]
+        else en_record["isotopes"]
+        if en_record
+        else []
+    )
 
     return {
         "atomic_number": atomic_number,
@@ -831,13 +923,23 @@ def merge_element_records(ru_record: dict[str, Any] | None, en_record: dict[str,
 
 def _completeness_score(record: dict[str, Any]) -> int:
     score = 0
-    score += sum(1 for value in record.get("properties", {}).values() if value not in (None, "", {}, []))
-    score += sum(1 for value in record.get("classification", {}).values() if value not in (None, "", {}, []))
+    score += sum(
+        1
+        for value in record.get("properties", {}).values()
+        if value not in (None, "", {}, [])
+    )
+    score += sum(
+        1
+        for value in record.get("classification", {}).values()
+        if value not in (None, "", {}, [])
+    )
     score += len(record.get("isotopes", []))
     return score
 
 
-def _collect_language_elements(candidate_urls: list[str], *, language: str, fetch: FetchFunction) -> dict[int, dict[str, Any]]:
+def _collect_language_elements(
+    candidate_urls: list[str], *, language: str, fetch: FetchFunction
+) -> dict[int, dict[str, Any]]:
     elements: dict[int, dict[str, Any]] = {}
     for url in candidate_urls:
         try:
@@ -848,7 +950,9 @@ def _collect_language_elements(candidate_urls: list[str], *, language: str, fetc
         if parsed is None:
             continue
         existing = elements.get(parsed["atomic_number"])
-        if existing is None or _completeness_score(parsed) > _completeness_score(existing):
+        if existing is None or _completeness_score(parsed) > _completeness_score(
+            existing
+        ):
             elements[parsed["atomic_number"]] = parsed
     return elements
 
@@ -860,7 +964,12 @@ def _field_coverage(elements: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
         for key, value in element["properties"].items():
             if value in (None, "", {}, []):
                 continue
-            if isinstance(value, dict) and "raw" in value and value.get("value") is None and not value.get("raw"):
+            if (
+                isinstance(value, dict)
+                and "raw" in value
+                and value.get("value") is None
+                and not value.get("raw")
+            ):
                 continue
             counter[key] += 1
         for key in ("group", "period", "block", "category"):
@@ -881,7 +990,9 @@ def _summarize_structure(
     elements: list[dict[str, Any]],
     ru_page: PageSummary,
     en_page: PageSummary,
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[
+    dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]
+]:
     groups_map: defaultdict[int, list[int]] = defaultdict(list)
     periods_map: defaultdict[int, list[int]] = defaultdict(list)
     blocks_map: defaultdict[str, list[int]] = defaultdict(list)
@@ -911,10 +1022,14 @@ def _summarize_structure(
         "element_count": len(elements),
         "source_urls": {"ru": ru_page.url, "en": en_page.url},
         "section_summaries": {
-            "structure": ru_page.section_summaries.get("structure") or en_page.section_summaries.get("structure"),
-            "groups": ru_page.section_summaries.get("groups") or en_page.section_summaries.get("groups"),
-            "periods": ru_page.section_summaries.get("periods") or en_page.section_summaries.get("periods"),
-            "blocks": ru_page.section_summaries.get("blocks") or en_page.section_summaries.get("blocks"),
+            "structure": ru_page.section_summaries.get("structure")
+            or en_page.section_summaries.get("structure"),
+            "groups": ru_page.section_summaries.get("groups")
+            or en_page.section_summaries.get("groups"),
+            "periods": ru_page.section_summaries.get("periods")
+            or en_page.section_summaries.get("periods"),
+            "blocks": ru_page.section_summaries.get("blocks")
+            or en_page.section_summaries.get("blocks"),
         },
         "legend": {
             "categories": sorted(categories),
@@ -959,7 +1074,9 @@ def build_periodic_table_dataset(
         fetch = fetcher.fetch
 
     now = generated_at or datetime.now(UTC)
-    generated_at_iso = now.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    generated_at_iso = (
+        now.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    )
 
     table_pages: dict[str, PageSummary] = {}
     elements_by_language: dict[str, dict[int, dict[str, Any]]] = {}
@@ -969,25 +1086,52 @@ def build_periodic_table_dataset(
         try:
             html = fetch(url)
         except Exception as exc:
-            errors.append({"scope": "table_page", "language": language, "url": url, "error": str(exc)})
+            errors.append(
+                {
+                    "scope": "table_page",
+                    "language": language,
+                    "url": url,
+                    "error": str(exc),
+                }
+            )
             continue
         page_summary = parse_periodic_table_page(html, language=language, url=url)
         table_pages[language] = page_summary
-        elements_by_language[language] = _collect_language_elements(page_summary.candidate_urls, language=language, fetch=fetch)
+        elements_by_language[language] = _collect_language_elements(
+            page_summary.candidate_urls, language=language, fetch=fetch
+        )
 
-    ru_page = table_pages.get("ru") or PageSummary("ru", TABLE_PAGE_URLS["ru"], None, None, {key: None for key in STRUCTURE_SECTION_ALIASES}, [])
-    en_page = table_pages.get("en") or PageSummary("en", TABLE_PAGE_URLS["en"], None, None, {key: None for key in STRUCTURE_SECTION_ALIASES}, [])
+    ru_page = table_pages.get("ru") or PageSummary(
+        "ru",
+        TABLE_PAGE_URLS["ru"],
+        None,
+        None,
+        {key: None for key in STRUCTURE_SECTION_ALIASES},
+        [],
+    )
+    en_page = table_pages.get("en") or PageSummary(
+        "en",
+        TABLE_PAGE_URLS["en"],
+        None,
+        None,
+        {key: None for key in STRUCTURE_SECTION_ALIASES},
+        [],
+    )
     ru_elements = elements_by_language.get("ru", {})
     en_elements = elements_by_language.get("en", {})
     atomic_numbers = sorted(set(ru_elements) | set(en_elements))
 
     elements = [
-        merge_element_records(ru_elements.get(number), en_elements.get(number), generated_at_iso)
+        merge_element_records(
+            ru_elements.get(number), en_elements.get(number), generated_at_iso
+        )
         for number in atomic_numbers
     ]
     elements.sort(key=lambda item: item["atomic_number"])
 
-    structure, groups, periods, blocks = _summarize_structure(elements, ru_page, en_page)
+    structure, groups, periods, blocks = _summarize_structure(
+        elements, ru_page, en_page
+    )
     return {
         "meta": {
             "schema_version": SCHEMA_VERSION,
@@ -1006,22 +1150,32 @@ def build_periodic_table_dataset(
     }
 
 
-def write_periodic_table_json(dataset: dict[str, Any], output_path: Path = DEFAULT_OUTPUT_PATH) -> Path:
+def write_periodic_table_json(
+    dataset: dict[str, Any], output_path: Path = DEFAULT_OUTPUT_PATH
+) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = output_path.with_suffix(output_path.suffix + ".tmp")
-    temp_path.write_text(json.dumps(dataset, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.write_text(
+        json.dumps(dataset, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     temp_path.replace(output_path)
     return output_path
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build an offline periodic table dataset from RU/EN Wikipedia.")
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH, help="Target JSON path.")
+    parser = argparse.ArgumentParser(
+        description="Build an offline periodic table dataset from RU/EN Wikipedia."
+    )
+    parser.add_argument(
+        "--output", type=Path, default=DEFAULT_OUTPUT_PATH, help="Target JSON path."
+    )
     args = parser.parse_args()
 
     dataset = build_periodic_table_dataset()
     write_periodic_table_json(dataset, args.output)
-    print(f"Wrote periodic table dataset with {dataset['meta']['element_count']} elements to {args.output}")
+    print(
+        f"Wrote periodic table dataset with {dataset['meta']['element_count']} elements to {args.output}"
+    )
     return 0
 
 

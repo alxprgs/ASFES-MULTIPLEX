@@ -58,15 +58,29 @@ class DatabaseManager:
         await users.create_indexes(
             [
                 IndexModel([("username", ASCENDING)], unique=True),
-                IndexModel([("email", ASCENDING)], unique=True, partialFilterExpression={"email": {"$type": "string"}}),
-                IndexModel([("tg_id", ASCENDING)], unique=True, partialFilterExpression={"tg_id": {"$type": "string"}}),
-                IndexModel([("vk_id", ASCENDING)], unique=True, partialFilterExpression={"vk_id": {"$type": "string"}}),
+                IndexModel(
+                    [("email", ASCENDING)],
+                    unique=True,
+                    partialFilterExpression={"email": {"$type": "string"}},
+                ),
+                IndexModel(
+                    [("tg_id", ASCENDING)],
+                    unique=True,
+                    partialFilterExpression={"tg_id": {"$type": "string"}},
+                ),
+                IndexModel(
+                    [("vk_id", ASCENDING)],
+                    unique=True,
+                    partialFilterExpression={"vk_id": {"$type": "string"}},
+                ),
                 IndexModel([("is_root", ASCENDING)]),
             ]
         )
 
         settings_collection = self.collection(SETTINGS)
-        await settings_collection.create_indexes([IndexModel([("kind", ASCENDING)], unique=True)])
+        await settings_collection.create_indexes(
+            [IndexModel([("kind", ASCENDING)], unique=True)]
+        )
 
         oauth_clients = self.collection(OAUTH_CLIENTS)
         await oauth_clients.create_indexes(
@@ -123,7 +137,14 @@ class DatabaseManager:
         tool_policies = self.collection(TOOL_POLICIES)
         await tool_policies.create_indexes(
             [
-                IndexModel([("tool_key", ASCENDING), ("scope", ASCENDING), ("subject_id", ASCENDING)], unique=True),
+                IndexModel(
+                    [
+                        ("tool_key", ASCENDING),
+                        ("scope", ASCENDING),
+                        ("subject_id", ASCENDING),
+                    ],
+                    unique=True,
+                ),
                 IndexModel([("tool_key", ASCENDING), ("enabled", ASCENDING)]),
             ]
         )
@@ -159,7 +180,11 @@ class DatabaseManager:
             [
                 IndexModel([("token_hash", ASCENDING)], unique=True),
                 IndexModel([("user_id", ASCENDING)]),
-                IndexModel([("expires_at", ASCENDING)], expireAfterSeconds=0, partialFilterExpression={"expires_at": {"$type": "date"}}),
+                IndexModel(
+                    [("expires_at", ASCENDING)],
+                    expireAfterSeconds=0,
+                    partialFilterExpression={"expires_at": {"$type": "date"}},
+                ),
                 IndexModel([("is_active", ASCENDING)]),
             ]
         )

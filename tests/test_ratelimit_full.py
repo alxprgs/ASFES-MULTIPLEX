@@ -119,7 +119,9 @@ async def test_rate_limiter_switching() -> None:
     assert limiter.should_use_redis() is False
 
     # For required mode, disabling raises ValueError
-    limiter_req = RateLimiter(policies=policies, redis_mode="required", redis_url="redis://localhost:6379")
+    limiter_req = RateLimiter(
+        policies=policies, redis_mode="required", redis_url="redis://localhost:6379"
+    )
     with pytest.raises(ValueError):
         await limiter_req.set_runtime_enabled(False)
 

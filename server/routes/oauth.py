@@ -10,7 +10,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 
 from server.core.deps import enforce_api_rate_limit, get_services, require_permission
 from server.core.ratelimit import RateLimitError
-from server.models import OAuthClientCreateRequest, OAuthClientResponse, OAuthClientSecretRotateResponse, OAuthDynamicClientRegistrationRequest, UserPrincipal
+from server.models import (
+    OAuthClientCreateRequest,
+    OAuthClientResponse,
+    OAuthClientSecretRotateResponse,
+    OAuthDynamicClientRegistrationRequest,
+    UserPrincipal,
+)
 from server.services import ApplicationServices
 
 
@@ -221,18 +227,33 @@ def _base_page(title: str, body: str) -> str:
 </html>"""
 
 
-def _render_confirm_page(client_name: str, username: str, values: dict[str, str], scopes: list[str], need_totp: bool = False, error: str | None = None) -> HTMLResponse:
+def _render_confirm_page(
+    client_name: str,
+    username: str,
+    values: dict[str, str],
+    scopes: list[str],
+    need_totp: bool = False,
+    error: str | None = None,
+) -> HTMLResponse:
     """Page shown when the user is already authenticated — just confirm the OAuth grant."""
+
     def hidden(name: str) -> str:
-        return f'<input type="hidden" name="{html.escape(name)}" value="{html.escape(values.get(name, ""))}">' 
+        return f'<input type="hidden" name="{html.escape(name)}" value="{html.escape(values.get(name, ""))}">'
 
     initials = username[0].upper() if username else "?"
-    scope_tags = " ".join(f'<span class="scope-tag">{html.escape(s)}</span>' for s in scopes) or ''
+    scope_tags = (
+        " ".join(f'<span class="scope-tag">{html.escape(s)}</span>' for s in scopes)
+        or ""
+    )
     error_block = f'<div class="error">{html.escape(error)}</div>' if error else ""
-    totp_field = """
+    totp_field = (
+        """
         <label>Код аутентификатора</label>
         <input name="totp_code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="000000">
-    """ if need_totp else ""
+    """
+        if need_totp
+        else ""
+    )
 
     body = f"""
       <div class="subtitle">Авторизация</div>
@@ -245,7 +266,7 @@ def _render_confirm_page(client_name: str, username: str, values: dict[str, str]
           <strong>{html.escape(username)}</strong>
         </div>
       </div>
-      {f'<div class="scopes">{scope_tags}</div>' if scope_tags else ''}
+      {f'<div class="scopes">{scope_tags}</div>' if scope_tags else ""}
       {error_block}
       <form method="post">
         {hidden("response_type")}
@@ -267,16 +288,26 @@ def _render_confirm_page(client_name: str, username: str, values: dict[str, str]
     return HTMLResponse(_base_page(f"Подключить {client_name}", body))
 
 
-def _render_login_page(client_name: str, values: dict[str, str], error: str | None = None, need_totp: bool = False) -> HTMLResponse:
+def _render_login_page(
+    client_name: str,
+    values: dict[str, str],
+    error: str | None = None,
+    need_totp: bool = False,
+) -> HTMLResponse:
     """Page shown when the user is not authenticated — requires login."""
+
     def hidden(name: str) -> str:
-        return f'<input type="hidden" name="{html.escape(name)}" value="{html.escape(values.get(name, ""))}">' 
+        return f'<input type="hidden" name="{html.escape(name)}" value="{html.escape(values.get(name, ""))}">'
 
     error_block = f'<div class="error">{html.escape(error)}</div>' if error else ""
-    totp_field = f"""
+    totp_field = (
+        """
         <label>Код аутентификатора</label>
         <input name="totp_code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="000000">
-    """ if need_totp else ""
+    """
+        if need_totp
+        else ""
+    )
 
     body = f"""
       <div class="subtitle">Авторизация</div>
@@ -305,12 +336,17 @@ def _render_login_page(client_name: str, values: dict[str, str], error: str | No
     return HTMLResponse(_base_page(f"Войти для {client_name}", body))
 
 
-def _validate_scope(requested_scope: str | None, client: dict, services: ApplicationServices) -> list[str]:
+def _validate_scope(
+    requested_scope: str | None, client: dict, services: ApplicationServices
+) -> list[str]:
     scopes = [scope for scope in (requested_scope or "mcp").split(" ") if scope]
     allowed = set(client.get("allowed_scopes", []))
     supported = set(services.settings.oauth.supported_scopes)
     if not set(scopes).issubset(allowed) or not set(scopes).issubset(supported):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requested scopes are not allowed")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Requested scopes are not allowed",
+        )
     return scopes
 
 
@@ -335,9 +371,14 @@ def _client_secret_from_request(request: Request, form) -> str | None:
 def _validate_pkce_method(method: str, services: ApplicationServices) -> str:
     normalized = method.upper()
     if normalized == "PLAIN" and not services.settings.oauth.allow_plain_pkce:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plain PKCE is not allowed")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="plain PKCE is not allowed"
+        )
     if normalized not in {"S256", "PLAIN"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported PKCE code_challenge_method")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported PKCE code_challenge_method",
+        )
     return normalized
 
 
@@ -354,16 +395,26 @@ async def oauth_authorize_get(
     services: ApplicationServices = Depends(get_services),
 ) -> HTMLResponse:
     if response_type != "code":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only response_type=code is supported")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only response_type=code is supported",
+        )
     if services.settings.oauth.require_pkce and not code_challenge:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PKCE code_challenge is required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="PKCE code_challenge is required",
+        )
     code_challenge_method = _validate_pkce_method(code_challenge_method, services)
     try:
         client = await services.oauth.validate_client(client_id, redirect_uri)
     except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     scopes = _validate_scope(scope, client, services)
 
     values = {
@@ -383,7 +434,11 @@ async def oauth_authorize_get(
             payload = await services.auth.verify_api_access_token(session_token)
             user_doc = await services.users.get_user_by_id(payload["sub"])
             if user_doc:
-                username = user_doc.get("username") or user_doc.get("display_name") or payload["sub"]
+                username = (
+                    user_doc.get("username")
+                    or user_doc.get("display_name")
+                    or payload["sub"]
+                )
                 return _render_confirm_page(client["name"], username, values, scopes)
         except Exception:
             pass  # Invalid / expired session cookie → fall through to login form
@@ -392,7 +447,9 @@ async def oauth_authorize_get(
 
 
 @oauth_router.post("/authorize", response_class=HTMLResponse, response_model=None)
-async def oauth_authorize_post(request: Request, services: ApplicationServices = Depends(get_services)) -> Response:
+async def oauth_authorize_post(
+    request: Request, services: ApplicationServices = Depends(get_services)
+) -> Response:
     form = await request.form()
     response_type = str(form.get("response_type", ""))
     basic_client_id, _ = _basic_client_credentials(request)
@@ -412,15 +469,26 @@ async def oauth_authorize_post(request: Request, services: ApplicationServices =
         client = await services.oauth.validate_client(client_id, redirect_uri)
         scopes = _validate_scope(scope, client, services)
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
 
     if response_type != "code":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only response_type=code is supported")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only response_type=code is supported",
+        )
     if services.settings.oauth.require_pkce and not code_challenge:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PKCE code_challenge is required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="PKCE code_challenge is required",
+        )
     code_challenge_method = _validate_pkce_method(code_challenge_method, services)
     if not approve:
-        return RedirectResponse(_append_query(redirect_uri, {"error": "access_denied", "state": state}), status_code=status.HTTP_302_FOUND)
+        return RedirectResponse(
+            _append_query(redirect_uri, {"error": "access_denied", "state": state}),
+            status_code=status.HTTP_302_FOUND,
+        )
 
     values = {
         "response_type": response_type,
@@ -445,21 +513,45 @@ async def oauth_authorize_post(request: Request, services: ApplicationServices =
             except Exception:
                 user_doc = None
         if user_doc is None:
-            return _render_login_page(client["name"], values, error="Сессия истекла. Пожалуйста, войдите снова.")
+            return _render_login_page(
+                client["name"],
+                values,
+                error="Сессия истекла. Пожалуйста, войдите снова.",
+            )
         user = services.users.to_principal(user_doc)
         # TOTP check for session-auth path too
-        if services.users.two_factor_enabled(user_doc) and not await services.users.verify_second_factor(user_doc, totp_code):
-            return _render_confirm_page(client["name"], username, values, scopes, need_totp=True, error="Неверный код аутентификатора." if totp_code else None)
+        if services.users.two_factor_enabled(
+            user_doc
+        ) and not await services.users.verify_second_factor(user_doc, totp_code):
+            return _render_confirm_page(
+                client["name"],
+                username,
+                values,
+                scopes,
+                need_totp=True,
+                error="Неверный код аутентификатора." if totp_code else None,
+            )
     else:
         # --- Password-based login flow ---
         user = await services.users.authenticate(username, password)
         if user is None:
-            return _render_login_page(client["name"], values, error="Неверное имя пользователя или пароль.")
+            return _render_login_page(
+                client["name"], values, error="Неверное имя пользователя или пароль."
+            )
         user_doc = await services.users.get_user_by_id(user.user_id)
         if not user_doc:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User does not exist")
-        if services.users.two_factor_enabled(user_doc) and not await services.users.verify_second_factor(user_doc, totp_code):
-            return _render_login_page(client["name"], values, error="Неверный код аутентификатора.", need_totp=True)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="User does not exist"
+            )
+        if services.users.two_factor_enabled(
+            user_doc
+        ) and not await services.users.verify_second_factor(user_doc, totp_code):
+            return _render_login_page(
+                client["name"],
+                values,
+                error="Неверный код аутентификатора.",
+                need_totp=True,
+            )
 
     code = await services.oauth.create_authorization_code(
         client_id=client_id,
@@ -470,11 +562,16 @@ async def oauth_authorize_post(request: Request, services: ApplicationServices =
         code_challenge_method=code_challenge_method,
         audit_ctx=audit_context_from_request(request),
     )
-    return RedirectResponse(_append_query(redirect_uri, {"code": code, "state": state}), status_code=status.HTTP_302_FOUND)
+    return RedirectResponse(
+        _append_query(redirect_uri, {"code": code, "state": state}),
+        status_code=status.HTTP_302_FOUND,
+    )
 
 
 @oauth_router.post("/token")
-async def oauth_token(request: Request, services: ApplicationServices = Depends(get_services)) -> JSONResponse:
+async def oauth_token(
+    request: Request, services: ApplicationServices = Depends(get_services)
+) -> JSONResponse:
     form = await request.form()
     grant_type = str(form.get("grant_type", ""))
     basic_client_id, _ = _basic_client_credentials(request)
@@ -482,9 +579,15 @@ async def oauth_token(request: Request, services: ApplicationServices = Depends(
     client_secret = _client_secret_from_request(request, form)
     request_meta = audit_context_from_request(request)
     try:
-        await services.rate_limiter.enforce("oauth_token", f"{client_id}:{request_meta.actor.ip or 'anonymous'}")
+        await services.rate_limiter.enforce(
+            "oauth_token", f"{client_id}:{request_meta.actor.ip or 'anonymous'}"
+        )
     except RateLimitError as exc:
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many token requests", headers={"Retry-After": str(exc.retry_after)}) from exc
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many token requests",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
 
     if grant_type == "authorization_code":
         code = str(form.get("code", ""))
@@ -500,29 +603,51 @@ async def oauth_token(request: Request, services: ApplicationServices = Depends(
                 audit_ctx=request_meta,
             )
         except LookupError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            ) from exc
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
         return JSONResponse(payload)
 
     if grant_type == "refresh_token":
         refresh_token = str(form.get("refresh_token", ""))
         try:
-            payload = await services.oauth.refresh_token(refresh_token=refresh_token, client_id=client_id, client_secret=client_secret, audit_ctx=request_meta)
+            payload = await services.oauth.refresh_token(
+                refresh_token=refresh_token,
+                client_id=client_id,
+                client_secret=client_secret,
+                audit_ctx=request_meta,
+            )
         except LookupError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            ) from exc
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
         return JSONResponse(payload)
 
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported grant_type")
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported grant_type"
+    )
 
 
 @oauth_router.post("/revoke", status_code=status.HTTP_200_OK)
-async def oauth_revoke(request: Request, token: str = Form(...), client_id: str | None = Form(default=None), services: ApplicationServices = Depends(get_services)) -> dict[str, bool]:
+async def oauth_revoke(
+    request: Request,
+    token: str = Form(...),
+    client_id: str | None = Form(default=None),
+    services: ApplicationServices = Depends(get_services),
+) -> dict[str, bool]:
     form = await request.form()
     basic_client_id, _ = _basic_client_credentials(request)
-    await services.oauth.revoke_token(token, client_id or basic_client_id, _client_secret_from_request(request, form))
+    await services.oauth.revoke_token(
+        token, client_id or basic_client_id, _client_secret_from_request(request, form)
+    )
     return {"revoked": True}
 
 
@@ -533,45 +658,71 @@ async def oauth_clients(
     current_user: UserPrincipal = Depends(require_permission("oauth.clients.manage")),
 ) -> list[OAuthClientResponse]:
     await enforce_api_rate_limit(request, services, user=current_user)
-    return [OAuthClientResponse.model_validate(item) for item in await services.oauth.list_clients()]
+    return [
+        OAuthClientResponse.model_validate(item)
+        for item in await services.oauth.list_clients()
+    ]
 
 
-@oauth_router.post("/clients", response_model=OAuthClientResponse, status_code=status.HTTP_201_CREATED)
+@oauth_router.post(
+    "/clients", response_model=OAuthClientResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_oauth_client(
     payload: OAuthClientCreateRequest,
     request: Request,
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(require_permission("oauth.clients.manage")),
 ) -> OAuthClientResponse:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
     try:
-        client = await services.oauth.create_client(payload.name, payload.redirect_uris, payload.allowed_scopes, payload.client_id, payload.confidential)
+        client = await services.oauth.create_client(
+            payload.name,
+            payload.redirect_uris,
+            payload.allowed_scopes,
+            payload.client_id,
+            payload.confidential,
+        )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     await services.audit.record(
         "oauth.client.create",
         actor=current_user,
         audit_ctx=audit_context_from_request(request),
         target={"client_id": client["client_id"]},
-        metadata={"redirect_uris": payload.redirect_uris, "allowed_scopes": payload.allowed_scopes},
+        metadata={
+            "redirect_uris": payload.redirect_uris,
+            "allowed_scopes": payload.allowed_scopes,
+        },
     )
     return OAuthClientResponse.model_validate(client)
 
 
-@oauth_router.post("/clients/{client_id}/secret/rotate", response_model=OAuthClientSecretRotateResponse)
+@oauth_router.post(
+    "/clients/{client_id}/secret/rotate", response_model=OAuthClientSecretRotateResponse
+)
 async def rotate_oauth_client_secret(
     client_id: str,
     request: Request,
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(require_permission("oauth.clients.manage")),
 ) -> OAuthClientSecretRotateResponse:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
     try:
         rotated = await services.oauth.rotate_client_secret(client_id)
     except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     await services.audit.record(
         "oauth.client.secret.rotate",
         actor=current_user,
@@ -589,11 +740,20 @@ async def register_oauth_client(
 ) -> JSONResponse:
     await enforce_api_rate_limit(request, services, policy_name="rest_write")
     if payload.token_endpoint_auth_method != "none":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only public OAuth clients are supported")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only public OAuth clients are supported",
+        )
     if "authorization_code" not in payload.grant_types:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="authorization_code grant is required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="authorization_code grant is required",
+        )
     if "code" not in payload.response_types:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="code response type is required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="code response type is required",
+        )
 
     requested_scopes = [scope for scope in (payload.scope or "mcp").split(" ") if scope]
     try:
@@ -605,13 +765,18 @@ async def register_oauth_client(
             confidential=False,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     await services.audit.record(
         "oauth.client.dynamic_register",
         actor=None,
         audit_ctx=audit_context_from_request(request),
         target={"client_id": client["client_id"]},
-        metadata={"redirect_uris": payload.redirect_uris, "allowed_scopes": client["allowed_scopes"]},
+        metadata={
+            "redirect_uris": payload.redirect_uris,
+            "allowed_scopes": client["allowed_scopes"],
+        },
     )
     return JSONResponse(
         {
@@ -633,7 +798,9 @@ async def oauth_jwks() -> dict[str, list]:
 
 
 @well_known_router.get("/.well-known/oauth-authorization-server")
-async def well_known_authorization_server(request: Request, services: ApplicationServices = Depends(get_services)) -> dict[str, object]:
+async def well_known_authorization_server(
+    request: Request, services: ApplicationServices = Depends(get_services)
+) -> dict[str, object]:
     return services.oauth.authorization_server_metadata(base_url=str(request.base_url))
 
 
@@ -648,7 +815,10 @@ async def well_known_authorization_server_path(
         services.settings.mcp_path.rstrip("/"),
     }
     if issuer_path.rstrip("/") not in metadata_paths:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Authorization server metadata not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Authorization server metadata not found",
+        )
     return services.oauth.authorization_server_metadata(base_url=str(request.base_url))
 
 
@@ -659,17 +829,29 @@ async def well_known_authorization_server_resource(
     services: ApplicationServices = Depends(get_services),
 ) -> dict[str, object]:
     if resource_path.rstrip("/") != services.settings.mcp_path.rstrip("/"):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Authorization server metadata not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Authorization server metadata not found",
+        )
     return services.oauth.authorization_server_metadata(base_url=str(request.base_url))
 
 
 @well_known_router.get("/.well-known/oauth-protected-resource")
-async def well_known_protected_resource_root(request: Request, services: ApplicationServices = Depends(get_services)) -> dict[str, object]:
+async def well_known_protected_resource_root(
+    request: Request, services: ApplicationServices = Depends(get_services)
+) -> dict[str, object]:
     return services.oauth.protected_resource_metadata(base_url=str(request.base_url))
 
 
 @well_known_router.get("/.well-known/oauth-protected-resource{resource_path:path}")
-async def well_known_protected_resource(request: Request, resource_path: str, services: ApplicationServices = Depends(get_services)) -> dict[str, object]:
+async def well_known_protected_resource(
+    request: Request,
+    resource_path: str,
+    services: ApplicationServices = Depends(get_services),
+) -> dict[str, object]:
     if resource_path.rstrip("/") != services.settings.mcp_path:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Protected resource metadata not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Protected resource metadata not found",
+        )
     return services.oauth.protected_resource_metadata(base_url=str(request.base_url))

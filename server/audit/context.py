@@ -22,27 +22,29 @@ def client_ip_from_request(request: Request, settings: Settings) -> str | None:
     return forwarded.split(",")[0].strip() or peer_ip
 
 
-def audit_context_from_request(request: Request, settings: Settings | None = None) -> AuditContext:
+def audit_context_from_request(
+    request: Request, settings: Settings | None = None
+) -> AuditContext:
     if settings is None:
         state = getattr(getattr(request, "app", None), "state", None)
         settings = getattr(getattr(state, "services", None), "settings", None)
-    
+
     # Check if a correlation_id is already assigned by middleware
     correlation_id = getattr(request.state, "correlation_id", None)
     if not correlation_id:
         correlation_id = str(uuid.uuid4())
-        
+
     actor = AuditActor(
         ip=client_ip_from_request(request, settings) if settings else None,
         user_agent=request.headers.get("user-agent"),
-        connection_type="Browser", # Default, could be enriched later
+        connection_type="Browser",  # Default, could be enriched later
     )
-    
+
     source = AuditSource(
         module="web.api",
         hostname=request.url.hostname,
     )
-    
+
     return AuditContext(
         correlation_id=correlation_id,
         actor=actor,

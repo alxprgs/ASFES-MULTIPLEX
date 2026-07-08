@@ -1,4 +1,3 @@
-
 from server.audit.models import BaseAuditEventEnvelope
 
 
@@ -6,7 +5,7 @@ class AuditEnricher:
     """Pure function layer to enrich events with additional context before saving."""
 
     def enrich(self, event: BaseAuditEventEnvelope) -> BaseAuditEventEnvelope:
-        # Currently, the parsing logic can go here. 
+        # Currently, the parsing logic can go here.
         # For example, interpreting User-Agent to determine AI Assistant names
         if event.actor.user_agent:
             ua = event.actor.user_agent.lower()
@@ -20,7 +19,7 @@ class AuditEnricher:
                 event.actor.ai_assistant_name = "Rooc"
             elif "antigravity" in ua:
                 event.actor.ai_assistant_name = "Antigravity"
-            
+
             # Simple connection type fallback if not set
             if not event.actor.connection_type:
                 if "mozilla" in ua or "chrome" in ua or "safari" in ua:
@@ -28,4 +27,3 @@ class AuditEnricher:
                 else:
                     event.actor.connection_type = "API / CLI"
         return event
-

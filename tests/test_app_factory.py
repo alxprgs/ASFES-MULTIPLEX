@@ -14,6 +14,7 @@ from server.core.config import settings
 @pytest.mark.asyncio
 async def test_exact_path_slash_middleware() -> None:
     called_scopes = []
+
     async def mock_app(scope, receive, send):
         called_scopes.append(scope)
         return
@@ -112,11 +113,14 @@ async def test_lifespan_context() -> None:
     mock_services.audit.start = AsyncMock()
     mock_services.audit_archiver.start = AsyncMock()
 
-    with patch("server.app.IntegrityLogManager") as mock_log_mgr_cls, \
-         patch("server.app.build_application_services", return_value=mock_services) as mock_build_svcs, \
-         patch("server.app.periodic_integrity_verifier"), \
-         patch("server.app.shutdown_application_services") as mock_shutdown_svcs:
-
+    with (
+        patch("server.app.IntegrityLogManager") as mock_log_mgr_cls,
+        patch(
+            "server.app.build_application_services", return_value=mock_services
+        ) as mock_build_svcs,
+        patch("server.app.periodic_integrity_verifier"),
+        patch("server.app.shutdown_application_services") as mock_shutdown_svcs,
+    ):
         # Temporarily change startup_progress to False for easier testing
         with patch("server.app.settings") as mock_settings:
             mock_settings.app.startup_progress = False

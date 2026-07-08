@@ -12,7 +12,9 @@ async def test_list_tools_reports_unavailable_metadata(integration_env) -> None:
     async def unavailable(_services):
         return RuntimeAvailability(available=False, reason="Missing backend")
 
-    services.plugins.plugins["docker"].tools["docker.list_containers"].availability = unavailable
+    services.plugins.plugins["docker"].tools[
+        "docker.list_containers"
+    ].availability = unavailable
     tools = {item["key"]: item for item in await services.plugins.list_tools()}
     assert tools["docker.list_containers"]["available"] is False
     assert tools["docker.list_containers"]["availability_reason"] == "Missing backend"
@@ -53,12 +55,19 @@ async def test_call_tool_redacts_arguments_in_audit(integration_env) -> None:
 
     await services.audit._flush()
     events = await services.audit.list_events()
-    tool_event = next(item for item in events if item["event_type"] == "mcp.tool.call" and item["target"]["tool_key"] == "docker.restart_container")
+    tool_event = next(
+        item
+        for item in events
+        if item["event_type"] == "mcp.tool.call"
+        and item["target"]["tool_key"] == "docker.restart_container"
+    )
     assert tool_event["metadata"]["arguments"]["container"] == "[REDACTED]"
 
 
 @pytest.mark.asyncio
-async def test_set_plugin_enabled_records_detailed_audit_metadata(integration_env) -> None:
+async def test_set_plugin_enabled_records_detailed_audit_metadata(
+    integration_env,
+) -> None:
     services = integration_env["services"]
     cfg = integration_env["settings"]
     user_doc = await services.users.get_user_by_username(cfg.root.username)
@@ -74,7 +83,12 @@ async def test_set_plugin_enabled_records_detailed_audit_metadata(integration_en
 
     await services.audit._flush()
     events = await services.audit.list_events()
-    event = next(item for item in events if item["event_type"] == "mcp.plugin.update" and item["target"]["plugin_key"] == "docker")
+    event = next(
+        item
+        for item in events
+        if item["event_type"] == "mcp.plugin.update"
+        and item["target"]["plugin_key"] == "docker"
+    )
     assert event["metadata"]["enabled"] is False
     assert event["metadata"]["previous_enabled"] is True
     assert event["metadata"]["changed"] is True
@@ -82,7 +96,9 @@ async def test_set_plugin_enabled_records_detailed_audit_metadata(integration_en
 
 
 @pytest.mark.asyncio
-async def test_set_global_tool_enabled_records_detailed_audit_metadata(integration_env) -> None:
+async def test_set_global_tool_enabled_records_detailed_audit_metadata(
+    integration_env,
+) -> None:
     services = integration_env["services"]
     cfg = integration_env["settings"]
     user_doc = await services.users.get_user_by_username(cfg.root.username)
@@ -98,7 +114,12 @@ async def test_set_global_tool_enabled_records_detailed_audit_metadata(integrati
 
     await services.audit._flush()
     events = await services.audit.list_events()
-    event = next(item for item in events if item["event_type"] == "mcp.tool.global.update" and item["target"]["tool_key"] == "docker.list_containers")
+    event = next(
+        item
+        for item in events
+        if item["event_type"] == "mcp.tool.global.update"
+        and item["target"]["tool_key"] == "docker.list_containers"
+    )
     assert event["metadata"]["enabled"] is True
     assert event["metadata"]["previous_enabled"] is False
     assert event["metadata"]["changed"] is True
@@ -107,7 +128,9 @@ async def test_set_global_tool_enabled_records_detailed_audit_metadata(integrati
 
 
 @pytest.mark.asyncio
-async def test_reload_plugins_calls_old_shutdown_before_reload(integration_env, monkeypatch) -> None:
+async def test_reload_plugins_calls_old_shutdown_before_reload(
+    integration_env, monkeypatch
+) -> None:
     registry = integration_env["services"].plugins
     order: list[str] = []
 
@@ -118,7 +141,9 @@ async def test_reload_plugins_calls_old_shutdown_before_reload(integration_env, 
         order.append(f"load:{module_name}:{reload_existing}")
 
     registry.plugins["dummy"] = PluginDefinition(
-        manifest=PluginManifest(key="dummy", name="Dummy", version="1.0.0", description="dummy"),
+        manifest=PluginManifest(
+            key="dummy", name="Dummy", version="1.0.0", description="dummy"
+        ),
         tools={},
         shutdown=fake_shutdown,
     )

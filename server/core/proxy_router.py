@@ -2,6 +2,7 @@
 Proxy routing layer — pure transport concern.
 Decoupled from download logic so each layer stays focused.
 """
+
 from __future__ import annotations
 
 import asyncio

@@ -17,7 +17,11 @@ from server.core.middleware import AuditMetricsMiddleware
 from server.mcp import create_mcp_gateway
 from server.routes import api_router, root_router
 from server.routes.pypi import simple_router as pypi_simple_router
-from server.services import build_application_services, periodic_integrity_verifier, shutdown_application_services
+from server.services import (
+    build_application_services,
+    periodic_integrity_verifier,
+    shutdown_application_services,
+)
 
 
 LOGGER = get_logger("multiplex.startup")
@@ -39,7 +43,9 @@ class ExactPathSlashMiddleware:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     mailer = Mailer(settings.smtp)
-    logger_manager = IntegrityLogManager(settings.logging, mailer, str(settings.root.email))
+    logger_manager = IntegrityLogManager(
+        settings.logging, mailer, str(settings.root.email)
+    )
     logger_manager.initialize()
     services = None
     try:
@@ -52,17 +58,33 @@ async def lifespan(app: FastAPI):
                 console=console,
             ) as progress:
                 task_id = progress.add_task("Preparing Multiplex logger", total=4)
-                progress.update(task_id, completed=1, description="Connecting MongoDB and creating indexes")
-                services = await build_application_services(settings, logger_manager, mailer)
-                progress.update(task_id, completed=2, description="Loading plugins and permissions")
-                progress.update(task_id, completed=3, description="Starting integrity verifier")
-                services.verifier_task = asyncio.create_task(periodic_integrity_verifier(services))
+                progress.update(
+                    task_id,
+                    completed=1,
+                    description="Connecting MongoDB and creating indexes",
+                )
+                services = await build_application_services(
+                    settings, logger_manager, mailer
+                )
+                progress.update(
+                    task_id, completed=2, description="Loading plugins and permissions"
+                )
+                progress.update(
+                    task_id, completed=3, description="Starting integrity verifier"
+                )
+                services.verifier_task = asyncio.create_task(
+                    periodic_integrity_verifier(services)
+                )
                 await services.audit.start()
                 await services.audit_archiver.start()
                 progress.update(task_id, completed=4, description="Startup complete")
         else:
-            services = await build_application_services(settings, logger_manager, mailer)
-            services.verifier_task = asyncio.create_task(periodic_integrity_verifier(services))
+            services = await build_application_services(
+                settings, logger_manager, mailer
+            )
+            services.verifier_task = asyncio.create_task(
+                periodic_integrity_verifier(services)
+            )
             await services.audit.start()
             await services.audit_archiver.start()
 
@@ -89,7 +111,9 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     docs_url = f"{settings.api_prefix}/docs" if settings.api_docs_enabled else None
-    openapi_url = f"{settings.api_prefix}/openapi.json" if settings.api_docs_enabled else None
+    openapi_url = (
+        f"{settings.api_prefix}/openapi.json" if settings.api_docs_enabled else None
+    )
     redoc_url = f"{settings.api_prefix}/redoc" if settings.api_docs_enabled else None
 
     app = FastAPI(
@@ -106,7 +130,9 @@ def create_app() -> FastAPI:
     app.state.mcp_gateway = mcp_gateway
     app.include_router(root_router)
     app.include_router(api_router, prefix=settings.api_prefix)
-    app.include_router(pypi_simple_router)  # pip-compatible Simple API — before frontend catch-all
+    app.include_router(
+        pypi_simple_router
+    )  # pip-compatible Simple API — before frontend catch-all
     app.mount(settings.mcp_path, mcp_gateway.http_app)
     mount_frontend(app, settings)
     return app
@@ -115,11 +141,27 @@ def create_app() -> FastAPI:
 def mount_frontend(app: FastAPI, app_settings: Settings) -> None:
     frontend_dist = app_settings.app.frontend_dist
     assets_dir = frontend_dist / "assets"
-    app.mount("/assets", StaticFiles(directory=str(assets_dir), check_dir=False), name="frontend-assets")
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(assets_dir), check_dir=False),
+        name="frontend-assets",
+    )
 
     _ALLOWED_EXTENSIONS = {
-        ".html", ".js", ".css", ".svg", ".png", ".ico", ".webp",
-        ".woff", ".woff2", ".ttf", ".eot", ".json", ".txt", ".xml",
+        ".html",
+        ".js",
+        ".css",
+        ".svg",
+        ".png",
+        ".ico",
+        ".webp",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".eot",
+        ".json",
+        ".txt",
+        ".xml",
     }
 
     @app.get("/", include_in_schema=False)
@@ -137,7 +179,7 @@ def mount_frontend(app: FastAPI, app_settings: Settings) -> None:
 
         if frontend_path:
             file_path = frontend_dist / frontend_path
-            
+
             # Additional layer of defense against path traversal
             try:
                 file_path = file_path.resolve()

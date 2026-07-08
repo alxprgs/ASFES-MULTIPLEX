@@ -4,7 +4,6 @@ import pytest
 from unittest.mock import AsyncMock
 
 
-
 @pytest.mark.asyncio
 async def test_proxy_crud_and_isolation(integration_env) -> None:
     client = integration_env["client"]
@@ -13,20 +12,29 @@ async def test_proxy_crud_and_isolation(integration_env) -> None:
     # 1. Login as root
     root_login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     assert root_login.status_code == 200
     root_access = root_login.json()["access_token"]
     root_headers = {"Authorization": f"Bearer {root_access}"}
 
     # 2. Add Alice user
-    await client.put("/api/settings/registration", headers=root_headers, json={"enabled": True})
+    await client.put(
+        "/api/settings/registration", headers=root_headers, json={"enabled": True}
+    )
     register = await client.post(
         "/api/auth/register",
-        json={"username": "alice", "password": "AlicePassword123!", "email": "alice@example.com"},
+        json={
+            "username": "alice",
+            "password": "AlicePassword123!",
+            "email": "alice@example.com",
+        },
     )
     assert register.status_code == 201
-    
+
     # Login as Alice
     alice_login = await client.post(
         "/api/auth/login",
@@ -44,7 +52,9 @@ async def test_proxy_crud_and_isolation(integration_env) -> None:
         "password": "alice_password",
         "label": "Alice Socks",
     }
-    create_resp = await client.post("/api/proxy/proxies", headers=alice_headers, json=proxy_payload)
+    create_resp = await client.post(
+        "/api/proxy/proxies", headers=alice_headers, json=proxy_payload
+    )
     assert create_resp.status_code == 201
     proxy_data = create_resp.json()
     assert proxy_data["host"] == "1.1.1.1"
@@ -64,7 +74,9 @@ async def test_proxy_crud_and_isolation(integration_env) -> None:
     assert len(root_list_resp.json()) == 0
 
     # 6. Duplicate proxy insertion by Alice should fail
-    dup_resp = await client.post("/api/proxy/proxies", headers=alice_headers, json=proxy_payload)
+    dup_resp = await client.post(
+        "/api/proxy/proxies", headers=alice_headers, json=proxy_payload
+    )
     assert dup_resp.status_code == 400
     assert "already exists" in dup_resp.json()["detail"]
 
@@ -74,7 +86,9 @@ async def test_proxy_crud_and_isolation(integration_env) -> None:
         "protocol": "http",
         "label": "Bob Http",
     }
-    url_resp = await client.post("/api/proxy/proxies/from-url", headers=alice_headers, json=url_payload)
+    url_resp = await client.post(
+        "/api/proxy/proxies/from-url", headers=alice_headers, json=url_payload
+    )
     assert url_resp.status_code == 201
     assert url_resp.json()["host"] == "2.2.2.2"
     assert url_resp.json()["port"] == 8080
@@ -87,29 +101,40 @@ async def test_proxy_crud_and_isolation(integration_env) -> None:
     # 8. Export checks
     # Export URL
     p_id = proxy_data["proxy_id"]
-    exp_url = await client.get(f"/api/proxy/proxies/{p_id}/export/url", headers=alice_headers)
+    exp_url = await client.get(
+        f"/api/proxy/proxies/{p_id}/export/url", headers=alice_headers
+    )
     assert exp_url.status_code == 200
     assert exp_url.json()["url"] == "socks5://alice_user:alice_password@1.1.1.1:1080"
 
     # Export Lines
-    exp_lines = await client.get(f"/api/proxy/proxies/{p_id}/export/lines", headers=alice_headers)
+    exp_lines = await client.get(
+        f"/api/proxy/proxies/{p_id}/export/lines", headers=alice_headers
+    )
     assert exp_lines.status_code == 200
     assert exp_lines.json()["lines"] == "alice_user\nalice_password\n1.1.1.1\n1080"
 
     # Export TG (SOCKS5 is supported)
-    exp_tg = await client.get(f"/api/proxy/proxies/{p_id}/export/tg?secret=dd112233", headers=alice_headers)
+    exp_tg = await client.get(
+        f"/api/proxy/proxies/{p_id}/export/tg?secret=dd112233", headers=alice_headers
+    )
     assert exp_tg.status_code == 200
-    assert "tg://proxy?server=1.1.1.1&port=1080&secret=dd112233" in exp_tg.json()["deep_link"]
+    assert (
+        "tg://proxy?server=1.1.1.1&port=1080&secret=dd112233"
+        in exp_tg.json()["deep_link"]
+    )
 
     # Export TG (HTTP is not supported for TG proxy)
     bob_id = url_resp.json()["proxy_id"]
-    exp_tg_err = await client.get(f"/api/proxy/proxies/{bob_id}/export/tg", headers=alice_headers)
+    exp_tg_err = await client.get(
+        f"/api/proxy/proxies/{bob_id}/export/tg", headers=alice_headers
+    )
     assert exp_tg_err.status_code == 400
 
     # 9. Delete proxy
     del_resp = await client.delete(f"/api/proxy/proxies/{p_id}", headers=alice_headers)
     assert del_resp.status_code == 200
-    
+
     # Alice now has 1 proxy left
     list_resp = await client.get("/api/proxy/proxies", headers=alice_headers)
     assert len(list_resp.json()) == 1
@@ -123,7 +148,10 @@ async def test_proxifier_import_export(integration_env) -> None:
     # Login root
     root_login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {root_login.json()['access_token']}"}
 
@@ -185,12 +213,17 @@ async def test_proxy_limits(integration_env, monkeypatch) -> None:
     cfg = integration_env["settings"]
 
     # Mock count_proxies to return 500 (simulate limit)
-    monkeypatch.setattr(services.proxy_service, "count_proxies", AsyncMock(return_value=500))
+    monkeypatch.setattr(
+        services.proxy_service, "count_proxies", AsyncMock(return_value=500)
+    )
 
     # Login root
     root_login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {root_login.json()['access_token']}"}
 
@@ -212,7 +245,10 @@ async def test_proxy_check_all_background(integration_env) -> None:
     # Login root
     root_login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {root_login.json()['access_token']}"}
 

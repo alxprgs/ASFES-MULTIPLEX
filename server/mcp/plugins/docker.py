@@ -5,8 +5,20 @@ import json
 import shutil
 from typing import Any
 
-from server.mcp.plugins._common import int_argument, parse_json_lines, require_argument, static_availability
-from server.models import MCPTool, MCPToolManifest, PermissionDefinition, PluginDefinition, PluginManifest, ToolExecutionContext
+from server.mcp.plugins._common import (
+    int_argument,
+    parse_json_lines,
+    require_argument,
+    static_availability,
+)
+from server.models import (
+    MCPTool,
+    MCPToolManifest,
+    PermissionDefinition,
+    PluginDefinition,
+    PluginManifest,
+    ToolExecutionContext,
+)
 
 
 def _docker_executable() -> str:
@@ -25,10 +37,16 @@ async def _run_docker_command(*args: str) -> tuple[int, str, str]:
         stderr=asyncio.subprocess.PIPE,
     )
     stdout, stderr = await process.communicate()
-    return process.returncode, stdout.decode("utf-8", errors="replace"), stderr.decode("utf-8", errors="replace")
+    return (
+        process.returncode,
+        stdout.decode("utf-8", errors="replace"),
+        stderr.decode("utf-8", errors="replace"),
+    )
 
 
-async def list_containers(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def list_containers(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     command = ["ps", "--format", "{{json .}}"]
     if arguments.get("all"):
         command.insert(1, "-a")
@@ -39,16 +57,23 @@ async def list_containers(context: ToolExecutionContext, arguments: dict[str, An
     return {"containers": containers, "count": len(containers)}
 
 
-async def restart_container(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def restart_container(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     container = require_argument(arguments, "container")
     returncode, stdout, stderr = await _run_docker_command("restart", str(container))
     if returncode != 0:
         raise RuntimeError(stderr.strip() or "docker restart failed")
     restarted = [line.strip() for line in stdout.splitlines() if line.strip()]
-    return {"restarted": restarted or [container], "requested_by": context.user.username}
+    return {
+        "restarted": restarted or [container],
+        "requested_by": context.user.username,
+    }
 
 
-async def start_container(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def start_container(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     container = require_argument(arguments, "container")
     returncode, stdout, stderr = await _run_docker_command("start", str(container))
     if returncode != 0:
@@ -57,7 +82,9 @@ async def start_container(context: ToolExecutionContext, arguments: dict[str, An
     return {"started": started or [container], "requested_by": context.user.username}
 
 
-async def stop_container(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def stop_container(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     container = require_argument(arguments, "container")
     returncode, stdout, stderr = await _run_docker_command("stop", str(container))
     if returncode != 0:
@@ -66,16 +93,22 @@ async def stop_container(context: ToolExecutionContext, arguments: dict[str, Any
     return {"stopped": stopped or [container], "requested_by": context.user.username}
 
 
-async def container_logs(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def container_logs(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     container = require_argument(arguments, "container")
     tail_lines = min(max(1, int_argument(arguments, "tail_lines", 200)), 500)
-    returncode, stdout, stderr = await _run_docker_command("logs", "--tail", str(max(1, tail_lines)), str(container))
+    returncode, stdout, stderr = await _run_docker_command(
+        "logs", "--tail", str(max(1, tail_lines)), str(container)
+    )
     if returncode != 0:
         raise RuntimeError(stderr.strip() or "docker logs failed")
     return {"container": container, "tail_lines": max(1, tail_lines), "logs": stdout}
 
 
-async def inspect_container(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def inspect_container(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     container = require_argument(arguments, "container")
     returncode, stdout, stderr = await _run_docker_command("inspect", str(container))
     if returncode != 0:
@@ -108,10 +141,15 @@ def _redact_env_value(value: str) -> str:
 
 def _looks_sensitive(name: str) -> bool:
     lowered = name.lower()
-    return any(marker in lowered for marker in ("password", "passwd", "secret", "token", "key", "credential"))
+    return any(
+        marker in lowered
+        for marker in ("password", "passwd", "secret", "token", "key", "credential")
+    )
 
 
-async def container_stats(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def container_stats(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     container = require_argument(arguments, "container")
     returncode, stdout, stderr = await _run_docker_command(
         "stats",
@@ -133,10 +171,22 @@ PLUGIN = PluginDefinition(
         version="1.1.0",
         description="Управляет локальными Docker-контейнерами через защищённые MCP-инструменты.",
         permissions=[
-            PermissionDefinition(key="docker.containers.read", description="Читать статус, логи и метрики Docker-контейнеров."),
-            PermissionDefinition(key="docker.containers.start", description="Запускать Docker-контейнеры с MCP-сервера."),
-            PermissionDefinition(key="docker.containers.stop", description="Останавливать Docker-контейнеры с MCP-сервера."),
-            PermissionDefinition(key="docker.containers.restart", description="Перезапускать Docker-контейнеры с MCP-сервера."),
+            PermissionDefinition(
+                key="docker.containers.read",
+                description="Читать статус, логи и метрики Docker-контейнеров.",
+            ),
+            PermissionDefinition(
+                key="docker.containers.start",
+                description="Запускать Docker-контейнеры с MCP-сервера.",
+            ),
+            PermissionDefinition(
+                key="docker.containers.stop",
+                description="Останавливать Docker-контейнеры с MCP-сервера.",
+            ),
+            PermissionDefinition(
+                key="docker.containers.restart",
+                description="Перезапускать Docker-контейнеры с MCP-сервера.",
+            ),
         ],
         required_backends=["docker"],
     ),
@@ -173,7 +223,12 @@ PLUGIN = PluginDefinition(
                 input_schema={
                     "type": "object",
                     "required": ["container"],
-                    "properties": {"container": {"type": "string", "description": "Docker container name or container ID."}},
+                    "properties": {
+                        "container": {
+                            "type": "string",
+                            "description": "Docker container name or container ID.",
+                        }
+                    },
                     "additionalProperties": False,
                 },
                 permissions=["docker.containers.read"],
@@ -194,8 +249,14 @@ PLUGIN = PluginDefinition(
                     "type": "object",
                     "required": ["container"],
                     "properties": {
-                        "container": {"type": "string", "description": "Docker container name or ID."},
-                        "tail_lines": {"type": "integer", "description": "Maximum number of log lines to return."},
+                        "container": {
+                            "type": "string",
+                            "description": "Docker container name or ID.",
+                        },
+                        "tail_lines": {
+                            "type": "integer",
+                            "description": "Maximum number of log lines to return.",
+                        },
                     },
                     "additionalProperties": False,
                 },
@@ -216,7 +277,12 @@ PLUGIN = PluginDefinition(
                 input_schema={
                     "type": "object",
                     "required": ["container"],
-                    "properties": {"container": {"type": "string", "description": "Docker container name or ID."}},
+                    "properties": {
+                        "container": {
+                            "type": "string",
+                            "description": "Docker container name or ID.",
+                        }
+                    },
                     "additionalProperties": False,
                 },
                 permissions=["docker.containers.read"],
@@ -236,7 +302,12 @@ PLUGIN = PluginDefinition(
                 input_schema={
                     "type": "object",
                     "required": ["container"],
-                    "properties": {"container": {"type": "string", "description": "Docker container name or ID."}},
+                    "properties": {
+                        "container": {
+                            "type": "string",
+                            "description": "Docker container name or ID.",
+                        }
+                    },
                     "additionalProperties": False,
                 },
                 permissions=["docker.containers.start"],
@@ -256,7 +327,12 @@ PLUGIN = PluginDefinition(
                 input_schema={
                     "type": "object",
                     "required": ["container"],
-                    "properties": {"container": {"type": "string", "description": "Docker container name or ID."}},
+                    "properties": {
+                        "container": {
+                            "type": "string",
+                            "description": "Docker container name or ID.",
+                        }
+                    },
                     "additionalProperties": False,
                 },
                 permissions=["docker.containers.stop"],

@@ -19,7 +19,10 @@ async def test_api_keys_full_flow(integration_env) -> None:
     # 1. Login as root
     login_resp = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     assert login_resp.status_code == 200
     access_token = login_resp.json()["access_token"]
@@ -88,7 +91,9 @@ async def test_api_keys_full_flow(integration_env) -> None:
     assert matched2[0]["name"] == "Antigravity Updated Key"
 
     # 7. Revoke API key
-    revoke_resp = await client.delete(f"/api/auth/api-keys/{key_id}", headers=auth_headers)
+    revoke_resp = await client.delete(
+        f"/api/auth/api-keys/{key_id}", headers=auth_headers
+    )
     assert revoke_resp.status_code == 204
 
     # Verify it is no longer usable (401)
@@ -104,7 +109,10 @@ async def test_api_keys_max_limit(integration_env) -> None:
     # Login
     login_resp = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     access_token = login_resp.json()["access_token"]
     auth_headers = {"Authorization": f"Bearer {access_token}"}
@@ -137,7 +145,10 @@ async def test_api_keys_expiration(integration_env) -> None:
     # Login
     login_resp = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     access_token = login_resp.json()["access_token"]
     auth_headers = {"Authorization": f"Bearer {access_token}"}

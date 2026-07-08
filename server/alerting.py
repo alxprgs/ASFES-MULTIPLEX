@@ -32,7 +32,13 @@ class AlertEvaluation:
 
 
 class AlertingService:
-    def __init__(self, db: DatabaseManager, host_ops: HostOpsService, mailer: Mailer, poll_interval_seconds: int) -> None:
+    def __init__(
+        self,
+        db: DatabaseManager,
+        host_ops: HostOpsService,
+        mailer: Mailer,
+        poll_interval_seconds: int,
+    ) -> None:
         self.db = db
         self.host_ops = host_ops
         self.mailer = mailer
@@ -62,7 +68,9 @@ class AlertingService:
 
     async def upsert_rule(self, payload: dict[str, Any]) -> dict[str, Any]:
         rule = self._normalize_rule(payload)
-        rule_id = str(payload.get("rule_id") or payload.get("_id") or f"alert_{uuid4().hex}")
+        rule_id = str(
+            payload.get("rule_id") or payload.get("_id") or f"alert_{uuid4().hex}"
+        )
         current = await self.db.collection(ALERT_RULES).find_one({"_id": rule_id})
         created_at = current.get("created_at") if current else now_utc()
         document = {
@@ -72,17 +80,23 @@ class AlertingService:
             "updated_at": now_utc(),
             "last_triggered_at": current.get("last_triggered_at") if current else None,
         }
-        await self.db.collection(ALERT_RULES).replace_one({"_id": rule_id}, document, upsert=True)
+        await self.db.collection(ALERT_RULES).replace_one(
+            {"_id": rule_id}, document, upsert=True
+        )
         return self._serialize_rule(document)
 
     async def delete_rule(self, rule_id: str) -> dict[str, Any]:
-        deleted = await self.db.collection(ALERT_RULES).find_one_and_delete({"_id": rule_id})
+        deleted = await self.db.collection(ALERT_RULES).find_one_and_delete(
+            {"_id": rule_id}
+        )
         if not deleted:
             raise LookupError("Alert rule not found")
         return {"rule_id": rule_id, "deleted": True}
 
     async def list_events(self, limit: int = 100) -> list[dict[str, Any]]:
-        cursor = self.db.collection(ALERT_EVENTS).find().sort("created_at", -1).limit(limit)
+        cursor = (
+            self.db.collection(ALERT_EVENTS).find().sort("created_at", -1).limit(limit)
+        )
         items: list[dict[str, Any]] = []
         async for item in cursor:
             items.append(
@@ -114,7 +128,13 @@ class AlertingService:
             triggered += 1
         return {"checked": checked, "triggered": triggered}
 
-    async def send_test_notification(self, recipients: list[str], *, subject: str | None = None, body: str | None = None) -> dict[str, Any]:
+    async def send_test_notification(
+        self,
+        recipients: list[str],
+        *,
+        subject: str | None = None,
+        body: str | None = None,
+    ) -> dict[str, Any]:
         if not recipients:
             raise ValueError("At least one recipient is required")
         sent_to: list[str] = []
@@ -143,7 +163,11 @@ class AlertingService:
             raise ValueError("selector must be an object")
         value = await self._resolve_source_value(source, selector)
         matched = self._compare(value, str(rule["condition"]), rule.get("threshold"))
-        return AlertEvaluation(matched=matched, value=value, summary=f"{source} {rule['condition']} {rule.get('threshold')}")
+        return AlertEvaluation(
+            matched=matched,
+            value=value,
+            summary=f"{source} {rule['condition']} {rule.get('threshold')}",
+        )
 
     async def _resolve_source_value(self, source: str, selector: dict[str, Any]) -> Any:
         if source == "system.cpu_percent":
@@ -155,7 +179,9 @@ class AlertingService:
             return _psutil.cpu_percent(interval=0.1)
         if source == "system.memory_percent":
             if not self.host_ops.psutil_available():
-                raise RuntimeError("psutil is required for system.memory_percent alerts")
+                raise RuntimeError(
+                    "psutil is required for system.memory_percent alerts"
+                )
             from server.host_ops import _psutil
 
             assert _psutil is not None
@@ -177,7 +203,10 @@ class AlertingService:
             expected = str(selector.get("name") or "").strip().lower()
             if not expected:
                 raise ValueError("selector.name is required for process.exists")
-            return any((proc.info.get("name") or "").lower() == expected for proc in _psutil.process_iter(["name"]))
+            return any(
+                (proc.info.get("name") or "").lower() == expected
+                for proc in _psutil.process_iter(["name"])
+            )
         if source == "port.tcp_reachable":
             host = str(selector.get("host") or "127.0.0.1")
             port = int(selector.get("port"))
@@ -211,7 +240,9 @@ class AlertingService:
         cooldown = int(rule.get("cooldown_seconds") or 0)
         return (now_utc() - last_triggered_at).total_seconds() >= cooldown
 
-    async def _trigger_rule(self, rule: dict[str, Any], evaluation: AlertEvaluation) -> None:
+    async def _trigger_rule(
+        self, rule: dict[str, Any], evaluation: AlertEvaluation
+    ) -> None:
         created_at = now_utc()
         recipients = [str(item) for item in rule.get("recipients", []) if item]
         notified = False
@@ -239,7 +270,11 @@ class AlertingService:
         )
 
     def _normalize_rule(self, payload: dict[str, Any]) -> dict[str, Any]:
-        recipients = [str(item).strip() for item in payload.get("recipients", []) if str(item).strip()]
+        recipients = [
+            str(item).strip()
+            for item in payload.get("recipients", [])
+            if str(item).strip()
+        ]
         selector = payload.get("selector") or {}
         if not isinstance(selector, dict):
             raise ValueError("selector must be an object")

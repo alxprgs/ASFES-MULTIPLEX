@@ -5,13 +5,22 @@ Two separate routers:
 - management_router: REST API for managing the mirror (/api/pypi/…)
 - simple_router: pip-compatible Simple Repository API (/pypi/simple/…)
 """
+
 from __future__ import annotations
 from server.audit import audit_context_from_request
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    status,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse, HTMLResponse
 
-from server.core.deps import get_services, require_permission
+from server.core.deps import enforce_api_rate_limit, get_services, require_permission
 from server.models import (
     PyPIBlocklistResponse,
     PyPIBlockRequest,
@@ -55,7 +64,9 @@ async def pypi_packages(
 ) -> PyPIPackageListResponse:
     """List packages in the mirror with optional search and pagination."""
     _check_enabled(services)
-    return await services.pypi_mirror.list_packages(search=search, page=page, per_page=per_page)
+    return await services.pypi_mirror.list_packages(
+        search=search, page=page, per_page=per_page
+    )
 
 
 @management_router.get("/packages/{name}", response_model=PyPIPackage)
@@ -69,7 +80,9 @@ async def pypi_package_detail(
     _check_enabled(services)
     pkg = await services.pypi_mirror.get_package(name)
     if pkg is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Package not found"
+        )
     return pkg
 
 
@@ -90,9 +103,13 @@ async def pypi_install(
     """
     _check_enabled(services)
     if payload.version:
-        job = services.pypi_mirror.install_version(payload.name, payload.version, payload.with_dependencies)
+        job = services.pypi_mirror.install_version(
+            payload.name, payload.version, payload.with_dependencies
+        )
     else:
-        job = services.pypi_mirror.install_all_versions(payload.name, payload.with_dependencies)
+        job = services.pypi_mirror.install_all_versions(
+            payload.name, payload.with_dependencies
+        )
     return job.to_status()
 
 
@@ -128,13 +145,13 @@ async def pypi_sync_all_packages(
 ) -> PyPIJobStatus:
     """Sync all versions for all locally cached packages."""
     _check_enabled(services)
-    
+
     packages = await services.pypi_mirror.list_packages("", 1, 999999)
     names = [pkg.name for pkg in packages.items]
-    
+
     if not names:
         raise HTTPException(status_code=400, detail="No local packages to sync")
-        
+
     job = services.pypi_mirror.bulk_install(names, with_dependencies=False)
     return job.to_status()
 
@@ -212,7 +229,9 @@ async def pypi_unblock_package(
     """Remove a package (and all its versions) from the blocklist."""
     _check_enabled(services)
     request_meta = audit_context_from_request(request)
-    await services.pypi_mirror.unblock(name, actor=current_user, request_meta=request_meta)
+    await services.pypi_mirror.unblock(
+        name, actor=current_user, request_meta=request_meta
+    )
     return {"ok": True}
 
 
@@ -276,7 +295,7 @@ async def pypi_jobs_ws(
 ) -> None:
     """Stream active job statuses for a requested list of job IDs via WebSocket."""
     import asyncio
-    
+
     await websocket.accept()
 
     # Manual auth using cookie for WebSocket
@@ -328,10 +347,10 @@ async def pypi_jobs_ws(
                     job = services.pypi_mirror.get_job(jid)
                     if job:
                         updates.append(job.to_status().model_dump())
-                
+
                 if updates:
                     await websocket.send_json({"type": "jobs_update", "jobs": updates})
-            
+
             await asyncio.sleep(1.5)
             if receiver_task.done():
                 break
@@ -355,7 +374,9 @@ async def pypi_job_status(
     _check_enabled(services)
     job = services.pypi_mirror.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Job not found"
+        )
     return job.to_status()
 
 
@@ -476,13 +497,16 @@ async def simple_file(
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
     if file_path is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        )
     return FileResponse(str(file_path), filename=filename)
 
 
 # ---------------------------------------------------------------------------
 # Internal helper
 # ---------------------------------------------------------------------------
+
 
 def _check_enabled(services: ApplicationServices) -> None:
     if not services.settings.pypi.enabled:

@@ -33,9 +33,15 @@ def make_test_settings():
     cfg.root.username = "root"
     cfg.root.password = SecretStr("IntegrationRootPass123!")
     cfg.root.email = "root.integration@example.com"
-    cfg.security.api_jwt_secret = SecretStr("IntegrationApiJwtSecretForPytest1234567890")
-    cfg.security.oauth_jwt_secret = SecretStr("IntegrationOauthJwtSecretForPytest1234567890")
-    cfg.security.password_pepper = SecretStr("IntegrationPasswordPepperForPytest1234567890")
+    cfg.security.api_jwt_secret = SecretStr(
+        "IntegrationApiJwtSecretForPytest1234567890"
+    )
+    cfg.security.oauth_jwt_secret = SecretStr(
+        "IntegrationOauthJwtSecretForPytest1234567890"
+    )
+    cfg.security.password_pepper = SecretStr(
+        "IntegrationPasswordPepperForPytest1234567890"
+    )
     cfg.logging.directory = workspace / "logs"
     cfg.logging.sqlite_path = workspace / "logs.db"
     cfg.host_ops.managed_file_roots = [workspace / "managed"]
@@ -45,13 +51,13 @@ def make_test_settings():
     cfg.host_ops.vpn_profiles_directory = workspace / "profiles" / "vpn"
     cfg.host_ops.ssl_profiles_directory = workspace / "profiles" / "ssl"
     cfg.host_ops.nginx_config_paths = [workspace / "managed" / "nginx"]
-    
+
     # Disable rate limits for integration testing
     cfg.rate_limits.rest_write_limit = 1000
     cfg.rate_limits.rest_read_limit = 1000
     cfg.rate_limits.login_limit = 1000
     cfg.rate_limits.oauth_token_limit = 1000
-    
+
     return cfg, workspace
 
 
@@ -82,7 +88,9 @@ async def integration_env():
     transport = httpx.ASGITransport(app=app)
     await mcp_gateway.refresh_tools()
     await services.audit.start()
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
         try:
             yield {
                 "app": app,

@@ -2,6 +2,7 @@
 PyPI Mirror service — wraps AsyncPypiMirror with blocklist (MongoDB),
 background Job tracking, and on-demand proxy support.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +19,11 @@ from server.core.config import PyPIConfig
 from server.core.database import DatabaseManager
 from server.core.cache import CacheManager
 from server.core.logging import get_logger
-from server.core.pypi_mirror import AsyncPypiMirror, MirrorConfig, normalize_package_name
+from server.core.pypi_mirror import (
+    AsyncPypiMirror,
+    MirrorConfig,
+    normalize_package_name,
+)
 from server.audit import AuditContext
 from server.models import (
     PyPIBlocklistResponse,
@@ -38,6 +43,7 @@ PYPI_BLOCKLIST = "pypi_blocklist"
 # ---------------------------------------------------------------------------
 # Job tracking
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class PyPIJob:
@@ -90,6 +96,7 @@ class PyPIJob:
 # Service
 # ---------------------------------------------------------------------------
 
+
 class PyPIMirrorService:
     """
     High-level service for the PyPI mirror. Wraps AsyncPypiMirror and adds:
@@ -99,7 +106,13 @@ class PyPIMirrorService:
     - Audit logging for destructive operations
     """
 
-    def __init__(self, config: PyPIConfig, db: DatabaseManager, audit: Any, cache: CacheManager | None = None) -> None:
+    def __init__(
+        self,
+        config: PyPIConfig,
+        db: DatabaseManager,
+        audit: Any,
+        cache: CacheManager | None = None,
+    ) -> None:
         self.config = config
         self.db = db
         self.audit = audit
@@ -190,7 +203,9 @@ class PyPIMirrorService:
             target={"package": norm, "version": version},
         )
         await self._invalidate_cache(norm)
-        LOGGER.info("pypi.block package=%s version=%s actor=%s", norm, version, actor.username)
+        LOGGER.info(
+            "pypi.block package=%s version=%s actor=%s", norm, version, actor.username
+        )
 
     async def unblock(
         self,
@@ -367,7 +382,9 @@ class PyPIMirrorService:
             await self.cache.set(cache_key, html_resp, ttl_seconds=3600)
         return html_resp
 
-    async def get_file_path(self, name: str, version: str, filename: str) -> Path | None:
+    async def get_file_path(
+        self, name: str, version: str, filename: str
+    ) -> Path | None:
         """
         Resolve a file path for serving to pip.
 
@@ -396,10 +413,13 @@ class PyPIMirrorService:
 
         # On-demand: check disk space before downloading (minimum 500MB free)
         import shutil
+
         try:
             usage = shutil.disk_usage(str(self._mirror._storage_dir))
             if usage.free < 500 * 1024 * 1024:
-                LOGGER.error("Not enough disk space for on-demand proxy (less than 500MB free)")
+                LOGGER.error(
+                    "Not enough disk space for on-demand proxy (less than 500MB free)"
+                )
                 return None
         except Exception as exc:
             LOGGER.warning("Could not check disk space: %s", exc)
@@ -425,12 +445,12 @@ class PyPIMirrorService:
                     return None
 
                 local_path.parent.mkdir(parents=True, exist_ok=True)
-                
+
                 # V3.3 Redis Download Coordination
                 redis = self.cache._redis if self.cache.should_use_redis() else None
                 lock_key = f"pypi:download:{norm}:{version}:{filename}"
                 stream_key = f"pypi:events:{norm}:{version}:{filename}"
-                
+
                 if redis:
                     # Attempt to acquire lock
                     lock_acquired = await redis.set(lock_key, "1", nx=True, ex=300)
@@ -438,9 +458,11 @@ class PyPIMirrorService:
                         # Wait for completion event
                         LOGGER.info("Waiting for other worker to download %s", filename)
                         last_id = "0"
-                        for _ in range(60): # wait up to 60s
+                        for _ in range(60):  # wait up to 60s
                             try:
-                                streams = await redis.xread({stream_key: last_id}, count=1, block=5000)
+                                streams = await redis.xread(
+                                    {stream_key: last_id}, count=1, block=5000
+                                )
                                 if streams:
                                     break
                             except Exception:
@@ -449,8 +471,10 @@ class PyPIMirrorService:
 
                 try:
                     await self._mirror._download_file(session, file_url, local_path)
-                    
-                    if expected_sha and not await self._mirror._verify_hash(local_path, expected_sha):
+
+                    if expected_sha and not await self._mirror._verify_hash(
+                        local_path, expected_sha
+                    ):
                         LOGGER.warning("on_demand hash mismatch file=%s", filename)
                         if local_path.exists():
                             local_path.unlink()
@@ -459,7 +483,9 @@ class PyPIMirrorService:
                     if redis:
                         await redis.delete(lock_key)
                         try:
-                            await redis.xadd(stream_key, {"status": "success"}, maxlen=10)
+                            await redis.xadd(
+                                stream_key, {"status": "success"}, maxlen=10
+                            )
                             await redis.expire(stream_key, 60)
                         except Exception:
                             pass
@@ -542,7 +568,9 @@ class PyPIMirrorService:
                 )
             )
 
-        return PyPIPackageListResponse(items=items, total=total, page=page, per_page=per_page)
+        return PyPIPackageListResponse(
+            items=items, total=total, page=page, per_page=per_page
+        )
 
     async def get_package(self, name: str) -> PyPIPackage | None:
         norm = normalize_package_name(name)
@@ -595,24 +623,32 @@ class PyPIMirrorService:
 
     async def _sync_job(self, job: PyPIJob) -> None:
         if self.cache is not None:
-            await self.cache.set(f"pypi:job:{job.job_id}", job.to_status().model_dump(), ttl_seconds=86400)
+            await self.cache.set(
+                f"pypi:job:{job.job_id}",
+                job.to_status().model_dump(),
+                ttl_seconds=86400,
+            )
 
     def _make_job(self, kind: str, name: str | None) -> PyPIJob:
         job_id = uuid4().hex
         job = PyPIJob(job_id=job_id, kind=kind, name=name)
         self._jobs[job_id] = job
-        
+
         if self.cache is not None:
+
             async def _sync_loop() -> None:
                 while job.status in ("running", "pending"):
                     await asyncio.sleep(2)
                     await self._sync_job(job)
                 await self._sync_job(job)
+
             asyncio.create_task(_sync_loop())
-            
+
         return job
 
-    async def _resolve_and_download(self, session: Any, job: PyPIJob, specs: list[str]) -> None:
+    async def _resolve_and_download(
+        self, session: Any, job: PyPIJob, specs: list[str]
+    ) -> None:
         from packaging.requirements import Requirement
         from packaging.version import parse as parse_version
 
@@ -659,14 +695,18 @@ class PyPIMirrorService:
                 except Exception:
                     pass
 
-            matched = list(req.specifier.filter(available_versions)) if req.specifier else available_versions
+            matched = (
+                list(req.specifier.filter(available_versions))
+                if req.specifier
+                else available_versions
+            )
             if not matched:
                 job.failed += 1
                 continue
 
             best_version = str(max(matched))
             job.message = f"Downloading {norm}=={best_version}"
-            
+
             ok = await self._mirror.download_version(session, norm, best_version)
             if ok:
                 job.done += 1
@@ -674,7 +714,7 @@ class PyPIMirrorService:
                 for dist in requires_dist:
                     try:
                         dep_req = Requirement(dist)
-                        if dep_req.marker and 'extra' in str(dep_req.marker):
+                        if dep_req.marker and "extra" in str(dep_req.marker):
                             continue
                         dep_str = str(dep_req)
                         queue.append(dep_str)
@@ -690,7 +730,9 @@ class PyPIMirrorService:
     # Install operations
     # ------------------------------------------------------------------
 
-    def install_version(self, name: str, version: str, with_dependencies: bool = False) -> PyPIJob:
+    def install_version(
+        self, name: str, version: str, with_dependencies: bool = False
+    ) -> PyPIJob:
         norm = normalize_package_name(name)
         job = self._make_job("install", norm)
 
@@ -703,7 +745,9 @@ class PyPIMirrorService:
                     headers={"User-Agent": self.config.user_agent}
                 ) as session:
                     if with_dependencies:
-                        await self._resolve_and_download(session, job, [f"{norm}=={version}"])
+                        await self._resolve_and_download(
+                            session, job, [f"{norm}=={version}"]
+                        )
                     else:
                         job.total = 1
                         job.message = f"Downloading {norm}=={version}"
@@ -712,14 +756,19 @@ class PyPIMirrorService:
                             job.done = 1
                         else:
                             job.failed = 1
-                            
+
                     if job.status != "cancelled":
                         job.status = "done" if job.failed == 0 else "error"
                         job.message = f"Done: {job.done} ok, {job.failed} failed"
             except Exception as exc:
                 job.status = "error"
                 job.message = str(exc)
-                LOGGER.error("install_version error package=%s version=%s error=%s", norm, version, exc)
+                LOGGER.error(
+                    "install_version error package=%s version=%s error=%s",
+                    norm,
+                    version,
+                    exc,
+                )
             finally:
                 job.finished_at = datetime.now(UTC)
                 await self._invalidate_cache(norm)
@@ -727,7 +776,9 @@ class PyPIMirrorService:
         job.task = asyncio.create_task(_run())
         return job
 
-    def install_all_versions(self, name: str, with_dependencies: bool = False) -> PyPIJob:
+    def install_all_versions(
+        self, name: str, with_dependencies: bool = False
+    ) -> PyPIJob:
         norm = normalize_package_name(name)
         job = self._make_job("install_all", norm)
 
@@ -760,29 +811,39 @@ class PyPIMirrorService:
                     if job.status != "cancelled":
                         job.status = "done"
                         job.message = f"Completed: {job.done} ok, {job.failed} failed"
-                        
+
                         if with_dependencies and job.done > 0:
                             job.message = f"Resolving dependencies for {norm}"
-                            requires_dist = metadata.get("info", {}).get("requires_dist") or []
+                            requires_dist = (
+                                metadata.get("info", {}).get("requires_dist") or []
+                            )
                             deps_to_install = []
                             from packaging.requirements import Requirement
+
                             for dist in requires_dist:
                                 try:
                                     dep_req = Requirement(dist)
-                                    if not (dep_req.marker and 'extra' in str(dep_req.marker)):
+                                    if not (
+                                        dep_req.marker
+                                        and "extra" in str(dep_req.marker)
+                                    ):
                                         deps_to_install.append(str(dep_req))
                                 except Exception:
                                     pass
-                            
+
                             if deps_to_install:
-                                await self._resolve_and_download(session, job, deps_to_install)
+                                await self._resolve_and_download(
+                                    session, job, deps_to_install
+                                )
                                 job.status = "done" if job.failed == 0 else "error"
                                 job.message = f"Completed with deps: {job.done} ok, {job.failed} failed"
 
             except Exception as exc:
                 job.status = "error"
                 job.message = str(exc)
-                LOGGER.error("install_all_versions error package=%s error=%s", norm, exc)
+                LOGGER.error(
+                    "install_all_versions error package=%s error=%s", norm, exc
+                )
             finally:
                 job.finished_at = datetime.now(UTC)
                 job.remaining_packages = []
@@ -791,7 +852,9 @@ class PyPIMirrorService:
         job.task = asyncio.create_task(_run())
         return job
 
-    def bulk_install(self, packages: list[str], with_dependencies: bool = False) -> PyPIJob:
+    def bulk_install(
+        self, packages: list[str], with_dependencies: bool = False
+    ) -> PyPIJob:
         """Install packages from a list of specs: 'flask==2.0.0', 'requests', etc."""
         job = self._make_job("bulk_install", None)
 
@@ -815,9 +878,13 @@ class PyPIMirrorService:
                             job.message = f"Downloading {pkg_spec}"
                             try:
                                 if version_parsed:
-                                    ok = await self._mirror.download_version(session, norm, version_parsed)
+                                    ok = await self._mirror.download_version(
+                                        session, norm, version_parsed
+                                    )
                                 else:
-                                    await self._mirror.download_all_versions(session, norm)
+                                    await self._mirror.download_all_versions(
+                                        session, norm
+                                    )
                                     ok = True
                                 if ok:
                                     job.done += 1
@@ -825,13 +892,17 @@ class PyPIMirrorService:
                                     job.failed += 1
                             except Exception as exc:
                                 job.failed += 1
-                                LOGGER.warning("bulk_install error pkg=%s error=%s", pkg_spec, exc)
+                                LOGGER.warning(
+                                    "bulk_install error pkg=%s error=%s", pkg_spec, exc
+                                )
                             if pkg_spec in job.remaining_packages:
                                 job.remaining_packages.remove(pkg_spec)
 
                     if job.status != "cancelled":
                         job.status = "done" if job.failed == 0 else "error"
-                        job.message = f"Bulk install done: {job.done} ok, {job.failed} failed"
+                        job.message = (
+                            f"Bulk install done: {job.done} ok, {job.failed} failed"
+                        )
             except Exception as exc:
                 job.status = "error"
                 job.message = str(exc)
@@ -879,7 +950,9 @@ class PyPIMirrorService:
                                 job.failed += 1
                         except Exception as exc:
                             job.failed += 1
-                            LOGGER.warning("bulk_refresh error spec=%s error=%s", spec, exc)
+                            LOGGER.warning(
+                                "bulk_refresh error spec=%s error=%s", spec, exc
+                            )
                         if spec in job.remaining_packages:
                             job.remaining_packages.remove(spec)
 
@@ -917,7 +990,12 @@ class PyPIMirrorService:
                 request_meta=request_meta,
                 target={"package": norm, "version": version},
             )
-            LOGGER.info("pypi.delete_version package=%s version=%s actor=%s", norm, version, actor.username)
+            LOGGER.info(
+                "pypi.delete_version package=%s version=%s actor=%s",
+                norm,
+                version,
+                actor.username,
+            )
             await self._invalidate_cache(norm)
         return bool(result.get("deleted"))
 
@@ -1032,6 +1110,7 @@ class PyPIMirrorService:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _parse_pkg_spec(spec: str) -> tuple[str, str | None]:
     """Parse 'flask==2.0.0' → ('flask', '2.0.0'). Only exact pinned versions extracted."""

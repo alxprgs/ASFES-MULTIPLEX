@@ -39,7 +39,9 @@ async def test_mailer_ssl_enabled() -> None:
         assert res is True
         mock_ssl.assert_called_once_with("smtp.example.com", 465, timeout=10)
         mock_client.__enter__.assert_called_once()
-        mock_client.__enter__.return_value.login.assert_called_once_with("user", "pass123")
+        mock_client.__enter__.return_value.login.assert_called_once_with(
+            "user", "pass123"
+        )
         mock_client.__enter__.return_value.send_message.assert_called_once()
 
 
@@ -76,7 +78,9 @@ async def test_integrity_log_missing_file() -> None:
     )
     workspace.mkdir(parents=True, exist_ok=True)
     try:
-        manager = IntegrityLogManager(config, Mailer(SMTPConfig(enabled=False)), "root@example.com")
+        manager = IntegrityLogManager(
+            config, Mailer(SMTPConfig(enabled=False)), "root@example.com"
+        )
         manager.initialize()
 
         logger = logging.getLogger("tests.integrity.missing")
@@ -87,7 +91,9 @@ async def test_integrity_log_missing_file() -> None:
         log_file = next(logs_dir.glob("*.log"))
         log_file.unlink()
 
-        verifier = IntegrityLogManager(config, Mailer(SMTPConfig(enabled=False)), "root@example.com")
+        verifier = IntegrityLogManager(
+            config, Mailer(SMTPConfig(enabled=False)), "root@example.com"
+        )
         verifier.initialize()
         detections = await verifier.verify_integrity()
         verifier.finalize()
@@ -111,7 +117,9 @@ async def test_integrity_log_invalid_json() -> None:
     )
     workspace.mkdir(parents=True, exist_ok=True)
     try:
-        manager = IntegrityLogManager(config, Mailer(SMTPConfig(enabled=False)), "root@example.com")
+        manager = IntegrityLogManager(
+            config, Mailer(SMTPConfig(enabled=False)), "root@example.com"
+        )
         manager.initialize()
 
         logger = logging.getLogger("tests.integrity.json")
@@ -122,7 +130,9 @@ async def test_integrity_log_invalid_json() -> None:
         log_file = next(logs_dir.glob("*.log"))
         log_file.write_text("invalid json lines here\n", encoding="utf-8")
 
-        verifier = IntegrityLogManager(config, Mailer(SMTPConfig(enabled=False)), "root@example.com")
+        verifier = IntegrityLogManager(
+            config, Mailer(SMTPConfig(enabled=False)), "root@example.com"
+        )
         verifier.initialize()
         detections = await verifier.verify_integrity()
         verifier.finalize()
@@ -146,7 +156,9 @@ async def test_integrity_log_exception_formatting() -> None:
     )
     workspace.mkdir(parents=True, exist_ok=True)
     try:
-        manager = IntegrityLogManager(config, Mailer(SMTPConfig(enabled=False)), "root@example.com")
+        manager = IntegrityLogManager(
+            config, Mailer(SMTPConfig(enabled=False)), "root@example.com"
+        )
         manager.initialize()
 
         logger = logging.getLogger("tests.integrity.exc")

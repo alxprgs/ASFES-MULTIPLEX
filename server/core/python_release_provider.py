@@ -2,12 +2,12 @@
 Python release provider — fetches and caches version/file metadata from python.org.
 This is the only component that knows about python.org HTML structure.
 """
+
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import aiohttp
@@ -23,13 +23,15 @@ logger = logging.getLogger("multiplex.python_mirror.provider")
 # File classification patterns
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ReleaseFile:
     """Metadata for a single Python distribution file."""
+
     filename: str
     version: str
-    os_type: str    # "windows" | "macos" | "source"
-    arch: str       # "amd64" | "arm64" | ""
+    os_type: str  # "windows" | "macos" | "source"
+    arch: str  # "amd64" | "arm64" | ""
     file_type: str  # "installer" | "zip" | "pkg" | "tarball"
     download_url: str
     md5: str | None = None
@@ -37,24 +39,53 @@ class ReleaseFile:
 
 # (compiled_pattern, os_type, arch, file_type)
 _FILE_PATTERNS: list[tuple[re.Pattern[str], str, str, str]] = [
-    (re.compile(r"python-(\d+\.\d+\.\d+(?:[abc]\d+)?)-amd64\.exe", re.IGNORECASE),
-     "windows", "amd64", "installer"),
-    (re.compile(r"python-(\d+\.\d+\.\d+(?:[abc]\d+)?)-arm64\.exe", re.IGNORECASE),
-     "windows", "arm64", "installer"),
-    (re.compile(r"python-(\d+\.\d+\.\d+(?:[abc]\d+)?)-amd64\.zip", re.IGNORECASE),
-     "windows", "amd64", "zip"),
-    (re.compile(r"python-(\d+\.\d+\.\d+(?:[abc]\d+)?)-arm64\.zip", re.IGNORECASE),
-     "windows", "arm64", "zip"),
+    (
+        re.compile(r"python-(\d+\.\d+\.\d+(?:[abc]\d+)?)-amd64\.exe", re.IGNORECASE),
+        "windows",
+        "amd64",
+        "installer",
+    ),
+    (
+        re.compile(r"python-(\d+\.\d+\.\d+(?:[abc]\d+)?)-arm64\.exe", re.IGNORECASE),
+        "windows",
+        "arm64",
+        "installer",
+    ),
+    (
+        re.compile(r"python-(\d+\.\d+\.\d+(?:[abc]\d+)?)-amd64\.zip", re.IGNORECASE),
+        "windows",
+        "amd64",
+        "zip",
+    ),
+    (
+        re.compile(r"python-(\d+\.\d+\.\d+(?:[abc]\d+)?)-arm64\.zip", re.IGNORECASE),
+        "windows",
+        "arm64",
+        "zip",
+    ),
     # macOS pkg variants: macos11, macos13, macos13arm, etc.
-    (re.compile(r"python-(\d+\.\d+\.\d+(?:[abc]\d+)?)-macos\w+arm\w*\.pkg", re.IGNORECASE),
-     "macos", "arm64", "pkg"),
-    (re.compile(r"python-(\d+\.\d+\.\d+(?:[abc]\d+)?)-macos\w+\.pkg", re.IGNORECASE),
-     "macos", "amd64", "pkg"),
+    (
+        re.compile(
+            r"python-(\d+\.\d+\.\d+(?:[abc]\d+)?)-macos\w+arm\w*\.pkg", re.IGNORECASE
+        ),
+        "macos",
+        "arm64",
+        "pkg",
+    ),
+    (
+        re.compile(r"python-(\d+\.\d+\.\d+(?:[abc]\d+)?)-macos\w+\.pkg", re.IGNORECASE),
+        "macos",
+        "amd64",
+        "pkg",
+    ),
     # Source tarball
-    (re.compile(r"Python-(\d+\.\d+\.\d+(?:[abc]\d+)?)\.tar\.xz"),
-     "source", "", "tarball"),
-    (re.compile(r"Python-(\d+\.\d+\.\d+(?:[abc]\d+)?)\.tgz"),
-     "source", "", "tarball"),
+    (
+        re.compile(r"Python-(\d+\.\d+\.\d+(?:[abc]\d+)?)\.tar\.xz"),
+        "source",
+        "",
+        "tarball",
+    ),
+    (re.compile(r"Python-(\d+\.\d+\.\d+(?:[abc]\d+)?)\.tgz"), "source", "", "tarball"),
 ]
 
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+")
@@ -91,9 +122,7 @@ class PythonReleaseProvider:
         """Construct direct download URL."""
         return f"{self._ftp_url}{version}/{filename}"
 
-    def classify_file(
-        self, filename: str, version: str
-    ) -> tuple[str, str, str] | None:
+    def classify_file(self, filename: str, version: str) -> tuple[str, str, str] | None:
         """Return (os_type, arch, file_type) from FILE_PATTERNS, or None."""
         for pattern, os_type, arch, file_type in _FILE_PATTERNS:
             if pattern.fullmatch(filename):
@@ -132,7 +161,9 @@ class PythonReleaseProvider:
             versions = self._parse_versions_html(html)
             logger.debug("python_versions fetched count=%d", len(versions))
             if cache is not None and versions:
-                await cache.set(self.CACHE_KEY_VERSIONS, versions, ttl_seconds=self._ttl_versions)
+                await cache.set(
+                    self.CACHE_KEY_VERSIONS, versions, ttl_seconds=self._ttl_versions
+                )
             return versions
         except Exception as exc:
             logger.warning("python_versions_fetch_failed error=%s", exc)
@@ -175,7 +206,9 @@ class PythonReleaseProvider:
                 resp.raise_for_status()
                 html = await resp.text()
         except Exception as exc:
-            logger.warning("python_files_fetch_failed version=%s error=%s", version, exc)
+            logger.warning(
+                "python_files_fetch_failed version=%s error=%s", version, exc
+            )
             # Try stale cache
             if cache is not None:
                 stale = await cache.get(cache_key)
@@ -196,15 +229,17 @@ class PythonReleaseProvider:
             if classified is None:
                 continue
             os_type, arch, file_type = classified
-            files.append(ReleaseFile(
-                filename=fname,
-                version=version,
-                os_type=os_type,
-                arch=arch,
-                file_type=file_type,
-                download_url=self.build_download_url(version, fname),
-                md5=md5_map.get(fname),
-            ))
+            files.append(
+                ReleaseFile(
+                    filename=fname,
+                    version=version,
+                    os_type=os_type,
+                    arch=arch,
+                    file_type=file_type,
+                    download_url=self.build_download_url(version, fname),
+                    md5=md5_map.get(fname),
+                )
+            )
 
         # 6. Cache result
         if cache is not None and files:

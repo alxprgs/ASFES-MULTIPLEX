@@ -39,7 +39,9 @@ async def test_mcp_gateway_authorized_flows(integration_env) -> None:
     cfg = integration_env["settings"]
 
     # Create static API key for root user to authorize MCP client
-    root_principal = services.users.to_principal(await services.users.get_user_by_username(cfg.root.username))
+    root_principal = services.users.to_principal(
+        await services.users.get_user_by_username(cfg.root.username)
+    )
     mcp_token, api_key_doc = await services.api_key_service.create_key(
         root_principal,
         name="test_mcp_key",
@@ -78,7 +80,9 @@ async def test_mcp_gateway_authorized_flows(integration_env) -> None:
             # 2. Call non-existent tool -> raises error
             with pytest.raises(Exception) as exc_nonexistent:
                 await mcp_client.call_tool("non_existent.tool", {})
-            assert "Unknown tool" in str(exc_nonexistent.value) or "Tool not found" in str(exc_nonexistent.value)
+            assert "Unknown tool" in str(
+                exc_nonexistent.value
+            ) or "Tool not found" in str(exc_nonexistent.value)
 
             # 3. Disable the tool globally
             await services.plugins.set_global_tool_enabled(

@@ -5,24 +5,53 @@ from pathlib import Path
 from typing import Any
 
 from server.host_ops import _psutil
-from server.mcp.plugins._common import bool_argument, int_argument, managed_path, static_availability, string_list_argument
-from server.models import MCPTool, MCPToolManifest, PermissionDefinition, PluginDefinition, PluginManifest, ToolExecutionContext
+from server.mcp.plugins._common import (
+    bool_argument,
+    int_argument,
+    managed_path,
+    static_availability,
+    string_list_argument,
+)
+from server.models import (
+    MCPTool,
+    MCPToolManifest,
+    PermissionDefinition,
+    PluginDefinition,
+    PluginManifest,
+    ToolExecutionContext,
+)
 
 
 def _ensure_allowed_command(context: ToolExecutionContext, command: list[str]) -> None:
-    allowed = {Path(item).name.lower() for item in context.services.settings.host_ops.process_allowed_executables}
+    allowed = {
+        Path(item).name.lower()
+        for item in context.services.settings.host_ops.process_allowed_executables
+    }
     executable = Path(command[0]).name.lower() if command else ""
     if not allowed or executable not in allowed:
         raise RuntimeError("Process start is not allowed for this executable")
 
 
-async def list_processes(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def list_processes(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     if _psutil is None:
         raise RuntimeError("psutil is required for process inspection")
     name_filter = str(arguments.get("name") or "").strip().lower()
     limit = max(1, int_argument(arguments, "limit", 100))
     items = []
-    for proc in _psutil.process_iter(["pid", "name", "status", "username", "cpu_percent", "memory_percent", "cmdline", "create_time"]):
+    for proc in _psutil.process_iter(
+        [
+            "pid",
+            "name",
+            "status",
+            "username",
+            "cpu_percent",
+            "memory_percent",
+            "cmdline",
+            "create_time",
+        ]
+    ):
         info = proc.info
         if name_filter and name_filter not in (info.get("name") or "").lower():
             continue
@@ -32,7 +61,9 @@ async def list_processes(context: ToolExecutionContext, arguments: dict[str, Any
     return {"processes": items, "count": len(items)}
 
 
-async def inspect_process(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def inspect_process(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     if _psutil is None:
         raise RuntimeError("psutil is required for process inspection")
     pid = int_argument(arguments, "pid", 0)
@@ -50,7 +81,9 @@ async def inspect_process(context: ToolExecutionContext, arguments: dict[str, An
     }
 
 
-async def start_process(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def start_process(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     command = string_list_argument(arguments, "command")
     if not command:
         raise RuntimeError("The 'command' argument must contain at least one element")
@@ -58,11 +91,15 @@ async def start_process(context: ToolExecutionContext, arguments: dict[str, Any]
     cwd = None
     if arguments.get("cwd"):
         cwd = managed_path(context, str(arguments["cwd"]))
-    process = await asyncio.create_subprocess_exec(*command, cwd=str(cwd) if cwd else None)
+    process = await asyncio.create_subprocess_exec(
+        *command, cwd=str(cwd) if cwd else None
+    )
     return {"pid": process.pid, "command": command, "cwd": str(cwd) if cwd else None}
 
 
-async def stop_process(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def stop_process(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     if _psutil is None:
         raise RuntimeError("psutil is required for process control")
     pid = int_argument(arguments, "pid", 0)
@@ -76,7 +113,9 @@ async def stop_process(context: ToolExecutionContext, arguments: dict[str, Any])
     return {"pid": pid, "force": force, "stopped": True}
 
 
-async def restart_process(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def restart_process(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     if _psutil is None:
         raise RuntimeError("psutil is required for process control")
     pid = int_argument(arguments, "pid", 0)
@@ -84,7 +123,9 @@ async def restart_process(context: ToolExecutionContext, arguments: dict[str, An
     cmdline = proc.cmdline()
     cwd = proc.cwd() if proc.is_running() else None
     if not cmdline:
-        raise RuntimeError("The selected process does not expose a restartable command line")
+        raise RuntimeError(
+            "The selected process does not expose a restartable command line"
+        )
     _ensure_allowed_command(context, cmdline)
     proc.terminate()
     proc.wait(timeout=5)
@@ -99,8 +140,14 @@ PLUGIN = PluginDefinition(
         version="1.0.0",
         description="Просматривает и управляет локальными процессами операционной системы.",
         permissions=[
-            PermissionDefinition(key="process.read", description="Читать метаданные и runtime-метрики локальных процессов."),
-            PermissionDefinition(key="process.write", description="Запускать, останавливать и перезапускать локальные процессы."),
+            PermissionDefinition(
+                key="process.read",
+                description="Читать метаданные и runtime-метрики локальных процессов.",
+            ),
+            PermissionDefinition(
+                key="process.write",
+                description="Запускать, останавливать и перезапускать локальные процессы.",
+            ),
         ],
         required_backends=["psutil"],
     ),

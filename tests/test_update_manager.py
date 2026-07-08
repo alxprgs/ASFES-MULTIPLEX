@@ -11,7 +11,9 @@ async def test_update_check_session_emits_status_and_stage_events(monkeypatch) -
     manager = UpdateManager(base_settings.model_copy(deep=True))
 
     async def fake_check_code(session):
-        await manager._emit(session, "stage", {"stage": session.stages["code"].to_dict()})
+        await manager._emit(
+            session, "stage", {"stage": session.stages["code"].to_dict()}
+        )
         return {"needed": True, "changed_files": []}
 
     async def fake_check_python(session):
@@ -36,7 +38,9 @@ async def test_update_check_session_emits_status_and_stage_events(monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_update_run_accepts_forced_stages_and_blocks_parallel(monkeypatch) -> None:
+async def test_update_run_accepts_forced_stages_and_blocks_parallel(
+    monkeypatch,
+) -> None:
     manager = UpdateManager(base_settings.model_copy(deep=True))
     started = []
 

@@ -24,11 +24,16 @@ async def test_integrity_verifier_detects_tampered_log() -> None:
     )
     workspace.mkdir(parents=True, exist_ok=True)
     try:
-        manager = IntegrityLogManager(config, Mailer(SMTPConfig(enabled=False)), "root@example.com")
+        manager = IntegrityLogManager(
+            config, Mailer(SMTPConfig(enabled=False)), "root@example.com"
+        )
         manager.initialize()
 
         logger = logging.getLogger("tests.integrity")
-        logger.info("integrity baseline", extra={"event_type": "tests.integrity", "payload": {"step": 1}})
+        logger.info(
+            "integrity baseline",
+            extra={"event_type": "tests.integrity", "payload": {"step": 1}},
+        )
         manager.finalize()
 
         log_file = next(logs_dir.glob("*.log"))
@@ -36,12 +41,18 @@ async def test_integrity_verifier_detects_tampered_log() -> None:
         tampered = original.replace("baseline", "tampered", 1)
         log_file.write_text(tampered, encoding="utf-8")
 
-        verifier = IntegrityLogManager(config, Mailer(SMTPConfig(enabled=False)), "root@example.com")
+        verifier = IntegrityLogManager(
+            config, Mailer(SMTPConfig(enabled=False)), "root@example.com"
+        )
         verifier.initialize()
         detections = await verifier.verify_integrity()
         verifier.finalize()
 
         assert detections
-        assert detections[0].reason in {"line hash mismatch", "hash chain mismatch", "sealed file hash mismatch"}
+        assert detections[0].reason in {
+            "line hash mismatch",
+            "hash chain mismatch",
+            "sealed file hash mismatch",
+        }
     finally:
         shutil.rmtree(workspace, ignore_errors=True)

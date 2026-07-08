@@ -2,6 +2,7 @@
 Unit tests for the PyPI mirror routes and core logic.
 Uses mock services — no real MongoDB or network required.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -12,6 +13,7 @@ from server.core.pypi_mirror import normalize_package_name
 # ---------------------------------------------------------------------------
 # PEP 503 normalization
 # ---------------------------------------------------------------------------
+
 
 def test_normalize_simple():
     assert normalize_package_name("flask") == "flask"
@@ -45,6 +47,7 @@ def test_normalize_already_normalized():
 # PyPIMirrorService unit tests (no MongoDB)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_is_blocked_checks_package(tmp_path):
     """is_blocked returns True when package is in blocked_packages list."""
@@ -61,14 +64,16 @@ async def test_is_blocked_checks_package(tmp_path):
     service = PyPIMirrorService(config=config, db=db, audit=audit)
 
     # Patch _get_blocklist_doc to return a blocked package
-    service._get_blocklist_doc = AsyncMock(return_value={
-        "_id": "blocklist",
-        "blocked_packages": ["flask"],
-        "blocked_versions": {},
-    })
+    service._get_blocklist_doc = AsyncMock(
+        return_value={
+            "_id": "blocklist",
+            "blocked_packages": ["flask"],
+            "blocked_versions": {},
+        }
+    )
 
-    assert await service.is_blocked("Flask") is True         # normalizes to flask
-    assert await service.is_blocked("flask-cors") is False   # different package
+    assert await service.is_blocked("Flask") is True  # normalizes to flask
+    assert await service.is_blocked("flask-cors") is False  # different package
 
 
 @pytest.mark.asyncio
@@ -81,11 +86,13 @@ async def test_is_blocked_checks_version(tmp_path):
     config = PyPIConfig(data_dir=tmp_path / "pypi_storage")
     service = PyPIMirrorService(config=config, db=MagicMock(), audit=MagicMock())
 
-    service._get_blocklist_doc = AsyncMock(return_value={
-        "_id": "blocklist",
-        "blocked_packages": [],
-        "blocked_versions": {"flask": ["0.12.0", "1.0.0"]},
-    })
+    service._get_blocklist_doc = AsyncMock(
+        return_value={
+            "_id": "blocklist",
+            "blocked_packages": [],
+            "blocked_versions": {"flask": ["0.12.0", "1.0.0"]},
+        }
+    )
 
     assert await service.is_blocked("flask", "0.12.0") is True
     assert await service.is_blocked("flask", "2.0.0") is False
@@ -102,11 +109,13 @@ async def test_simple_api_blocked_package_raises(tmp_path):
     config = PyPIConfig(data_dir=tmp_path / "pypi_storage")
     service = PyPIMirrorService(config=config, db=MagicMock(), audit=MagicMock())
 
-    service._get_blocklist_doc = AsyncMock(return_value={
-        "_id": "blocklist",
-        "blocked_packages": ["banned-lib"],
-        "blocked_versions": {},
-    })
+    service._get_blocklist_doc = AsyncMock(
+        return_value={
+            "_id": "blocklist",
+            "blocked_packages": ["banned-lib"],
+            "blocked_versions": {},
+        }
+    )
 
     with pytest.raises(ValueError, match="blocked"):
         await service.simple_api_package_html("Banned-Lib")
@@ -130,11 +139,13 @@ async def test_simple_api_package_html_links_local_files(tmp_path):
     config = PyPIConfig(data_dir=tmp_path / "pypi_storage", simple_path="/pypi")
     service = PyPIMirrorService(config=config, db=MagicMock(), audit=MagicMock())
 
-    service._get_blocklist_doc = AsyncMock(return_value={
-        "_id": "blocklist",
-        "blocked_packages": [],
-        "blocked_versions": {},
-    })
+    service._get_blocklist_doc = AsyncMock(
+        return_value={
+            "_id": "blocklist",
+            "blocked_packages": [],
+            "blocked_versions": {},
+        }
+    )
 
     # Fake PyPI metadata response
     fake_metadata = {
@@ -149,7 +160,9 @@ async def test_simple_api_package_html_links_local_files(tmp_path):
         }
     }
 
-    with patch.object(service._mirror, "_fetch_metadata", new=AsyncMock(return_value=fake_metadata)):
+    with patch.object(
+        service._mirror, "_fetch_metadata", new=AsyncMock(return_value=fake_metadata)
+    ):
         html = await service.simple_api_package_html("my-pkg")
 
     assert html is not None
@@ -176,11 +189,13 @@ async def test_simple_api_package_html_excludes_blocked_versions(tmp_path):
     config = PyPIConfig(data_dir=tmp_path / "pypi_storage", simple_path="/pypi")
     service = PyPIMirrorService(config=config, db=MagicMock(), audit=MagicMock())
 
-    service._get_blocklist_doc = AsyncMock(return_value={
-        "_id": "blocklist",
-        "blocked_packages": [],
-        "blocked_versions": {"mylib": ["1.0.0"]},  # 1.0.0 is blocked
-    })
+    service._get_blocklist_doc = AsyncMock(
+        return_value={
+            "_id": "blocklist",
+            "blocked_packages": [],
+            "blocked_versions": {"mylib": ["1.0.0"]},  # 1.0.0 is blocked
+        }
+    )
 
     fake_metadata = {
         "releases": {
@@ -189,7 +204,9 @@ async def test_simple_api_package_html_excludes_blocked_versions(tmp_path):
         }
     }
 
-    with patch.object(service._mirror, "_fetch_metadata", new=AsyncMock(return_value=fake_metadata)):
+    with patch.object(
+        service._mirror, "_fetch_metadata", new=AsyncMock(return_value=fake_metadata)
+    ):
         html = await service.simple_api_package_html("mylib")
 
     assert html is not None
@@ -206,11 +223,13 @@ async def test_get_file_path_blocked_package_raises(tmp_path):
 
     config = PyPIConfig(data_dir=tmp_path / "pypi_storage")
     service = PyPIMirrorService(config=config, db=MagicMock(), audit=MagicMock())
-    service._get_blocklist_doc = AsyncMock(return_value={
-        "_id": "blocklist",
-        "blocked_packages": ["badlib"],
-        "blocked_versions": {},
-    })
+    service._get_blocklist_doc = AsyncMock(
+        return_value={
+            "_id": "blocklist",
+            "blocked_packages": ["badlib"],
+            "blocked_versions": {},
+        }
+    )
 
     with pytest.raises(PermissionError):
         await service.get_file_path("badlib", "1.0.0", "badlib-1.0.0.whl")
@@ -225,11 +244,13 @@ async def test_get_file_path_blocked_version_raises(tmp_path):
 
     config = PyPIConfig(data_dir=tmp_path / "pypi_storage")
     service = PyPIMirrorService(config=config, db=MagicMock(), audit=MagicMock())
-    service._get_blocklist_doc = AsyncMock(return_value={
-        "_id": "blocklist",
-        "blocked_packages": [],
-        "blocked_versions": {"goodlib": ["0.1.0"]},
-    })
+    service._get_blocklist_doc = AsyncMock(
+        return_value={
+            "_id": "blocklist",
+            "blocked_packages": [],
+            "blocked_versions": {"goodlib": ["0.1.0"]},
+        }
+    )
 
     with pytest.raises(PermissionError):
         await service.get_file_path("goodlib", "0.1.0", "goodlib-0.1.0.whl")
@@ -250,13 +271,17 @@ async def test_get_file_path_returns_existing_file(tmp_path):
 
     config = PyPIConfig(data_dir=storage, on_demand_proxy=False)
     service = PyPIMirrorService(config=config, db=MagicMock(), audit=MagicMock())
-    service._get_blocklist_doc = AsyncMock(return_value={
-        "_id": "blocklist",
-        "blocked_packages": [],
-        "blocked_versions": {},
-    })
+    service._get_blocklist_doc = AsyncMock(
+        return_value={
+            "_id": "blocklist",
+            "blocked_packages": [],
+            "blocked_versions": {},
+        }
+    )
 
-    result = await service.get_file_path("flask", "2.0.0", "Flask-2.0.0-py3-none-any.whl")
+    result = await service.get_file_path(
+        "flask", "2.0.0", "Flask-2.0.0-py3-none-any.whl"
+    )
     assert result is not None
     assert result.exists()
 
@@ -275,11 +300,13 @@ async def test_get_stats(tmp_path):
 
     config = PyPIConfig(data_dir=storage)
     service = PyPIMirrorService(config=config, db=MagicMock(), audit=MagicMock())
-    service._get_blocklist_doc = AsyncMock(return_value={
-        "_id": "blocklist",
-        "blocked_packages": [],
-        "blocked_versions": {},
-    })
+    service._get_blocklist_doc = AsyncMock(
+        return_value={
+            "_id": "blocklist",
+            "blocked_packages": [],
+            "blocked_versions": {},
+        }
+    )
 
     stats = await service.get_stats()
     assert stats.packages_count == 1
@@ -290,16 +317,19 @@ async def test_get_stats(tmp_path):
 
 def test_parse_pkg_spec_exact():
     from server.pypi_service import _parse_pkg_spec
+
     assert _parse_pkg_spec("flask==2.0.0") == ("flask", "2.0.0")
 
 
 def test_parse_pkg_spec_no_version():
     from server.pypi_service import _parse_pkg_spec
+
     assert _parse_pkg_spec("flask") == ("flask", None)
 
 
 def test_parse_pkg_spec_gte():
     from server.pypi_service import _parse_pkg_spec
+
     name, ver = _parse_pkg_spec("flask>=2.0")
     assert name == "flask"
     assert ver is None  # non-exact spec has no pinned version

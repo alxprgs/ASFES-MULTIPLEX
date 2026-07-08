@@ -19,16 +19,16 @@ from server.core.crypto import ProxyEncryptor
 
 # Networks that must never be used as proxy endpoints (SSRF guard).
 _BLOCKED_NETWORKS: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
-    ipaddress.ip_network("127.0.0.0/8"),      # IPv4 loopback
-    ipaddress.ip_network("::1/128"),           # IPv6 loopback
-    ipaddress.ip_network("10.0.0.0/8"),        # RFC 1918
-    ipaddress.ip_network("172.16.0.0/12"),     # RFC 1918
-    ipaddress.ip_network("192.168.0.0/16"),    # RFC 1918
-    ipaddress.ip_network("169.254.0.0/16"),   # Link-local / AWS IMDS
-    ipaddress.ip_network("fe80::/10"),         # IPv6 link-local
-    ipaddress.ip_network("fc00::/7"),          # IPv6 ULA
-    ipaddress.ip_network("100.64.0.0/10"),     # CGNAT
-    ipaddress.ip_network("0.0.0.0/8"),         # "This" network
+    ipaddress.ip_network("127.0.0.0/8"),  # IPv4 loopback
+    ipaddress.ip_network("::1/128"),  # IPv6 loopback
+    ipaddress.ip_network("10.0.0.0/8"),  # RFC 1918
+    ipaddress.ip_network("172.16.0.0/12"),  # RFC 1918
+    ipaddress.ip_network("192.168.0.0/16"),  # RFC 1918
+    ipaddress.ip_network("169.254.0.0/16"),  # Link-local / AWS IMDS
+    ipaddress.ip_network("fe80::/10"),  # IPv6 link-local
+    ipaddress.ip_network("fc00::/7"),  # IPv6 ULA
+    ipaddress.ip_network("100.64.0.0/10"),  # CGNAT
+    ipaddress.ip_network("0.0.0.0/8"),  # "This" network
 ]
 
 
@@ -123,25 +123,37 @@ class ProxyService:
         try:
             await self.db.collection(PROXIES).insert_one(doc)
         except DuplicateKeyError as exc:
-            raise ValueError("Proxy with this protocol, host and port already exists") from exc
+            raise ValueError(
+                "Proxy with this protocol, host and port already exists"
+            ) from exc
 
         return doc
 
     async def list_proxies(self, user_id: str) -> list[dict[str, Any]]:
-        cursor = self.db.collection(PROXIES).find({"user_id": user_id}).sort("created_at", -1)
+        cursor = (
+            self.db.collection(PROXIES)
+            .find({"user_id": user_id})
+            .sort("created_at", -1)
+        )
         return [item async for item in cursor]
 
     async def get_proxy(self, user_id: str, proxy_id: str) -> dict[str, Any] | None:
-        return await self.db.collection(PROXIES).find_one({"_id": proxy_id, "user_id": user_id})
+        return await self.db.collection(PROXIES).find_one(
+            {"_id": proxy_id, "user_id": user_id}
+        )
 
     async def delete_proxy(self, user_id: str, proxy_id: str) -> bool:
-        result = await self.db.collection(PROXIES).delete_one({"_id": proxy_id, "user_id": user_id})
+        result = await self.db.collection(PROXIES).delete_one(
+            {"_id": proxy_id, "user_id": user_id}
+        )
         return result.deleted_count > 0
 
     async def count_proxies(self, user_id: str) -> int:
         return await self.db.collection(PROXIES).count_documents({"user_id": user_id})
 
-    async def update_proxy_check(self, proxy_id: str, check_result: dict[str, Any]) -> None:
+    async def update_proxy_check(
+        self, proxy_id: str, check_result: dict[str, Any]
+    ) -> None:
         await self.db.collection(PROXIES).update_one(
             {"_id": proxy_id},
             {"$set": {"last_check": check_result}},
@@ -154,7 +166,10 @@ class ProxyService:
             return self.encryptor.decrypt(encrypted_password)
         except Exception as exc:
             import logging
-            logging.getLogger("multiplex.proxy").warning(f"Failed to decrypt proxy password: {exc}")
+
+            logging.getLogger("multiplex.proxy").warning(
+                f"Failed to decrypt proxy password: {exc}"
+            )
             return None
 
     @staticmethod
@@ -211,10 +226,11 @@ class ProxyService:
         except ImportError:
             import warnings
             import xml.etree.ElementTree as ET  # type: ignore[assignment]
+
             warnings.warn(
                 "defusedxml is not installed; XML parsing may be vulnerable to "
                 "entity expansion attacks. Install: pip install defusedxml",
-                SecurityWarning,
+                RuntimeWarning,
                 stacklevel=2,
             )
 
@@ -268,25 +284,30 @@ class ProxyService:
                 if pass_node is not None and pass_node.text:
                     password = pass_node.text.strip()
 
-            proxies.append({
-                "protocol": protocol,
-                "host": host,
-                "port": port,
-                "username": username,
-                "password": password,
-            })
+            proxies.append(
+                {
+                    "protocol": protocol,
+                    "host": host,
+                    "port": port,
+                    "username": username,
+                    "password": password,
+                }
+            )
         return proxies
 
     @staticmethod
     def export_as_proxifier_xml(proxies: list[dict[str, Any]]) -> str:
         import xml.etree.ElementTree as ET
 
-        root = ET.Element("ProxifierProfile", {
-            "version": "102",
-            "platform": "Windows",
-            "product_id": "0",
-            "product_minver": "400",
-        })
+        root = ET.Element(
+            "ProxifierProfile",
+            {
+                "version": "102",
+                "platform": "Windows",
+                "product_id": "0",
+                "product_minver": "400",
+            },
+        )
 
         options = ET.SubElement(root, "Options")
         resolve = ET.SubElement(options, "Resolve")
@@ -298,7 +319,9 @@ class ProxyService:
         ET.SubElement(resolve, "DnsUdpMode").text = "0"
 
         ET.SubElement(options, "Encryption", {"mode": "disabled"})
-        ET.SubElement(options, "ConnectionLoopDetection", {"enabled": "false", "resolve": "true"})
+        ET.SubElement(
+            options, "ConnectionLoopDetection", {"enabled": "false", "resolve": "true"}
+        )
         ET.SubElement(options, "Udp", {"mode": "mode_block_all"})
         ET.SubElement(options, "LeakPreventionMode", {"enabled": "true"})
         ET.SubElement(options, "ProcessOtherUsers", {"enabled": "false"})
@@ -311,10 +334,14 @@ class ProxyService:
         for i, proxy in enumerate(proxies):
             proxy_id = str(100 + i)
             p_type = proxy["protocol"].upper()
-            proxy_node = ET.SubElement(proxy_list, "Proxy", {
-                "id": proxy_id,
-                "type": p_type,
-            })
+            proxy_node = ET.SubElement(
+                proxy_list,
+                "Proxy",
+                {
+                    "id": proxy_id,
+                    "type": p_type,
+                },
+            )
 
             addr_node = ET.SubElement(proxy_node, "Address")
             addr_node.text = proxy["host"]
@@ -326,7 +353,9 @@ class ProxyService:
             options_node.text = "48"
 
             if proxy.get("username") or proxy.get("password"):
-                auth_node = ET.SubElement(proxy_node, "Authentication", {"enabled": "true"})
+                auth_node = ET.SubElement(
+                    proxy_node, "Authentication", {"enabled": "true"}
+                )
                 if proxy.get("username"):
                     u_node = ET.SubElement(auth_node, "Username")
                     u_node.text = proxy["username"]
@@ -345,6 +374,7 @@ class ProxyService:
         name_node.text = "Default"
 
         from xml.dom import minidom
+
         xml_str = ET.tostring(root, encoding="utf-8")
         reparsed = minidom.parseString(xml_str)
         pretty_xml = reparsed.toprettyxml(indent="\t")
@@ -353,7 +383,7 @@ class ProxyService:
         lines = pretty_xml.splitlines()
         if lines and lines[0].startswith("<?xml"):
             lines = lines[1:]
-        
+
         xml_body = "\n".join(lines)
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml_body
 
@@ -363,14 +393,16 @@ class ProxyService:
         host = proxy["host"]
         port = proxy["port"]
         username = proxy.get("username")
-        
+
         if username:
             pass_str = f":{plain_password}" if plain_password else ""
             return f"{protocol}://{username}{pass_str}@{host}:{port}"
         return f"{protocol}://{host}:{port}"
 
     @staticmethod
-    def export_as_lines(proxy: dict[str, Any], plain_password: str | None = None) -> str:
+    def export_as_lines(
+        proxy: dict[str, Any], plain_password: str | None = None
+    ) -> str:
         username = proxy.get("username") or ""
         password = plain_password or ""
         host = proxy["host"]
@@ -378,11 +410,13 @@ class ProxyService:
         return f"{username}\n{password}\n{host}\n{port}"
 
     @staticmethod
-    def export_as_tg_proxy(proxy: dict[str, Any], secret: str | None = None) -> dict[str, str]:
+    def export_as_tg_proxy(
+        proxy: dict[str, Any], secret: str | None = None
+    ) -> dict[str, str]:
         host = proxy["host"]
         port = proxy["port"]
         sec_param = f"&secret={secret}" if secret else ""
-        
+
         deep_link = f"tg://proxy?server={host}&port={port}{sec_param}"
         web_url = f"https://t.me/proxy?server={host}&port={port}{sec_param}"
         return {
@@ -390,7 +424,9 @@ class ProxyService:
             "web_url": web_url,
         }
 
-    async def check_proxy_single(self, proxy: dict[str, Any], timeout: int = 10) -> dict[str, Any]:
+    async def check_proxy_single(
+        self, proxy: dict[str, Any], timeout: int = 10
+    ) -> dict[str, Any]:
         protocol = proxy["protocol"]
         host = proxy["host"]
         port = proxy["port"]
@@ -407,7 +443,14 @@ class ProxyService:
                 "checked_at": datetime.now(UTC).isoformat(),
                 "ok": False,
                 "avg_latency_ms": None,
-                "details": {"ssrf_guard": {"ok": False, "latency_ms": None, "external_ip": None, "error": str(exc)}},
+                "details": {
+                    "ssrf_guard": {
+                        "ok": False,
+                        "latency_ms": None,
+                        "external_ip": None,
+                        "error": str(exc),
+                    }
+                },
             }
 
         auth_str = ""
@@ -453,7 +496,7 @@ class ProxyService:
                             provider_res = data.get("isp")
                         except Exception:
                             external_ip = resp.text.strip()
-                            
+
                     results[target_name] = {
                         "ok": True,
                         "latency_ms": latency,
@@ -487,7 +530,9 @@ class ProxyService:
             "provider": provider_res,
         }
 
-    async def check_all_background(self, user_id: str, proxy_ids: list[str] | None = None) -> None:
+    async def check_all_background(
+        self, user_id: str, proxy_ids: list[str] | None = None
+    ) -> None:
         if proxy_ids is None:
             proxies = await self.list_proxies(user_id)
         else:

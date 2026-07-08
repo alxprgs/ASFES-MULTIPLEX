@@ -22,7 +22,11 @@ class MirrorConfig(BaseModel):
     """Конфигурация зеркала дистрибутивов Python."""
 
     url_ftp: HttpUrl = Field(default="https://www.python.org/ftp/python/")
-    data_dir: Path = Field(default_factory=lambda: Path(__file__).resolve().parent.parent / "data" / "python-ver")
+    data_dir: Path = Field(
+        default_factory=lambda: (
+            Path(__file__).resolve().parent.parent / "data" / "python-ver"
+        )
+    )
     proxies: Union[List[str], str, None] = None
     network_mode: str = Field(default="direct", pattern="^(direct|proxy|mix)$")
     rate_limit_mb: Optional[float] = Field(default=None, gt=0)
@@ -63,7 +67,9 @@ class AsyncPythonMirror:
         self.parallel = self.cfg.parallel
         self.max_retries = self.cfg.max_retries
         self.proxies = self._load_proxies(self.cfg.proxies)
-        self._rate_limit_bytes = (self.cfg.rate_limit_mb * 1024 * 1024) if self.cfg.rate_limit_mb else None
+        self._rate_limit_bytes = (
+            (self.cfg.rate_limit_mb * 1024 * 1024) if self.cfg.rate_limit_mb else None
+        )
         self.rate_limit = self._rate_limit_bytes
 
     # ------------------------- Базовые помощники -------------------------
@@ -141,7 +147,11 @@ class AsyncPythonMirror:
 
         path = Path(str(proxies))
         if path.exists() and path.is_file():
-            return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            return [
+                line.strip()
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
 
         value = str(proxies).strip()
         return [value] if value else []
@@ -184,7 +194,9 @@ class AsyncPythonMirror:
             "total_size_human": self._format_size(total_size),
         }
 
-    async def _fetch_version_page(self, session: aiohttp.ClientSession, version: str) -> Optional[str]:
+    async def _fetch_version_page(
+        self, session: aiohttp.ClientSession, version: str
+    ) -> Optional[str]:
         try:
             async with session.get(
                 f"{self.url_ftp}{version}/",
@@ -208,19 +220,27 @@ class AsyncPythonMirror:
 
     # ------------------------- Низкоуровневые методы -------------------------
 
-    async def _get_remote_file_size(self, session: aiohttp.ClientSession, version: str, name: str) -> int:
+    async def _get_remote_file_size(
+        self, session: aiohttp.ClientSession, version: str, name: str
+    ) -> int:
         url = f"{self.url_ftp}{version}/{name}"
         try:
-            async with session.head(url, proxy=self._choose_proxy(), ssl=self.cfg.verify_ssl) as resp:
+            async with session.head(
+                url, proxy=self._choose_proxy(), ssl=self.cfg.verify_ssl
+            ) as resp:
                 if resp.status == 200:
                     return int(resp.headers.get("Content-Length", 0))
         except Exception:
             pass
         return 0
 
-    async def _check_disk_space(self, session: aiohttp.ClientSession, version: str, file_names: List[str]) -> None:
+    async def _check_disk_space(
+        self, session: aiohttp.ClientSession, version: str, file_names: List[str]
+    ) -> None:
         min_safe_free_space = self.cfg.min_safe_space_gb * 1024**3
-        sizes = await asyncio.gather(*(self._get_remote_file_size(session, version, name) for name in file_names))
+        sizes = await asyncio.gather(
+            *(self._get_remote_file_size(session, version, name) for name in file_names)
+        )
         total_required = sum(sizes)
         if total_required == 0:
             return
@@ -241,12 +261,16 @@ class AsyncPythonMirror:
                 return True
         return False
 
-    async def _check_file_integrity(self, session: aiohttp.ClientSession, version: str, name: str, dest: Path) -> bool:
+    async def _check_file_integrity(
+        self, session: aiohttp.ClientSession, version: str, name: str, dest: Path
+    ) -> bool:
         if not dest.exists() or not dest.is_file():
             return False
         url = f"{self.url_ftp}{version}/{name}"
         try:
-            async with session.head(url, proxy=self._choose_proxy(), timeout=3, ssl=self.cfg.verify_ssl) as resp:
+            async with session.head(
+                url, proxy=self._choose_proxy(), timeout=3, ssl=self.cfg.verify_ssl
+            ) as resp:
                 if resp.status == 200:
                     server_size = int(resp.headers.get("Content-Length", 0))
                     return dest.stat().st_size == server_size
@@ -254,7 +278,9 @@ class AsyncPythonMirror:
         except Exception:
             return False
 
-    async def _download_file(self, session: aiohttp.ClientSession, url: str, dest: Path) -> bool:
+    async def _download_file(
+        self, session: aiohttp.ClientSession, url: str, dest: Path
+    ) -> bool:
         proxy = self._choose_proxy()
         temp = dest.with_suffix(".download.tmp")
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -285,7 +311,13 @@ class AsyncPythonMirror:
                     pass
             raise
 
-    async def _download_single(self, session: aiohttp.ClientSession, version: str, name: str, sem: asyncio.Semaphore) -> bool:
+    async def _download_single(
+        self,
+        session: aiohttp.ClientSession,
+        version: str,
+        name: str,
+        sem: asyncio.Semaphore,
+    ) -> bool:
         async with sem:
             dest = self._safe_path(version, name)
             if await self._check_file_integrity(session, version, name, dest):
@@ -319,12 +351,16 @@ class AsyncPythonMirror:
                     href = str(link.get("href", "")).rstrip("/")
                     if re.match(r"^\d+\.\d+\.\d+$", href):
                         versions.append(href)
-                return sorted(versions, key=lambda v: [int(p) for p in v.split(".")], reverse=True)
+                return sorted(
+                    versions, key=lambda v: [int(p) for p in v.split(".")], reverse=True
+                )
         except (aiohttp.ClientError, asyncio.TimeoutError):
             logger.warning("network_unavailable_fallback_to_local")
             return await self.list_installed()
 
-    async def install_version(self, session: aiohttp.ClientSession, version: str) -> bool:
+    async def install_version(
+        self, session: aiohttp.ClientSession, version: str
+    ) -> bool:
         session_dir = self._safe_path(version)
         session_dir.mkdir(parents=True, exist_ok=True)
 
@@ -347,9 +383,14 @@ class AsyncPythonMirror:
         sem = asyncio.Semaphore(self.parallel)
 
         for attempt in range(self.max_retries):
-            tasks = [self._download_single(session, version, name, sem) for name in files_to_download]
+            tasks = [
+                self._download_single(session, version, name, sem)
+                for name in files_to_download
+            ]
             results = await asyncio.gather(*tasks)
-            failed_files = [files_to_download[i] for i, ok in enumerate(results) if not ok]
+            failed_files = [
+                files_to_download[i] for i, ok in enumerate(results) if not ok
+            ]
             if not failed_files:
                 if self.show_progress:
                     logger.info("install_success version=%s", version)
@@ -366,7 +407,9 @@ class AsyncPythonMirror:
         raise RuntimeError(f"Failed to download all files for version {version}")
 
     async def list_installed(
-        self, session: Optional[aiohttp.ClientSession] = None, check_integrity: bool = False
+        self,
+        session: Optional[aiohttp.ClientSession] = None,
+        check_integrity: bool = False,
     ) -> List[str]:
         installed_versions = [d.name for d in self.data_dir.iterdir() if d.is_dir()]
         if not check_integrity:
@@ -380,7 +423,9 @@ class AsyncPythonMirror:
             files = [f.name for f in self._safe_path(version).iterdir() if f.is_file()]
             is_ok = True
             for file_name in files:
-                if not await self._check_file_integrity(session, version, file_name, self._safe_path(version, file_name)):
+                if not await self._check_file_integrity(
+                    session, version, file_name, self._safe_path(version, file_name)
+                ):
                     is_ok = False
                     break
             if is_ok and files:
@@ -402,7 +447,11 @@ class AsyncPythonMirror:
         # Новый API: get_file_path(version, filename)
         # Обратная совместимость: вызов с двумя аргументами и значением вроде "windows"/"linux"/"macos"
         # (или значением без расширения) считается старым API на основе os_type.
-        use_legacy = arch is not None or is_executable is not None or "." not in filename_or_os_type
+        use_legacy = (
+            arch is not None
+            or is_executable is not None
+            or "." not in filename_or_os_type
+        )
         if not use_legacy:
             return self._safe_path(version, filename_or_os_type)
 
@@ -418,7 +467,11 @@ class AsyncPythonMirror:
         elif os_type == "linux":
             filename = f"Python-{version}.tar.xz"
         elif os_type == "macos":
-            filename = f"python-{version}-macos11.pkg" if executable else f"Python-{version}.tar.xz"
+            filename = (
+                f"python-{version}-macos11.pkg"
+                if executable
+                else f"Python-{version}.tar.xz"
+            )
         else:
             raise ValueError(f"Unsupported os_type: {os_type}")
 
@@ -447,7 +500,9 @@ class AsyncPythonMirror:
 
     # ------------------------- Публичный высокоуровневый API -------------------------
 
-    async def get_versions_public(self, session: Optional[aiohttp.ClientSession] = None) -> Dict[str, Any]:
+    async def get_versions_public(
+        self, session: Optional[aiohttp.ClientSession] = None
+    ) -> Dict[str, Any]:
         try:
             async with self._managed_session(session) as managed:
                 versions = await self.get_versions(managed)
@@ -486,7 +541,9 @@ class AsyncPythonMirror:
             self._log_result(result)
             return result
         except Exception as exc:
-            result = self._result(False, "install_version", version=version, error=str(exc))
+            result = self._result(
+                False, "install_version", version=version, error=str(exc)
+            )
             self._log_result(result)
             return result
 
@@ -528,7 +585,9 @@ class AsyncPythonMirror:
                     if not target.exists():
                         missing_files.append(file_name)
                         continue
-                    ok = await self._check_file_integrity(managed, version, file_name, target)
+                    ok = await self._check_file_integrity(
+                        managed, version, file_name, target
+                    )
                     if not ok:
                         corrupted_files.append(file_name)
 
@@ -543,11 +602,15 @@ class AsyncPythonMirror:
             self._log_result(result)
             return result
         except Exception as exc:
-            result = self._result(False, "verify_version", version=version, error=str(exc))
+            result = self._result(
+                False, "verify_version", version=version, error=str(exc)
+            )
             self._log_result(result)
             return result
 
-    async def verify_all(self, session: Optional[aiohttp.ClientSession] = None) -> Dict[str, Any]:
+    async def verify_all(
+        self, session: Optional[aiohttp.ClientSession] = None
+    ) -> Dict[str, Any]:
         try:
             installed = await self.list_installed()
             details: List[Dict[str, Any]] = []
@@ -600,11 +663,15 @@ class AsyncPythonMirror:
             self._log_result(result)
             return result
         except Exception as exc:
-            result = self._result(False, "repair_version", version=version, error=str(exc))
+            result = self._result(
+                False, "repair_version", version=version, error=str(exc)
+            )
             self._log_result(result)
             return result
 
-    async def repair_all_public(self, session: Optional[aiohttp.ClientSession] = None) -> Dict[str, Any]:
+    async def repair_all_public(
+        self, session: Optional[aiohttp.ClientSession] = None
+    ) -> Dict[str, Any]:
         try:
             installed = await self.list_installed()
             details: List[Dict[str, Any]] = []
@@ -628,12 +695,16 @@ class AsyncPythonMirror:
             return result
 
     async def list_installed_public(
-        self, check_integrity: bool = False, session: Optional[aiohttp.ClientSession] = None
+        self,
+        check_integrity: bool = False,
+        session: Optional[aiohttp.ClientSession] = None,
     ) -> Dict[str, Any]:
         try:
             if check_integrity:
                 async with self._managed_session(session) as managed:
-                    versions = await self.list_installed(session=managed, check_integrity=True)
+                    versions = await self.list_installed(
+                        session=managed, check_integrity=True
+                    )
             else:
                 versions = await self.list_installed(check_integrity=False)
 
@@ -658,7 +729,9 @@ class AsyncPythonMirror:
             self._log_result(result)
             return result
         except Exception as exc:
-            result = self._result(False, "list_installed", check_integrity=check_integrity, error=str(exc))
+            result = self._result(
+                False, "list_installed", check_integrity=check_integrity, error=str(exc)
+            )
             self._log_result(result)
             return result
 
@@ -669,7 +742,11 @@ class AsyncPythonMirror:
             version_path = self._safe_path(version)
             files = self.list_version_files(version) if version_path.exists() else []
             size_bytes = self.get_version_size(version) if version_path.exists() else 0
-            verify_result = await self.verify_version(version, session=session) if version_path.exists() else None
+            verify_result = (
+                await self.verify_version(version, session=session)
+                if version_path.exists()
+                else None
+            )
 
             result = self._result(
                 ok=version_path.exists(),
@@ -686,7 +763,9 @@ class AsyncPythonMirror:
             self._log_result(result)
             return result
         except Exception as exc:
-            result = self._result(False, "get_version_info", version=version, error=str(exc))
+            result = self._result(
+                False, "get_version_info", version=version, error=str(exc)
+            )
             self._log_result(result)
             return result
 
@@ -713,7 +792,9 @@ class AsyncPythonMirror:
 
     def delete_target(self, version: str) -> Dict[str, Any]:
         removed = self.remove_version(version)
-        result = self._result(ok=removed, action="delete_target", version=version, deleted=removed)
+        result = self._result(
+            ok=removed, action="delete_target", version=version, deleted=removed
+        )
         self._log_result(result)
         return result
 

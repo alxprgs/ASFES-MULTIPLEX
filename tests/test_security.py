@@ -5,7 +5,17 @@ from datetime import timedelta
 import pytest
 
 from server.core.qr import _reed_solomon_generator, qr_svg
-from server.core.security import SecurityError, build_pkce_challenge, create_jwt, decode_jwt, encode_jwt, hash_password, totp_code, verify_password, verify_pkce
+from server.core.security import (
+    SecurityError,
+    build_pkce_challenge,
+    create_jwt,
+    decode_jwt,
+    encode_jwt,
+    hash_password,
+    totp_code,
+    verify_password,
+    verify_pkce,
+)
 
 
 def test_password_hash_roundtrip() -> None:
@@ -60,7 +70,11 @@ def test_jwt_rejects_unexpected_algorithm() -> None:
     import base64
     import json
 
-    bad_header = base64.urlsafe_b64encode(json.dumps({"alg": "none", "typ": "JWT"}).encode()).decode().rstrip("=")
+    bad_header = (
+        base64.urlsafe_b64encode(json.dumps({"alg": "none", "typ": "JWT"}).encode())
+        .decode()
+        .rstrip("=")
+    )
     with pytest.raises(SecurityError):
         decode_jwt(
             f"{bad_header}.{payload}.{signature}",

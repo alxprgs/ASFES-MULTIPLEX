@@ -9,15 +9,20 @@ class SchemaMigrationRegistry:
         def decorator(func: callable):
             self._transformers[(from_version, to_version)] = func
             return func
+
         return decorator
 
-    def upgrade(self, event_dict: dict[str, Any], target_version: int = 1) -> dict[str, Any]:
+    def upgrade(
+        self, event_dict: dict[str, Any], target_version: int = 1
+    ) -> dict[str, Any]:
         """Upgrades an event dictionary to the target schema version."""
         current_version = event_dict.get("schema_version", 1)
         while current_version < target_version:
             transformer = self._transformers.get((current_version, current_version + 1))
             if not transformer:
-                raise ValueError(f"No migration path from schema version {current_version} to {current_version + 1}")
+                raise ValueError(
+                    f"No migration path from schema version {current_version} to {current_version + 1}"
+                )
             event_dict = transformer(event_dict)
             current_version += 1
             event_dict["schema_version"] = current_version

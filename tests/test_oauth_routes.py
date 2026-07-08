@@ -27,7 +27,10 @@ async def test_oauth_client_registration_and_crud(integration_env) -> None:
     # Login as root
     login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
@@ -38,10 +41,10 @@ async def test_oauth_client_registration_and_crud(integration_env) -> None:
         json={
             "client_name": "Test Client App",
             "redirect_uris": ["http://localhost:3000/callback"],
-            "token_endpoint_auth_method": "none", # Public client
+            "token_endpoint_auth_method": "none",  # Public client
             "grant_types": ["authorization_code"],
             "response_types": ["code"],
-        }
+        },
     )
     assert reg_resp.status_code == 201
     client_id = reg_resp.json()["client_id"]
@@ -60,7 +63,10 @@ async def test_oauth_authorization_endpoint_failures(integration_env) -> None:
     # Login as root
     login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
@@ -74,7 +80,7 @@ async def test_oauth_authorization_endpoint_failures(integration_env) -> None:
             "token_endpoint_auth_method": "none",
             "grant_types": ["authorization_code"],
             "response_types": ["code"],
-        }
+        },
     )
     client_id = reg_resp.json()["client_id"]
 
@@ -88,7 +94,7 @@ async def test_oauth_authorization_endpoint_failures(integration_env) -> None:
             "scope": "mcp",
             "code_challenge": "challenge",
             "code_challenge_method": "S256",
-        }
+        },
     )
     assert resp1.status_code == 404
     assert "Unknown OAuth client" in resp1.json()["detail"]
@@ -103,7 +109,7 @@ async def test_oauth_authorization_endpoint_failures(integration_env) -> None:
             "scope": "mcp",
             "code_challenge": "challenge",
             "code_challenge_method": "S256",
-        }
+        },
     )
     assert resp2.status_code == 400
     assert "Redirect URI is not registered" in resp2.json()["detail"]
@@ -118,7 +124,7 @@ async def test_oauth_authorization_endpoint_failures(integration_env) -> None:
             "scope": "mcp",
             "code_challenge": "challenge",
             "code_challenge_method": "S256",
-        }
+        },
     )
     assert resp3.status_code == 400
     assert "Only response_type=code is supported" in resp3.json()["detail"]
@@ -135,7 +141,7 @@ async def test_oauth_token_endpoint_failures(integration_env) -> None:
         data={
             "grant_type": "client_credentials",
             "client_id": "some_client",
-        }
+        },
     )
     assert resp1.status_code == 400
     assert "Unsupported grant_type" in resp1.json()["detail"]
@@ -149,7 +155,7 @@ async def test_oauth_token_endpoint_failures(integration_env) -> None:
             "code": "invalid_code",
             "redirect_uri": "https://app.example.com/callback",
             "code_verifier": "verifier",
-        }
+        },
     )
     # The client isn't found during validation, so validate_client throws LookupError -> 404
     assert resp2.status_code == 404

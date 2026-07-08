@@ -8,17 +8,19 @@ from server.core.database import DatabaseManager
 
 
 def test_database_manager_initialization() -> None:
-    settings = Settings.model_validate({
-        "app": {"name": "TestApp"},
-        "mongo": {"uri": "mongodb://localhost:27017", "database": "test_db"},
-        "smtp": {},
-        "root": {"username": "root", "email": "root@example.com"},
-        "security": {
-            "api_jwt_secret": "secret",
-            "oauth_jwt_secret": "secret",
-            "password_pepper": "pepper",
-        },
-    })
+    settings = Settings.model_validate(
+        {
+            "app": {"name": "TestApp"},
+            "mongo": {"uri": "mongodb://localhost:27017", "database": "test_db"},
+            "smtp": {},
+            "root": {"username": "root", "email": "root@example.com"},
+            "security": {
+                "api_jwt_secret": "secret",
+                "oauth_jwt_secret": "secret",
+                "password_pepper": "pepper",
+            },
+        }
+    )
     db_manager = DatabaseManager(settings)
     assert db_manager.settings == settings
     assert db_manager.client is None
@@ -27,17 +29,19 @@ def test_database_manager_initialization() -> None:
 
 @pytest.mark.asyncio
 async def test_database_connect_disconnect() -> None:
-    settings = Settings.model_validate({
-        "app": {"name": "TestApp"},
-        "mongo": {"uri": "mongodb://localhost:27017", "database": "test_db"},
-        "smtp": {},
-        "root": {"username": "root", "email": "root@example.com"},
-        "security": {
-            "api_jwt_secret": "secret",
-            "oauth_jwt_secret": "secret",
-            "password_pepper": "pepper",
-        },
-    })
+    settings = Settings.model_validate(
+        {
+            "app": {"name": "TestApp"},
+            "mongo": {"uri": "mongodb://localhost:27017", "database": "test_db"},
+            "smtp": {},
+            "root": {"username": "root", "email": "root@example.com"},
+            "security": {
+                "api_jwt_secret": "secret",
+                "oauth_jwt_secret": "secret",
+                "password_pepper": "pepper",
+            },
+        }
+    )
     db_manager = DatabaseManager(settings)
 
     mock_client = MagicMock()
@@ -56,17 +60,19 @@ async def test_database_connect_disconnect() -> None:
 
 
 def test_collection_raises_when_not_connected() -> None:
-    settings = Settings.model_validate({
-        "app": {"name": "TestApp"},
-        "mongo": {"uri": "mongodb://localhost:27017", "database": "test_db"},
-        "smtp": {},
-        "root": {"username": "root", "email": "root@example.com"},
-        "security": {
-            "api_jwt_secret": "secret",
-            "oauth_jwt_secret": "secret",
-            "password_pepper": "pepper",
-        },
-    })
+    settings = Settings.model_validate(
+        {
+            "app": {"name": "TestApp"},
+            "mongo": {"uri": "mongodb://localhost:27017", "database": "test_db"},
+            "smtp": {},
+            "root": {"username": "root", "email": "root@example.com"},
+            "security": {
+                "api_jwt_secret": "secret",
+                "oauth_jwt_secret": "secret",
+                "password_pepper": "pepper",
+            },
+        }
+    )
     db_manager = DatabaseManager(settings)
     with pytest.raises(RuntimeError) as exc:
         db_manager.collection("users")
@@ -75,17 +81,19 @@ def test_collection_raises_when_not_connected() -> None:
 
 @pytest.mark.asyncio
 async def test_ensure_indexes() -> None:
-    settings = Settings.model_validate({
-        "app": {"name": "TestApp"},
-        "mongo": {"uri": "mongodb://localhost:27017", "database": "test_db"},
-        "smtp": {},
-        "root": {"username": "root", "email": "root@example.com"},
-        "security": {
-            "api_jwt_secret": "secret",
-            "oauth_jwt_secret": "secret",
-            "password_pepper": "pepper",
-        },
-    })
+    settings = Settings.model_validate(
+        {
+            "app": {"name": "TestApp"},
+            "mongo": {"uri": "mongodb://localhost:27017", "database": "test_db"},
+            "smtp": {},
+            "root": {"username": "root", "email": "root@example.com"},
+            "security": {
+                "api_jwt_secret": "secret",
+                "oauth_jwt_secret": "secret",
+                "password_pepper": "pepper",
+            },
+        }
+    )
     db_manager = DatabaseManager(settings)
 
     mock_db = MagicMock()

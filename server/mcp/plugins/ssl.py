@@ -5,7 +5,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 from server.mcp.plugins._common import require_argument
-from server.models import MCPTool, MCPToolManifest, PermissionDefinition, PluginDefinition, PluginManifest, RuntimeAvailability, ToolExecutionContext
+from server.models import (
+    MCPTool,
+    MCPToolManifest,
+    PermissionDefinition,
+    PluginDefinition,
+    PluginManifest,
+    RuntimeAvailability,
+    ToolExecutionContext,
+)
 
 
 def _default_ssl_provider(context: ToolExecutionContext) -> str:
@@ -18,19 +26,27 @@ def _default_ssl_provider(context: ToolExecutionContext) -> str:
 async def _ssl_provider_availability(services) -> RuntimeAvailability:
     override = services.host_ops.provider_override("ssl")
     if override:
-        return services.host_ops.availability_for_command(override, providers=[override])
-    return services.host_ops.availability_for_any_command(["certbot", "wacs", "wacs.exe"], providers=["certbot", "win-acme"])
+        return services.host_ops.availability_for_command(
+            override, providers=[override]
+        )
+    return services.host_ops.availability_for_any_command(
+        ["certbot", "wacs", "wacs.exe"], providers=["certbot", "win-acme"]
+    )
 
 
 def _load_profile(context: ToolExecutionContext, name: str) -> dict[str, Any]:
     return context.services.host_ops.load_json_profile("ssl", name)
 
 
-async def list_profiles(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def list_profiles(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     return {"profiles": context.services.host_ops.list_profiles("ssl")}
 
 
-async def issue_certificate(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def issue_certificate(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     profile_name = str(require_argument(arguments, "profile"))
     profile = _load_profile(context, profile_name)
     provider = str(profile.get("provider") or _default_ssl_provider(context))
@@ -43,7 +59,14 @@ async def issue_certificate(context: ToolExecutionContext, arguments: dict[str, 
         webroot = str(profile.get("webroot") or "")
         if not domains or not email:
             raise RuntimeError("Certbot profiles require 'domains' and 'email'")
-        command = [executable, "certonly", "--non-interactive", "--agree-tos", "-m", email]
+        command = [
+            executable,
+            "certonly",
+            "--non-interactive",
+            "--agree-tos",
+            "-m",
+            email,
+        ]
         if webroot:
             command.extend(["--webroot", "-w", webroot])
         else:
@@ -51,13 +74,24 @@ async def issue_certificate(context: ToolExecutionContext, arguments: dict[str, 
         for domain in domains:
             command.extend(["-d", domain])
     else:
-        extra_args = [str(item) for item in profile.get("arguments", []) if str(item).strip()]
+        extra_args = [
+            str(item) for item in profile.get("arguments", []) if str(item).strip()
+        ]
         if extra_args:
             command = [executable, *extra_args]
         else:
             if not domains:
-                raise RuntimeError("win-acme profiles require 'domains' or explicit 'arguments'")
-            command = [executable, "--accepttos", "--source", "manual", "--host", ",".join(domains)]
+                raise RuntimeError(
+                    "win-acme profiles require 'domains' or explicit 'arguments'"
+                )
+            command = [
+                executable,
+                "--accepttos",
+                "--source",
+                "manual",
+                "--host",
+                ",".join(domains),
+            ]
             if profile.get("email"):
                 command.extend(["--emailaddress", str(profile["email"])])
     result = await context.services.host_ops.run(command, check=False)
@@ -66,7 +100,9 @@ async def issue_certificate(context: ToolExecutionContext, arguments: dict[str, 
     return {"profile": profile_name, "provider": provider, **result.to_dict()}
 
 
-async def renew_certificate(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def renew_certificate(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     profile_name = str(require_argument(arguments, "profile"))
     profile = _load_profile(context, profile_name)
     provider = str(profile.get("provider") or _default_ssl_provider(context))
@@ -83,15 +119,21 @@ async def renew_certificate(context: ToolExecutionContext, arguments: dict[str, 
     return {"profile": profile_name, "provider": provider, **result.to_dict()}
 
 
-async def check_expiry(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def check_expiry(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     profile_name = str(require_argument(arguments, "profile"))
     profile = _load_profile(context, profile_name)
     certificate_path = profile.get("certificate_path") or profile.get("cert_path")
     if not certificate_path:
         raise RuntimeError("SSL profile does not define certificate_path")
-    cert_path = context.services.host_ops.resolve_managed_path(str(certificate_path), roots=context.services.host_ops.managed_file_roots())
+    cert_path = context.services.host_ops.resolve_managed_path(
+        str(certificate_path), roots=context.services.host_ops.managed_file_roots()
+    )
     decoded = ssl_module._ssl._test_decode_cert(str(cert_path))  # type: ignore[attr-defined]
-    expires_at = datetime.strptime(decoded["notAfter"], "%b %d %H:%M:%S %Y %Z").replace(tzinfo=UTC)
+    expires_at = datetime.strptime(decoded["notAfter"], "%b %d %H:%M:%S %Y %Z").replace(
+        tzinfo=UTC
+    )
     remaining = expires_at - datetime.now(UTC)
     return {
         "profile": profile_name,
@@ -108,8 +150,14 @@ PLUGIN = PluginDefinition(
         version="1.0.0",
         description="Выпускает, обновляет и проверяет SSL-сертификаты через именованные серверные профили.",
         permissions=[
-            PermissionDefinition(key="ssl.read", description="Читать метаданные SSL-профилей и срок действия сертификатов."),
-            PermissionDefinition(key="ssl.write", description="Выпускать и обновлять SSL-сертификаты из именованных профилей."),
+            PermissionDefinition(
+                key="ssl.read",
+                description="Читать метаданные SSL-профилей и срок действия сертификатов.",
+            ),
+            PermissionDefinition(
+                key="ssl.write",
+                description="Выпускать и обновлять SSL-сертификаты из именованных профилей.",
+            ),
         ],
         providers=["certbot", "win-acme"],
     ),
@@ -119,7 +167,11 @@ PLUGIN = PluginDefinition(
                 key="ssl.list_profiles",
                 name="Список SSL-профилей",
                 description="Показывает именованные SSL-профили, сохранённые на сервере.",
-                input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
                 permissions=["ssl.read"],
                 tags=["ssl", "read"],
                 read_only=True,

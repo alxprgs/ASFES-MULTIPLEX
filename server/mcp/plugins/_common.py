@@ -57,8 +57,14 @@ def parse_json_lines(stdout: str) -> list[dict[str, Any]]:
     return items
 
 
-def managed_path(context: ToolExecutionContext, raw_path: str, *, use_logs_root: bool = False) -> Path:
-    roots = context.services.host_ops.managed_log_roots() if use_logs_root else context.services.host_ops.managed_file_roots()
+def managed_path(
+    context: ToolExecutionContext, raw_path: str, *, use_logs_root: bool = False
+) -> Path:
+    roots = (
+        context.services.host_ops.managed_log_roots()
+        if use_logs_root
+        else context.services.host_ops.managed_file_roots()
+    )
     return context.services.host_ops.resolve_managed_path(str(raw_path), roots=roots)
 
 
@@ -73,15 +79,28 @@ def static_availability(
         if backend:
             statuses.append(services.host_ops.availability_for_command(backend))
         if any_backends:
-            statuses.append(services.host_ops.availability_for_any_command(any_backends))
+            statuses.append(
+                services.host_ops.availability_for_any_command(any_backends)
+            )
         if require_psutil:
             statuses.append(services.host_ops.availability_for_psutil())
         if not statuses:
             return RuntimeAvailability(available=True)
         available = all(item.available for item in statuses)
-        reason = next((item.reason for item in statuses if not item.available and item.reason), None)
-        required_backends = sorted({backend_name for item in statuses for backend_name in item.required_backends})
-        providers = sorted({provider for item in statuses for provider in item.providers})
+        reason = next(
+            (item.reason for item in statuses if not item.available and item.reason),
+            None,
+        )
+        required_backends = sorted(
+            {
+                backend_name
+                for item in statuses
+                for backend_name in item.required_backends
+            }
+        )
+        providers = sorted(
+            {provider for item in statuses for provider in item.providers}
+        )
         return RuntimeAvailability(
             available=available,
             reason=reason,

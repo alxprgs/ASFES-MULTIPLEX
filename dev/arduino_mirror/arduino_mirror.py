@@ -1,4 +1,3 @@
-
 import asyncio
 import hashlib
 import json
@@ -18,8 +17,9 @@ import aiofiles
 import aiohttp
 from bs4 import BeautifulSoup, NavigableString, Tag
 from pydantic import BaseModel, Field
+
 try:
-    import yaml # pyright: ignore[reportMissingModuleSource]
+    import yaml  # pyright: ignore[reportMissingModuleSource]
 except Exception:  # pragma: no cover - запасной путь для необязательной зависимости
     yaml = None
 
@@ -157,10 +157,16 @@ class AsyncArduinoMirror:
             path.mkdir(parents=True, exist_ok=True)
 
         self._visited_file = self._safe_path("_shared", "state", "visited_urls.json")
-        self._url_map_file = self._safe_path("_shared", "state", "url_to_local_path.json")
+        self._url_map_file = self._safe_path(
+            "_shared", "state", "url_to_local_path.json"
+        )
         self._failures_file = self._safe_path("_shared", "state", "failures.json")
-        self._pages_index_file = self._safe_path("_shared", "indexes", "pages_index.json")
-        self._assets_index_file = self._safe_path("_shared", "indexes", "assets_index.json")
+        self._pages_index_file = self._safe_path(
+            "_shared", "indexes", "pages_index.json"
+        )
+        self._assets_index_file = self._safe_path(
+            "_shared", "indexes", "assets_index.json"
+        )
         self._hardware_index_file = self._safe_path(
             "_shared", "indexes", "hardware_index.json"
         )
@@ -170,7 +176,9 @@ class AsyncArduinoMirror:
         self._programming_index_file = self._safe_path(
             "_shared", "indexes", "programming_index.json"
         )
-        self._learn_index_file = self._safe_path("_shared", "indexes", "learn_index.json")
+        self._learn_index_file = self._safe_path(
+            "_shared", "indexes", "learn_index.json"
+        )
 
         self.visited_urls: set[str] = set()
         self.url_to_local_path: Dict[str, str] = {}
@@ -322,7 +330,11 @@ class AsyncArduinoMirror:
         if self.cfg.follow_query_strings and parsed.query:
             pairs = sorted(parse_qsl(parsed.query, keep_blank_values=True))
             query = urlencode(pairs)
-        if path and not path.endswith("/") and not re.search(r"\.[A-Za-z0-9]{1,8}$", path):
+        if (
+            path
+            and not path.endswith("/")
+            and not re.search(r"\.[A-Za-z0-9]{1,8}$", path)
+        ):
             path = f"{path}/"
         return urlunparse((scheme, netloc, path, "", query, ""))
 
@@ -348,7 +360,10 @@ class AsyncArduinoMirror:
             return False
         if path.startswith("/tutorials/") and not self.cfg.follow_tutorial_links:
             return False
-        if path.startswith("/language-reference/") and not self.cfg.follow_reference_links:
+        if (
+            path.startswith("/language-reference/")
+            and not self.cfg.follow_reference_links
+        ):
             return False
         if path.startswith("/learn/") and not self.cfg.follow_learn_links:
             return False
@@ -422,13 +437,17 @@ class AsyncArduinoMirror:
             kwargs["timeout"] = self.cfg.request_timeout
         return kwargs
 
-    async def _fetch_text(self, session: aiohttp.ClientSession, url: str) -> Tuple[str, str]:
+    async def _fetch_text(
+        self, session: aiohttp.ClientSession, url: str
+    ) -> Tuple[str, str]:
         normalized = self._normalize_url(url)
         last_error: Optional[Exception] = None
         for attempt in range(1, self.cfg.max_retries + 1):
             try:
                 async with self._semaphore:
-                    async with session.get(normalized, **self._request_kwargs()) as resp:
+                    async with session.get(
+                        normalized, **self._request_kwargs()
+                    ) as resp:
                         if hasattr(resp, "raise_for_status"):
                             resp.raise_for_status()
                         text = await resp.text()
@@ -444,13 +463,17 @@ class AsyncArduinoMirror:
             raise last_error
         raise RuntimeError("unexpected fetch_text failure")
 
-    async def _fetch_bytes(self, session: aiohttp.ClientSession, url: str) -> Tuple[bytes, str]:
+    async def _fetch_bytes(
+        self, session: aiohttp.ClientSession, url: str
+    ) -> Tuple[bytes, str]:
         normalized = self._normalize_url(url)
         last_error: Optional[Exception] = None
         for attempt in range(1, self.cfg.max_retries + 1):
             try:
                 async with self._semaphore:
-                    async with session.get(normalized, **self._request_kwargs()) as resp:
+                    async with session.get(
+                        normalized, **self._request_kwargs()
+                    ) as resp:
                         if hasattr(resp, "raise_for_status"):
                             resp.raise_for_status()
                         if hasattr(resp, "read"):
@@ -472,7 +495,9 @@ class AsyncArduinoMirror:
             raise last_error
         raise RuntimeError("unexpected fetch_bytes failure")
 
-    async def _head_or_get_meta(self, session: aiohttp.ClientSession, url: str) -> Dict[str, Any]:
+    async def _head_or_get_meta(
+        self, session: aiohttp.ClientSession, url: str
+    ) -> Dict[str, Any]:
         normalized = self._normalize_url(url)
         headers: Dict[str, str] = {}
         status = None
@@ -480,7 +505,9 @@ class AsyncArduinoMirror:
         if hasattr(session, "head"):
             try:
                 async with self._semaphore:
-                    async with session.head(normalized, **self._request_kwargs()) as resp:
+                    async with session.head(
+                        normalized, **self._request_kwargs()
+                    ) as resp:
                         status = getattr(resp, "status", None)
                         headers = dict((getattr(resp, "headers", {}) or {}))
                         if status and status < 400:
@@ -527,7 +554,9 @@ class AsyncArduinoMirror:
             completed = False
             try:
                 async with self._semaphore:
-                    async with session.get(normalized, **self._request_kwargs()) as resp:
+                    async with session.get(
+                        normalized, **self._request_kwargs()
+                    ) as resp:
                         if hasattr(resp, "raise_for_status"):
                             resp.raise_for_status()
                         headers = dict((getattr(resp, "headers", {}) or {}))
@@ -577,12 +606,20 @@ class AsyncArduinoMirror:
         raise RuntimeError("unexpected download failure")
 
     def _filename_from_url_or_headers(self, url: str, headers: Dict[str, str]) -> str:
-        disposition = headers.get("Content-Disposition") or headers.get("content-disposition") or ""
+        disposition = (
+            headers.get("Content-Disposition")
+            or headers.get("content-disposition")
+            or ""
+        )
         if disposition:
-            match = re.search(r"filename\*=UTF-8''([^;]+)", disposition, flags=re.IGNORECASE)
+            match = re.search(
+                r"filename\*=UTF-8''([^;]+)", disposition, flags=re.IGNORECASE
+            )
             if match:
                 return self._safe_filename(unquote(match.group(1)))
-            match = re.search(r'filename="?([^";]+)"?', disposition, flags=re.IGNORECASE)
+            match = re.search(
+                r'filename="?([^";]+)"?', disposition, flags=re.IGNORECASE
+            )
             if match:
                 return self._safe_filename(match.group(1))
 
@@ -628,7 +665,9 @@ class AsyncArduinoMirror:
 
         meta = await self._head_or_get_meta(session, normalized)
         headers = meta.get("headers", {}) or {}
-        filename = expected_name or self._filename_from_url_or_headers(normalized, headers)
+        filename = expected_name or self._filename_from_url_or_headers(
+            normalized, headers
+        )
         filename = self._safe_filename(filename)
         dest = self._safe_path(*dest_dir.relative_to(self.data_dir).parts, filename)
         temp_path = dest.with_name(f"{dest.name}.download.tmp")
@@ -645,7 +684,8 @@ class AsyncArduinoMirror:
                     "normalized_url": normalized,
                     "filename": filename,
                     "local_path": str(dest),
-                    "content_type": download_meta.get("content_type") or headers.get("Content-Type", ""),
+                    "content_type": download_meta.get("content_type")
+                    or headers.get("Content-Type", ""),
                     "size_bytes": int(size_bytes),
                     "sha256": sha256,
                     "downloaded_at": self._now_iso(),
@@ -674,6 +714,7 @@ class AsyncArduinoMirror:
         if last_error is not None:
             raise last_error
         raise RuntimeError(f"asset download failed for {normalized}")
+
     # ---------------------------------------------------------------------
     # Помощники хранилища и состояния
     # ---------------------------------------------------------------------
@@ -782,7 +823,10 @@ class AsyncArduinoMirror:
             self._upsert_by_key(self.hardware_index, page_rec, "normalized_url")
         if section == "software":
             self._upsert_by_key(self.software_index, page_rec, "normalized_url")
-        if section in {"programming", "language_reference"} or record.get("page_type") == "reference_page":
+        if (
+            section in {"programming", "language_reference"}
+            or record.get("page_type") == "reference_page"
+        ):
             self._upsert_by_key(self.programming_index, page_rec, "normalized_url")
         if section == "learn":
             self._upsert_by_key(self.learn_index, page_rec, "normalized_url")
@@ -815,7 +859,9 @@ class AsyncArduinoMirror:
             )
         )
         has_tutorial_css = bool(
-            soup.select_one(".tutorial, .tutorial__content, [data-page-type='tutorial']")
+            soup.select_one(
+                ".tutorial, .tutorial__content, [data-page-type='tutorial']"
+            )
         )
         if has_reference_css:
             return "reference_page"
@@ -832,8 +878,12 @@ class AsyncArduinoMirror:
                 "compatibility",
             )
         )
-        has_features_signals = "features" in text and ("tutorials" in text or "specs" in text)
-        if path.startswith("/hardware/") and (has_product_css or has_product_signals or has_features_signals):
+        has_features_signals = "features" in text and (
+            "tutorials" in text or "specs" in text
+        )
+        if path.startswith("/hardware/") and (
+            has_product_css or has_product_signals or has_features_signals
+        ):
             return "hardware_product"
         if path.startswith("/hardware/"):
             return "hardware_index_like"
@@ -940,7 +990,9 @@ class AsyncArduinoMirror:
                     links.append(resolved)
         return links
 
-    def _find_heading(self, soup: BeautifulSoup, patterns: Iterable[str]) -> Optional[Tag]:
+    def _find_heading(
+        self, soup: BeautifulSoup, patterns: Iterable[str]
+    ) -> Optional[Tag]:
         compiled = [re.compile(p, flags=re.IGNORECASE) for p in patterns]
         for heading in soup.find_all(self.HEADING_TAGS):
             if not isinstance(heading, Tag):
@@ -974,9 +1026,13 @@ class AsyncArduinoMirror:
         seen: set[str] = set()
 
         scope_nodes: List[Tag] = []
-        heading = self._find_heading(soup, [r"downloadable resources", r"\bdownloads?\b"])
+        heading = self._find_heading(
+            soup, [r"downloadable resources", r"\bdownloads?\b"]
+        )
         if heading is not None:
-            scope_nodes.append(heading.parent if isinstance(heading.parent, Tag) else heading)
+            scope_nodes.append(
+                heading.parent if isinstance(heading.parent, Tag) else heading
+            )
 
         if not scope_nodes:
             scope_nodes.append(soup)
@@ -992,9 +1048,9 @@ class AsyncArduinoMirror:
                 if resolved in seen:
                     continue
                 seen.add(resolved)
-                filename = unquote(Path(urlparse(resolved).path).name) or self._safe_slug(
-                    anchor.get_text(" ", strip=True)
-                )
+                filename = unquote(
+                    Path(urlparse(resolved).path).name
+                ) or self._safe_slug(anchor.get_text(" ", strip=True))
                 resources.append(
                     {
                         "label": anchor.get_text(" ", strip=True) or filename,
@@ -1014,11 +1070,17 @@ class AsyncArduinoMirror:
 
         feature_heading = self._find_heading(soup, [r"\bfeatures?\b"])
         if feature_heading is not None:
-            parent = feature_heading.parent if isinstance(feature_heading.parent, Tag) else feature_heading
+            parent = (
+                feature_heading.parent
+                if isinstance(feature_heading.parent, Tag)
+                else feature_heading
+            )
             scopes.append(parent)
 
         if not scopes:
-            for node in soup.find_all(class_=re.compile(r"feature|card", flags=re.IGNORECASE)):
+            for node in soup.find_all(
+                class_=re.compile(r"feature|card", flags=re.IGNORECASE)
+            ):
                 if isinstance(node, Tag):
                     scopes.append(node)
             if not scopes:
@@ -1032,9 +1094,7 @@ class AsyncArduinoMirror:
                 resolved = self._normalize_url(urljoin(base_url, href))
                 if not self._is_allowed_url(resolved):
                     continue
-                title_node = (
-                    anchor.find(["h2", "h3", "h4", "strong", "span"]) or anchor
-                )
+                title_node = anchor.find(["h2", "h3", "h4", "strong", "span"]) or anchor
                 title = title_node.get_text(" ", strip=True)
                 description_node = anchor.find("p")
                 description = (
@@ -1042,8 +1102,14 @@ class AsyncArduinoMirror:
                     if isinstance(description_node, Tag)
                     else ""
                 )
-                tag_node = anchor.find(class_=re.compile(r"tag|category", re.IGNORECASE))
-                tag_text = tag_node.get_text(" ", strip=True) if isinstance(tag_node, Tag) else ""
+                tag_node = anchor.find(
+                    class_=re.compile(r"tag|category", re.IGNORECASE)
+                )
+                tag_text = (
+                    tag_node.get_text(" ", strip=True)
+                    if isinstance(tag_node, Tag)
+                    else ""
+                )
                 dedupe_key = f"{title.lower()}::{resolved}"
                 if title and dedupe_key not in seen:
                     seen.add(dedupe_key)
@@ -1059,7 +1125,9 @@ class AsyncArduinoMirror:
 
     def _extract_tech_specs(self, soup: BeautifulSoup) -> Dict[str, Any]:
         """Извлекает раздел Tech Specs и преобразует его в markdown."""
-        heading = self._find_heading(soup, [r"tech specs?", r"technical specifications?"])
+        heading = self._find_heading(
+            soup, [r"tech specs?", r"technical specifications?"]
+        )
         if heading is None:
             return {"found": False, "markdown": "", "html": ""}
         section_html = self._collect_section_html(heading)
@@ -1075,7 +1143,9 @@ class AsyncArduinoMirror:
         if heading is None:
             return ""
         html = self._collect_section_html(heading)
-        return self._html_to_markdown(BeautifulSoup(html, "html.parser"), "", self.data_dir)
+        return self._html_to_markdown(
+            BeautifulSoup(html, "html.parser"), "", self.data_dir
+        )
 
     # ---------------------------------------------------------------------
     # Помощники преобразования markdown
@@ -1205,7 +1275,9 @@ class AsyncArduinoMirror:
             return f"{self._convert_code_block(node)}\n\n"
         if name == "blockquote":
             text = self._html_to_markdown(node, "", self.data_dir).strip()
-            lines = [f"> {line}".rstrip() if line else ">" for line in text.splitlines()]
+            lines = [
+                f"> {line}".rstrip() if line else ">" for line in text.splitlines()
+            ]
             return "\n".join(lines).rstrip() + "\n\n"
         if name == "hr":
             return "---\n\n"
@@ -1213,7 +1285,9 @@ class AsyncArduinoMirror:
             img = node.find("img")
             caption = node.find("figcaption")
             image_md = self._inline_to_markdown(img) if isinstance(img, Tag) else ""
-            cap_text = caption.get_text(" ", strip=True) if isinstance(caption, Tag) else ""
+            cap_text = (
+                caption.get_text(" ", strip=True) if isinstance(caption, Tag) else ""
+            )
             if image_md and cap_text:
                 return f"{image_md}\n\n*{cap_text}*\n\n"
             return f"{image_md}\n\n" if image_md else ""
@@ -1239,7 +1313,8 @@ class AsyncArduinoMirror:
         """Переписывает markdown-ссылки на локальные файлы с регистронезависимым сопоставлением URL."""
         pattern = re.compile(r"(!?\[[^\]]*\]\()([^)]+)(\))")
         pages_lookup = {
-            self._url_lookup_key(url): path for url, path in self.url_to_local_path.items()
+            self._url_lookup_key(url): path
+            for url, path in self.url_to_local_path.items()
         }
 
         def _replace(match: re.Match[str]) -> str:
@@ -1252,7 +1327,9 @@ class AsyncArduinoMirror:
             key = self._url_lookup_key(normalized)
             if key in pages_lookup:
                 target = Path(pages_lookup[key])
-                rel = os.path.relpath(target, current_local_path.parent).replace("\\", "/")
+                rel = os.path.relpath(target, current_local_path.parent).replace(
+                    "\\", "/"
+                )
                 return f"{prefix}{rel}{suffix}"
 
             known_asset = self._assets_by_url.get(key)
@@ -1280,7 +1357,9 @@ class AsyncArduinoMirror:
             return body
         return soup
 
-    def _html_to_markdown(self, content_node: Any, page_url: str, local_dir: Path) -> str:
+    def _html_to_markdown(
+        self, content_node: Any, page_url: str, local_dir: Path
+    ) -> str:
         if isinstance(content_node, (str, bytes)):
             soup = BeautifulSoup(content_node, "html.parser")
             node: Any = self._content_node(soup)
@@ -1297,6 +1376,7 @@ class AsyncArduinoMirror:
             blocks.append(self._node_to_markdown(node))
         markdown = self._normalize_markdown("".join(blocks))
         return markdown
+
     # ---------------------------------------------------------------------
     # Помощники парсинга разделов и страниц
     # ---------------------------------------------------------------------
@@ -1310,18 +1390,28 @@ class AsyncArduinoMirror:
 
         if page_type == "section_root":
             base = self._safe_path(section)
-            md_path = self._safe_path(*base.relative_to(self.data_dir).parts, "_index.md")
+            md_path = self._safe_path(
+                *base.relative_to(self.data_dir).parts, "_index.md"
+            )
         elif page_type == "hardware_product":
-            dirname = self._slug_to_dirname(title or (segments[-1] if segments else "hardware-item"))
+            dirname = self._slug_to_dirname(
+                title or (segments[-1] if segments else "hardware-item")
+            )
             base = self._safe_path("hardware", dirname)
             md_path = self._safe_path("hardware", dirname, "_index.md")
         elif page_type == "software_tool":
-            dirname = self._slug_to_dirname(title or (segments[-1] if segments else "software-tool"))
+            dirname = self._slug_to_dirname(
+                title or (segments[-1] if segments else "software-tool")
+            )
             base = self._safe_path("software", dirname)
             md_path = self._safe_path("software", dirname, "_index.md")
         else:
             if section == "language_reference":
-                tail = segments[1:] if segments and segments[0] == "language-reference" else segments
+                tail = (
+                    segments[1:]
+                    if segments and segments[0] == "language-reference"
+                    else segments
+                )
                 if not tail:
                     md_path = self._safe_path("language_reference", "_index.md")
                 else:
@@ -1332,7 +1422,11 @@ class AsyncArduinoMirror:
                         f"{self._safe_slug(tail[-1])}.md",
                     )
             elif section == "tutorials":
-                tail = segments[1:] if segments and segments[0] == "tutorials" else segments
+                tail = (
+                    segments[1:]
+                    if segments and segments[0] == "tutorials"
+                    else segments
+                )
                 if not tail:
                     md_path = self._safe_path("tutorials", "_index.md")
                 else:
@@ -1344,12 +1438,18 @@ class AsyncArduinoMirror:
                     )
             else:
                 section_token = section.replace("_", "-")
-                tail = segments[1:] if segments and segments[0] == section_token else segments
+                tail = (
+                    segments[1:]
+                    if segments and segments[0] == section_token
+                    else segments
+                )
                 if not tail:
                     md_path = self._safe_path(section, "_index.md")
                 else:
                     parts = [self._safe_slug(seg) for seg in tail[:-1]]
-                    md_path = self._safe_path(section, *parts, f"{self._safe_slug(tail[-1])}.md")
+                    md_path = self._safe_path(
+                        section, *parts, f"{self._safe_slug(tail[-1])}.md"
+                    )
             base = md_path.parent
 
         if md_path.name == "_index.md":
@@ -1424,22 +1524,27 @@ class AsyncArduinoMirror:
         last_revision = self._extract_last_revision(soup)
         fetched_at = self._now_iso()
 
-        md_path, json_path, html_path, section = self._resolve_page_paths(normalized, page_type, title)
+        md_path, json_path, html_path, section = self._resolve_page_paths(
+            normalized, page_type, title
+        )
         self.url_to_local_path[normalized] = str(md_path)
 
         content_node = self._content_node(soup)
         markdown_body = self._html_to_markdown(content_node, normalized, md_path.parent)
         if self.cfg.localize_links:
             markdown_body = self._rewrite_links_to_local(markdown_body, md_path)
-        markdown = self._build_front_matter(
-            title=title,
-            source_url=normalized,
-            page_type=page_type,
-            section=section,
-            last_revision=last_revision,
-            fetched_at=fetched_at,
-            description=description,
-        ) + markdown_body
+        markdown = (
+            self._build_front_matter(
+                title=title,
+                source_url=normalized,
+                page_type=page_type,
+                section=section,
+                last_revision=last_revision,
+                fetched_at=fetched_at,
+                description=description,
+            )
+            + markdown_body
+        )
 
         asset_records: List[AssetRecord] = []
         if self.cfg.save_images_from_pages:
@@ -1447,7 +1552,9 @@ class AsyncArduinoMirror:
                 if not self._is_allowed_url(asset_url):
                     continue
                 try:
-                    asset = await self._download_asset(session, asset_url, md_path.parent / "assets")
+                    asset = await self._download_asset(
+                        session, asset_url, md_path.parent / "assets"
+                    )
                     asset_records.append(asset)
                 except Exception as exc:
                     self.failures[asset_url] = f"asset download failed: {exc}"
@@ -1465,7 +1572,9 @@ class AsyncArduinoMirror:
                     "description": description,
                     "last_revision": last_revision,
                     "local_markdown_path": str(md_path),
-                    "local_html_path": str(html_path) if self.cfg.save_html_snapshot else "",
+                    "local_html_path": str(html_path)
+                    if self.cfg.save_html_snapshot
+                    else "",
                     "asset_paths": [a["local_path"] for a in asset_records],
                     "outgoing_links": self._extract_all_links(soup, normalized),
                     "fetched_at": fetched_at,
@@ -1510,7 +1619,9 @@ class AsyncArduinoMirror:
         self, session: aiohttp.ClientSession, url: str, soup: BeautifulSoup, html: str
     ) -> Dict[str, Any]:
         """Парсит hardware hub и index-подобные страницы."""
-        return await self._parse_generic_page(session, url, soup, html, "hardware_index_like")
+        return await self._parse_generic_page(
+            session, url, soup, html, "hardware_index_like"
+        )
 
     async def _process_hardware_downloads(
         self,
@@ -1557,7 +1668,9 @@ class AsyncArduinoMirror:
                 normalized_card_url = self._normalize_url(card_url)
                 local_doc = self.url_to_local_path.get(normalized_card_url, "")
                 if not local_doc:
-                    local_doc = str(self._predict_local_markdown_path(normalized_card_url))
+                    local_doc = str(
+                        self._predict_local_markdown_path(normalized_card_url)
+                    )
 
             features_all_lines.append(f"## {card_title}")
             if card_desc:
@@ -1584,7 +1697,9 @@ class AsyncArduinoMirror:
             if card_desc:
                 feature_md.extend(["", card_desc])
             if not self.cfg.dry_run:
-                await self._write_markdown(feature_path, "\n".join(feature_md).strip() + "\n")
+                await self._write_markdown(
+                    feature_path, "\n".join(feature_md).strip() + "\n"
+                )
 
             feature_docs.append(
                 {
@@ -1596,7 +1711,9 @@ class AsyncArduinoMirror:
             )
 
         if not self.cfg.dry_run:
-            await self._write_markdown(features_all_path, "\n".join(features_all_lines).strip() + "\n")
+            await self._write_markdown(
+                features_all_path, "\n".join(features_all_lines).strip() + "\n"
+            )
         return feature_cards, feature_docs
 
     async def _process_hardware_sections(
@@ -1608,7 +1725,9 @@ class AsyncArduinoMirror:
     ) -> Dict[str, str]:
         """Извлекает и сохраняет разделы Tech Specs/Compatibility/Suggested Libraries."""
         tech_specs = self._extract_tech_specs(soup)
-        compatibility_md = self._extract_named_section_markdown(soup, [r"compatibility"])
+        compatibility_md = self._extract_named_section_markdown(
+            soup, [r"compatibility"]
+        )
         suggested_libraries_md = self._extract_named_section_markdown(
             soup, [r"suggested libraries?", r"libraries?"]
         )
@@ -1619,12 +1738,16 @@ class AsyncArduinoMirror:
             if compatibility_md:
                 await self._write_markdown(compatibility_path, compatibility_md)
             if suggested_libraries_md:
-                await self._write_markdown(suggested_libraries_path, suggested_libraries_md)
+                await self._write_markdown(
+                    suggested_libraries_path, suggested_libraries_md
+                )
 
         return {
             "tech_specs": str(tech_specs_path) if tech_specs.get("found") else "",
             "compatibility": str(compatibility_path) if compatibility_md else "",
-            "suggested_libraries": str(suggested_libraries_path) if suggested_libraries_md else "",
+            "suggested_libraries": str(suggested_libraries_path)
+            if suggested_libraries_md
+            else "",
         }
 
     async def _parse_hardware_product(
@@ -1653,23 +1776,30 @@ class AsyncArduinoMirror:
         hw_info_path = self._safe_path("hardware", dirname, "HardwareInfo.json")
         tech_specs_path = self._safe_path("hardware", dirname, "TechSpecs.md")
         compatibility_path = self._safe_path("hardware", dirname, "Compatibility.md")
-        suggested_libraries_path = self._safe_path("hardware", dirname, "SuggestedLibraries.md")
-        features_all_path = self._safe_path("hardware", dirname, "info", "features_all.md")
+        suggested_libraries_path = self._safe_path(
+            "hardware", dirname, "SuggestedLibraries.md"
+        )
+        features_all_path = self._safe_path(
+            "hardware", dirname, "info", "features_all.md"
+        )
 
         self.url_to_local_path[normalized] = str(md_path)
         content_node = self._content_node(soup)
         markdown_body = self._html_to_markdown(content_node, normalized, product_dir)
         if self.cfg.localize_links:
             markdown_body = self._rewrite_links_to_local(markdown_body, md_path)
-        markdown = self._build_front_matter(
-            title=title,
-            source_url=normalized,
-            page_type="hardware_product",
-            section="hardware",
-            last_revision=last_revision,
-            fetched_at=fetched_at,
-            description=description,
-        ) + markdown_body
+        markdown = (
+            self._build_front_matter(
+                title=title,
+                source_url=normalized,
+                page_type="hardware_product",
+                section="hardware",
+                last_revision=last_revision,
+                fetched_at=fetched_at,
+                description=description,
+            )
+            + markdown_body
+        )
 
         downloads_meta = await self._process_hardware_downloads(
             session=session,
@@ -1703,7 +1833,9 @@ class AsyncArduinoMirror:
                     "description": description,
                     "last_revision": last_revision,
                     "local_markdown_path": str(md_path),
-                    "local_html_path": str(html_path) if self.cfg.save_html_snapshot else "",
+                    "local_html_path": str(html_path)
+                    if self.cfg.save_html_snapshot
+                    else "",
                     "asset_paths": [asset["local_path"] for asset in downloads_meta],
                     "outgoing_links": self._extract_all_links(soup, normalized),
                     "fetched_at": fetched_at,
@@ -1810,12 +1942,16 @@ class AsyncArduinoMirror:
         self, session: aiohttp.ClientSession, url: str, soup: BeautifulSoup, html: str
     ) -> Dict[str, Any]:
         """Парсит страницу software tool и сохраняет метаданные SoftwareInfo."""
-        parsed = await self._parse_generic_page(session, url, soup, html, "software_tool")
+        parsed = await self._parse_generic_page(
+            session, url, soup, html, "software_tool"
+        )
         title = parsed["metadata"]["title"]
         normalized = parsed["metadata"]["normalized_url"]
         tool_dir = Path(parsed["metadata"]["local_markdown_path"]).parent
         tutorials = [
-            link for link in parsed["metadata"]["outgoing_links"] if "/tutorials/" in link
+            link
+            for link in parsed["metadata"]["outgoing_links"]
+            if "/tutorials/" in link
         ]
         info = {
             "name": title,
@@ -1839,7 +1975,9 @@ class AsyncArduinoMirror:
         self, session: aiohttp.ClientSession, url: str, soup: BeautifulSoup, html: str
     ) -> Dict[str, Any]:
         """Парсит страницу документации language/reference."""
-        return await self._parse_generic_page(session, url, soup, html, "reference_page")
+        return await self._parse_generic_page(
+            session, url, soup, html, "reference_page"
+        )
 
     async def _parse_learn_root(
         self, session: aiohttp.ClientSession, url: str, soup: BeautifulSoup, html: str
@@ -1858,6 +1996,7 @@ class AsyncArduinoMirror:
     ) -> Dict[str, Any]:
         """Парсит tutorial-страницу в markdown/json."""
         return await self._parse_generic_page(session, url, soup, html, "tutorial_page")
+
     # ---------------------------------------------------------------------
     # API обхода
     # ---------------------------------------------------------------------
@@ -1881,7 +2020,9 @@ class AsyncArduinoMirror:
         async with self._managed_session(session) as active_session:
             logger.info("Crawling URL: %s", normalized)
             if self._is_asset_url(normalized):
-                asset = await self._download_asset(active_session, normalized, self._assets_dir)
+                asset = await self._download_asset(
+                    active_session, normalized, self._assets_dir
+                )
                 self._mark_visited(normalized)
                 await self._save_state_async()
                 return {
@@ -1901,27 +2042,49 @@ class AsyncArduinoMirror:
                 if page_type == "section_root":
                     section = self._url_to_section(normalized)
                     if section == "software":
-                        result = await self._parse_software_root(active_session, normalized, soup, html)
+                        result = await self._parse_software_root(
+                            active_session, normalized, soup, html
+                        )
                     elif section == "programming":
-                        result = await self._parse_programming_root(active_session, normalized, soup, html)
+                        result = await self._parse_programming_root(
+                            active_session, normalized, soup, html
+                        )
                     elif section == "learn":
-                        result = await self._parse_learn_root(active_session, normalized, soup, html)
+                        result = await self._parse_learn_root(
+                            active_session, normalized, soup, html
+                        )
                     elif section == "hardware":
-                        result = await self._parse_hardware_index(active_session, normalized, soup, html)
+                        result = await self._parse_hardware_index(
+                            active_session, normalized, soup, html
+                        )
                     else:
-                        result = await self._parse_article_page(active_session, normalized, soup, html)
+                        result = await self._parse_article_page(
+                            active_session, normalized, soup, html
+                        )
                 elif page_type == "hardware_product":
-                    result = await self._parse_hardware_product(active_session, normalized, soup, html)
+                    result = await self._parse_hardware_product(
+                        active_session, normalized, soup, html
+                    )
                 elif page_type == "hardware_index_like":
-                    result = await self._parse_hardware_index(active_session, normalized, soup, html)
+                    result = await self._parse_hardware_index(
+                        active_session, normalized, soup, html
+                    )
                 elif page_type == "software_tool":
-                    result = await self._parse_software_tool_page(active_session, normalized, soup, html)
+                    result = await self._parse_software_tool_page(
+                        active_session, normalized, soup, html
+                    )
                 elif page_type == "reference_page":
-                    result = await self._parse_reference_page(active_session, normalized, soup, html)
+                    result = await self._parse_reference_page(
+                        active_session, normalized, soup, html
+                    )
                 elif page_type == "tutorial_page":
-                    result = await self._parse_tutorial_page(active_session, normalized, soup, html)
+                    result = await self._parse_tutorial_page(
+                        active_session, normalized, soup, html
+                    )
                 else:
-                    result = await self._parse_article_page(active_session, normalized, soup, html)
+                    result = await self._parse_article_page(
+                        active_session, normalized, soup, html
+                    )
 
                 self._mark_visited(normalized)
                 await self._save_state_async()
@@ -1930,7 +2093,12 @@ class AsyncArduinoMirror:
                 self.failures[normalized] = str(exc)
                 await self._save_state_async()
                 logger.error("Failed URL: %s (%s)", normalized, exc)
-                return {"status": "error", "url": normalized, "error": str(exc), "links": []}
+                return {
+                    "status": "error",
+                    "url": normalized,
+                    "error": str(exc),
+                    "links": [],
+                }
 
     async def crawl_section(
         self, session: Optional[aiohttp.ClientSession], section: str
@@ -1946,7 +2114,8 @@ class AsyncArduinoMirror:
                 "tutorials": "https://docs.arduino.cc/tutorials/",
             }
             start_url = mapped.get(
-                section_name, f"{self.cfg.base_url.rstrip('/')}/{section_name.strip('/')}/"
+                section_name,
+                f"{self.cfg.base_url.rstrip('/')}/{section_name.strip('/')}/",
             )
             start_url = self._normalize_url(start_url)
 
@@ -1987,7 +2156,9 @@ class AsyncArduinoMirror:
             "queued_left": len(queue),
         }
 
-    async def crawl_all(self, session: Optional[aiohttp.ClientSession]) -> Dict[str, Any]:
+    async def crawl_all(
+        self, session: Optional[aiohttp.ClientSession]
+    ) -> Dict[str, Any]:
         summary: Dict[str, Any] = {"status": "ok", "sections": [], "total_pages": 0}
         async with self._managed_session(session) as active_session:
             for start in self.cfg.start_sections:
@@ -2032,7 +2203,11 @@ class AsyncArduinoMirror:
         if not path.exists():
             return False, "missing_file"
         expected_size = record.get("size_bytes")
-        if isinstance(expected_size, int) and expected_size >= 0 and path.stat().st_size != expected_size:
+        if (
+            isinstance(expected_size, int)
+            and expected_size >= 0
+            and path.stat().st_size != expected_size
+        ):
             return False, "size_mismatch"
         expected_hash = record.get("sha256")
         if expected_hash and self._hash_file(path) != expected_hash:
@@ -2072,7 +2247,9 @@ class AsyncArduinoMirror:
             "assets_index": len(self.assets_index),
         }
 
-    async def verify(self, session: Optional[aiohttp.ClientSession] = None) -> Dict[str, Any]:
+    async def verify(
+        self, session: Optional[aiohttp.ClientSession] = None
+    ) -> Dict[str, Any]:
         report: Dict[str, Any] = {
             "status": "ok",
             "missing_markdown": [],
@@ -2088,13 +2265,21 @@ class AsyncArduinoMirror:
             ok_md, md_reason = self._verify_markdown(md_path)
             if not ok_md:
                 report["missing_markdown"].append(
-                    {"url": page.get("normalized_url", ""), "path": str(md_path), "reason": md_reason}
+                    {
+                        "url": page.get("normalized_url", ""),
+                        "path": str(md_path),
+                        "reason": md_reason,
+                    }
                 )
             json_path = Path(page.get("metadata_path", ""))
             ok_json, json_reason = self._verify_json(json_path)
             if not ok_json:
                 report["invalid_json"].append(
-                    {"url": page.get("normalized_url", ""), "path": str(json_path), "reason": json_reason}
+                    {
+                        "url": page.get("normalized_url", ""),
+                        "path": str(json_path),
+                        "reason": json_reason,
+                    }
                 )
 
         for asset in self.assets_index:
@@ -2114,7 +2299,9 @@ class AsyncArduinoMirror:
             ]
             missing = [str(p) for p in required if not p.exists()]
             if missing:
-                report["hardware_missing_required"].append({"product_dir": str(base), "missing": missing})
+                report["hardware_missing_required"].append(
+                    {"product_dir": str(base), "missing": missing}
+                )
 
         if (
             report["missing_markdown"]
@@ -2126,7 +2313,9 @@ class AsyncArduinoMirror:
             report["status"] = "issues_found"
         return report
 
-    async def repair(self, session: Optional[aiohttp.ClientSession] = None) -> Dict[str, Any]:
+    async def repair(
+        self, session: Optional[aiohttp.ClientSession] = None
+    ) -> Dict[str, Any]:
         report = await self.verify(session=session)
         repaired_assets = 0
         repaired_pages = 0
@@ -2144,7 +2333,9 @@ class AsyncArduinoMirror:
                     asset["sha256"] = self._hash_file(dest)
                     repaired_assets += 1
                 except Exception as exc:
-                    self.failures[self._normalize_url(source_url)] = f"repair asset failed: {exc}"
+                    self.failures[self._normalize_url(source_url)] = (
+                        f"repair asset failed: {exc}"
+                    )
 
             for missing_page in report.get("missing_markdown", []):
                 target_url = missing_page.get("url")
@@ -2204,10 +2395,14 @@ class AsyncArduinoMirror:
                     "outgoing_links": data.get("outgoing_links", []),
                     "fetched_at": data.get("fetched_at", ""),
                     "content_hash": data.get("content_hash", ""),
-                    "source_url": data.get("source_url", data.get("normalized_url", "")),
+                    "source_url": data.get(
+                        "source_url", data.get("normalized_url", "")
+                    ),
                 }
                 self._register_index_record(record)
-                self.url_to_local_path[record["normalized_url"]] = record["local_markdown_path"]
+                self.url_to_local_path[record["normalized_url"]] = record[
+                    "local_markdown_path"
+                ]
 
             for key in ("downloads", "assets"):
                 for asset in data.get(key, []):
@@ -2258,13 +2453,22 @@ class AsyncArduinoMirror:
 
         key = target.strip()
         lower = key.lower().replace("-", "_")
-        if lower in {"hardware", "software", "programming", "learn", "tutorials", "language_reference"}:
+        if lower in {
+            "hardware",
+            "software",
+            "programming",
+            "learn",
+            "tutorials",
+            "language_reference",
+        }:
             section_path = self._safe_path(lower)
             return {
                 "target": lower,
                 "path": str(section_path),
                 "exists": section_path.exists(),
-                "items": sorted([p.name for p in section_path.iterdir()]) if section_path.exists() else [],
+                "items": sorted([p.name for p in section_path.iterdir()])
+                if section_path.exists()
+                else [],
             }
 
         if key.startswith("http://") or key.startswith("https://"):
@@ -2275,9 +2479,16 @@ class AsyncArduinoMirror:
             return {"target": normalized, "record": None}
 
         slug = self._safe_slug(key)
-        for record in self.hardware_index + self.software_index + self.programming_index + self.learn_index:
+        for record in (
+            self.hardware_index
+            + self.software_index
+            + self.programming_index
+            + self.learn_index
+        ):
             title_slug = self._safe_slug(record.get("title", ""))
-            if slug == title_slug or slug == self._safe_slug(record.get("normalized_url", "")):
+            if slug == title_slug or slug == self._safe_slug(
+                record.get("normalized_url", "")
+            ):
                 return {"target": key, "record": record}
         return {"target": key, "record": None}
 
@@ -2325,7 +2536,10 @@ class AsyncArduinoMirror:
             if candidate.exists():
                 return candidate
         for path in section_path.rglob("*"):
-            if self._safe_slug(path.stem) == slug_token or self._safe_slug(path.name) == slug_token:
+            if (
+                self._safe_slug(path.stem) == slug_token
+                or self._safe_slug(path.name) == slug_token
+            ):
                 return path
         return None
 
@@ -2384,12 +2598,18 @@ class AsyncArduinoMirror:
         if not needle:
             return None
         normalized = self._normalize_url(needle) if self._is_url_like(needle) else ""
-        slug = self._safe_slug(Path(urlparse(normalized).path).name if normalized else needle)
+        slug = self._safe_slug(
+            Path(urlparse(normalized).path).name if normalized else needle
+        )
 
         for info in await self._iter_hardware_infos():
             info_slug = self._safe_slug(str(info.get("slug", "")))
             info_name = self._safe_slug(str(info.get("name", "")))
-            info_url = self._normalize_url(str(info.get("source_url", ""))) if info.get("source_url") else ""
+            info_url = (
+                self._normalize_url(str(info.get("source_url", "")))
+                if info.get("source_url")
+                else ""
+            )
             if normalized and info_url and info_url == normalized:
                 return info
             if slug and slug in {info_slug, info_name}:
@@ -2403,7 +2623,9 @@ class AsyncArduinoMirror:
             result.append(
                 {
                     "name": info.get("name", ""),
-                    "slug": info.get("slug", self._safe_slug(str(info.get("name", "")))),
+                    "slug": info.get(
+                        "slug", self._safe_slug(str(info.get("name", "")))
+                    ),
                     "type": info.get("type", ""),
                     "local_dir": info.get("local_dir", ""),
                     "source_url": info.get("source_url", ""),
@@ -2426,14 +2648,18 @@ class AsyncArduinoMirror:
                     str(info.get("family", "")),
                     str(info.get("type", "")),
                     str(info.get("description", "")),
-                    " ".join(info.get("tags", [])) if isinstance(info.get("tags"), list) else "",
+                    " ".join(info.get("tags", []))
+                    if isinstance(info.get("tags"), list)
+                    else "",
                 ]
             ).lower()
             if needle in haystack:
                 matches.append(
                     {
                         "name": info.get("name", ""),
-                        "slug": info.get("slug", self._safe_slug(str(info.get("name", "")))),
+                        "slug": info.get(
+                            "slug", self._safe_slug(str(info.get("name", "")))
+                        ),
                         "type": info.get("type", ""),
                         "local_dir": info.get("local_dir", ""),
                         "source_url": info.get("source_url", ""),
@@ -2445,7 +2671,11 @@ class AsyncArduinoMirror:
         """Возвращает путь раздела, признак существования и элементы верхнего уровня."""
         section_token = section.strip().lower().replace("-", "_")
         section_path = self._safe_path(section_token)
-        items = sorted([p.name for p in section_path.iterdir()]) if section_path.exists() else []
+        items = (
+            sorted([p.name for p in section_path.iterdir()])
+            if section_path.exists()
+            else []
+        )
         return {
             "section": section_token,
             "path": str(section_path),
@@ -2472,7 +2702,9 @@ class AsyncArduinoMirror:
                     "slug": self._record_slug(record),
                     "page_type": record.get("page_type", ""),
                     "local_markdown_path": record.get("local_markdown_path", ""),
-                    "source_url": record.get("source_url", record.get("normalized_url", "")),
+                    "source_url": record.get(
+                        "source_url", record.get("normalized_url", "")
+                    ),
                 }
             )
         records.sort(key=lambda x: str(x.get("title", "")).lower())
@@ -2525,7 +2757,9 @@ class AsyncArduinoMirror:
         for rec in self.assets_index:
             filename = self._safe_slug(rec.get("filename", ""), keep_dot=True)
             label = self._safe_slug(rec.get("label", ""), keep_dot=True)
-            local_stem = self._safe_slug(Path(rec.get("local_path", "")).stem, keep_dot=True)
+            local_stem = self._safe_slug(
+                Path(rec.get("local_path", "")).stem, keep_dot=True
+            )
             if slug in {filename, label, local_stem}:
                 return dict(rec)
         return None
@@ -2620,7 +2854,9 @@ class AsyncArduinoMirror:
                     "slug": self._record_slug(record),
                     "section": record.get("section", ""),
                     "local_markdown_path": record.get("local_markdown_path", ""),
-                    "source_url": record.get("source_url", record.get("normalized_url", "")),
+                    "source_url": record.get(
+                        "source_url", record.get("normalized_url", "")
+                    ),
                 }
             )
         return result
@@ -2653,7 +2889,9 @@ class AsyncArduinoMirror:
             target.unlink()
 
         def _keep_record(record: Dict[str, Any]) -> bool:
-            local_path = record.get("local_markdown_path") or record.get("local_path") or ""
+            local_path = (
+                record.get("local_markdown_path") or record.get("local_path") or ""
+            )
             if not local_path:
                 return True
             try:
@@ -2665,7 +2903,9 @@ class AsyncArduinoMirror:
         self.assets_index = [rec for rec in self.assets_index if _keep_record(rec)]
         self.hardware_index = [rec for rec in self.hardware_index if _keep_record(rec)]
         self.software_index = [rec for rec in self.software_index if _keep_record(rec)]
-        self.programming_index = [rec for rec in self.programming_index if _keep_record(rec)]
+        self.programming_index = [
+            rec for rec in self.programming_index if _keep_record(rec)
+        ]
         self.learn_index = [rec for rec in self.learn_index if _keep_record(rec)]
 
         self.url_to_local_path = {
@@ -2706,7 +2946,9 @@ class AsyncArduinoMirror:
                     result = await self.crawl_all(session)
                     print(json.dumps(result, indent=2, ensure_ascii=False))
                 elif choice == "2":
-                    section = input("Section (hardware/software/programming/learn): ").strip()
+                    section = input(
+                        "Section (hardware/software/programming/learn): "
+                    ).strip()
                     result = await self.crawl_section(session, section)
                     print(json.dumps(result, indent=2, ensure_ascii=False))
                 elif choice == "3":
@@ -2721,7 +2963,9 @@ class AsyncArduinoMirror:
                     print(json.dumps(result, indent=2, ensure_ascii=False))
                 elif choice == "6":
                     target = input("Target (empty for summary): ").strip() or None
-                    print(json.dumps(self.get_info(target), indent=2, ensure_ascii=False))
+                    print(
+                        json.dumps(self.get_info(target), indent=2, ensure_ascii=False)
+                    )
                 elif choice == "7":
                     section = input("Section: ").strip()
                     slug = input("Slug (optional): ").strip() or None

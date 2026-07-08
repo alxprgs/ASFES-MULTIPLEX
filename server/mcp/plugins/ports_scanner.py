@@ -9,8 +9,19 @@ from urllib.parse import urlparse
 import httpx
 
 from server.host_ops import _psutil
-from server.mcp.plugins._common import int_argument, require_argument, static_availability
-from server.models import MCPTool, MCPToolManifest, PermissionDefinition, PluginDefinition, PluginManifest, ToolExecutionContext
+from server.mcp.plugins._common import (
+    int_argument,
+    require_argument,
+    static_availability,
+)
+from server.models import (
+    MCPTool,
+    MCPToolManifest,
+    PermissionDefinition,
+    PluginDefinition,
+    PluginManifest,
+    ToolExecutionContext,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -20,16 +31,16 @@ from server.models import MCPTool, MCPToolManifest, PermissionDefinition, Plugin
 # All IP ranges that must never be probed — covers loopback, RFC 1918,
 # link-local (incl. AWS/GCP metadata), CGNAT, and IPv6 special ranges.
 _BLOCKED_NETWORKS: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
-    ipaddress.ip_network("127.0.0.0/8"),      # IPv4 loopback
-    ipaddress.ip_network("::1/128"),           # IPv6 loopback
-    ipaddress.ip_network("10.0.0.0/8"),        # RFC 1918
-    ipaddress.ip_network("172.16.0.0/12"),     # RFC 1918
-    ipaddress.ip_network("192.168.0.0/16"),    # RFC 1918
-    ipaddress.ip_network("169.254.0.0/16"),    # Link-local / AWS IMDS
-    ipaddress.ip_network("fe80::/10"),         # IPv6 link-local
-    ipaddress.ip_network("fc00::/7"),          # IPv6 ULA
-    ipaddress.ip_network("100.64.0.0/10"),     # CGNAT
-    ipaddress.ip_network("0.0.0.0/8"),         # "This" network
+    ipaddress.ip_network("127.0.0.0/8"),  # IPv4 loopback
+    ipaddress.ip_network("::1/128"),  # IPv6 loopback
+    ipaddress.ip_network("10.0.0.0/8"),  # RFC 1918
+    ipaddress.ip_network("172.16.0.0/12"),  # RFC 1918
+    ipaddress.ip_network("192.168.0.0/16"),  # RFC 1918
+    ipaddress.ip_network("169.254.0.0/16"),  # Link-local / AWS IMDS
+    ipaddress.ip_network("fe80::/10"),  # IPv6 link-local
+    ipaddress.ip_network("fc00::/7"),  # IPv6 ULA
+    ipaddress.ip_network("100.64.0.0/10"),  # CGNAT
+    ipaddress.ip_network("0.0.0.0/8"),  # "This" network
 ]
 
 
@@ -83,13 +94,17 @@ def _validate_probe_host(context: ToolExecutionContext, host: str) -> None:
     This is a lightweight wrapper kept for backward compatibility with
     probe_tcp (which handles TCP connections directly via socket).
     """
-    allowed_hosts = {item.lower() for item in context.services.settings.host_ops.port_probe_allowed_hosts}
+    allowed_hosts = {
+        item.lower()
+        for item in context.services.settings.host_ops.port_probe_allowed_hosts
+    }
     _resolve_and_validate(host, allowed_hosts)
 
 
 # ---------------------------------------------------------------------------
 # Custom httpx transport: pins the resolved IP while preserving TLS/SNI
 # ---------------------------------------------------------------------------
+
 
 class _PinnedIPTransport(httpx.AsyncHTTPTransport):
     """httpx transport that connects to a pre-resolved IP address.
@@ -119,7 +134,10 @@ class _PinnedIPTransport(httpx.AsyncHTTPTransport):
             new_url = request.url.copy_with(host=self._resolved_ip)
             # Preserve SNI so TLS negotiation uses the original hostname.
             # httpcore reads "sni_hostname" from the request extensions.
-            extensions = {**request.extensions, "sni_hostname": self._hostname.encode("ascii")}
+            extensions = {
+                **request.extensions,
+                "sni_hostname": self._hostname.encode("ascii"),
+            }
             request = httpx.Request(
                 method=request.method,
                 url=new_url,
@@ -134,7 +152,10 @@ class _PinnedIPTransport(httpx.AsyncHTTPTransport):
 # Tool handlers
 # ---------------------------------------------------------------------------
 
-async def list_listening_ports(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+
+async def list_listening_ports(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     if _psutil is None:
         raise RuntimeError("psutil is required to inspect listening ports")
     listeners = []
@@ -153,7 +174,9 @@ async def list_listening_ports(context: ToolExecutionContext, arguments: dict[st
     return {"listeners": listeners, "count": len(listeners)}
 
 
-async def probe_tcp(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def probe_tcp(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     host = str(arguments.get("host") or "127.0.0.1")
     _validate_probe_host(context, host)
     port = int_argument(arguments, "port", 0)
@@ -165,12 +188,25 @@ async def probe_tcp(context: ToolExecutionContext, arguments: dict[str, Any]) ->
 
     try:
         await asyncio.to_thread(_probe)
-        return {"host": host, "port": port, "reachable": True, "timeout_seconds": timeout_seconds}
+        return {
+            "host": host,
+            "port": port,
+            "reachable": True,
+            "timeout_seconds": timeout_seconds,
+        }
     except OSError as exc:
-        return {"host": host, "port": port, "reachable": False, "timeout_seconds": timeout_seconds, "error": str(exc)}
+        return {
+            "host": host,
+            "port": port,
+            "reachable": False,
+            "timeout_seconds": timeout_seconds,
+            "error": str(exc),
+        }
 
 
-async def probe_http(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def probe_http(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     url = require_argument(arguments, "url")
     parsed = urlparse(str(url))
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -218,8 +254,13 @@ PLUGIN = PluginDefinition(
         version="1.1.0",
         description="Проверяет слушающие порты и доступность разрешенных TCP/HTTP endpoint.",
         permissions=[
-            PermissionDefinition(key="ports.read", description="Проверять слушающие порты."),
-            PermissionDefinition(key="ports.probe", description="Проверять TCP/HTTP endpoint через allowlist."),
+            PermissionDefinition(
+                key="ports.read", description="Проверять слушающие порты."
+            ),
+            PermissionDefinition(
+                key="ports.probe",
+                description="Проверять TCP/HTTP endpoint через allowlist.",
+            ),
         ],
     ),
     tools={
@@ -228,7 +269,11 @@ PLUGIN = PluginDefinition(
                 key="ports_scanner.list_listening_ports",
                 name="Список слушающих портов",
                 description="Показывает порты, которые сейчас слушаются на локальном хосте.",
-                input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
                 permissions=["ports.read"],
                 tags=["ports", "read"],
                 read_only=True,

@@ -2,17 +2,25 @@
 Python Mirror routes — management API.
 Mounted inside api_router at /api/python-mirror/…
 """
+
 from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.responses import FileResponse
 
 from server.audit import audit_context_from_request
 from server.core.deps import get_services, require_permission
 from server.models import (
-    PythonMirrorInstallRequest,
     PythonMirrorJobStatus,
     PythonMirrorListResponse,
     PythonMirrorStatsResponse,
@@ -31,6 +39,7 @@ router = APIRouter(prefix="/python-mirror", tags=["python-mirror"])
 # Stats
 # ---------------------------------------------------------------------------
 
+
 @router.get("/stats", response_model=PythonMirrorStatsResponse)
 async def pm_stats(
     request: Request,
@@ -45,6 +54,7 @@ async def pm_stats(
 # ---------------------------------------------------------------------------
 # Remote versions — MUST be before /versions/{version} to avoid routing clash
 # ---------------------------------------------------------------------------
+
 
 @router.get("/versions/remote")
 async def pm_remote_versions(
@@ -61,6 +71,7 @@ async def pm_remote_versions(
 # ---------------------------------------------------------------------------
 # Installed versions
 # ---------------------------------------------------------------------------
+
 
 @router.get("/versions", response_model=PythonMirrorListResponse)
 async def pm_list_versions(
@@ -94,6 +105,7 @@ async def pm_version_detail(
 # ---------------------------------------------------------------------------
 # Operations
 # ---------------------------------------------------------------------------
+
 
 @router.post(
     "/versions/{version}/install",
@@ -190,6 +202,7 @@ async def pm_repair_version(
 # Suggest
 # ---------------------------------------------------------------------------
 
+
 @router.post("/suggest", response_model=PythonMirrorSuggestResponse)
 async def pm_suggest(
     body: PythonMirrorSuggestRequest,
@@ -208,6 +221,7 @@ async def pm_suggest(
 # ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
+
 
 @router.websocket("/jobs/ws")
 async def pm_jobs_ws(
@@ -301,6 +315,7 @@ async def pm_cancel_job(
 # File serving
 # ---------------------------------------------------------------------------
 
+
 @router.get("/files/{version}/{filename}", include_in_schema=False)
 async def pm_download_file(
     version: str,
@@ -331,6 +346,7 @@ async def pm_download_file(
 # ---------------------------------------------------------------------------
 # Internal helper
 # ---------------------------------------------------------------------------
+
 
 def _check_enabled(services: ApplicationServices) -> None:
     if not services.settings.python_mirror.enabled:

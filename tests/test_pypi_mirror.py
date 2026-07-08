@@ -106,7 +106,9 @@ def temp_dir():
 
 @pytest.fixture
 def cfg(temp_dir):
-    return MirrorConfig(data_dir=temp_dir, proxies=["http://p1", "http://p2"], parallel=2)
+    return MirrorConfig(
+        data_dir=temp_dir, proxies=["http://p1", "http://p2"], parallel=2
+    )
 
 
 @pytest.fixture
@@ -154,10 +156,14 @@ def test_verify_hash_variants(mirror, temp_dir):
 def test_fetch_metadata_success_and_failures(mirror):
     async def _run():
         ok_payload = {"releases": {"1.0": []}}
-        ok_session = FakeSession(response=FakeResponse(status=200, json_data=ok_payload))
+        ok_session = FakeSession(
+            response=FakeResponse(status=200, json_data=ok_payload)
+        )
         assert await mirror._fetch_metadata(ok_session, "demo") == ok_payload
 
-        bad_status_session = FakeSession(response=FakeResponse(status=404, json_data={}))
+        bad_status_session = FakeSession(
+            response=FakeResponse(status=404, json_data={})
+        )
         assert await mirror._fetch_metadata(bad_status_session, "demo") is None
 
         broken_session = FakeSession(exc=RuntimeError("boom"))
@@ -306,12 +312,16 @@ def test_download_version_download_exception_returns_false(mirror):
 
 def test_download_all_versions(mirror):
     async def _run():
-        mirror._fetch_metadata = AsyncMock(return_value={"releases": {"1.0": [], "2.0": []}})
+        mirror._fetch_metadata = AsyncMock(
+            return_value={"releases": {"1.0": [], "2.0": []}}
+        )
         mirror.download_version = AsyncMock(return_value=True)
 
         await mirror.download_all_versions(MagicMock(), "demo")
 
-        called_versions = {call.args[2] for call in mirror.download_version.await_args_list}
+        called_versions = {
+            call.args[2] for call in mirror.download_version.await_args_list
+        }
         assert called_versions == {"1.0", "2.0"}
 
     asyncio.run(_run())
@@ -377,7 +387,9 @@ def test_get_info(mirror):
         pkg = mirror._get_pkg_dir("demo")
         (pkg / "1.0").mkdir(parents=True)
 
-        mirror._fetch_metadata = AsyncMock(return_value={"releases": {"1.0": [], "2.0": []}})
+        mirror._fetch_metadata = AsyncMock(
+            return_value={"releases": {"1.0": [], "2.0": []}}
+        )
 
         info = await mirror.get_info(MagicMock(), "demo")
 

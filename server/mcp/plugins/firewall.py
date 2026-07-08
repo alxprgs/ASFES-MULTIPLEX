@@ -3,7 +3,15 @@ from __future__ import annotations
 from typing import Any
 
 from server.mcp.plugins._common import require_argument
-from server.models import MCPTool, MCPToolManifest, PermissionDefinition, PluginDefinition, PluginManifest, RuntimeAvailability, ToolExecutionContext
+from server.models import (
+    MCPTool,
+    MCPToolManifest,
+    PermissionDefinition,
+    PluginDefinition,
+    PluginManifest,
+    RuntimeAvailability,
+    ToolExecutionContext,
+)
 
 
 async def _firewall_availability(services) -> RuntimeAvailability:
@@ -12,20 +20,30 @@ async def _firewall_availability(services) -> RuntimeAvailability:
     return services.host_ops.availability_for_command("netsh", providers=["netsh"])
 
 
-async def list_rules(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def list_rules(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     if context.services.host_ops.is_linux:
-        result = await context.services.host_ops.run_backend("ufw", "status", "numbered", check=False)
+        result = await context.services.host_ops.run_backend(
+            "ufw", "status", "numbered", check=False
+        )
     else:
-        result = await context.services.host_ops.run_backend("netsh", "advfirewall", "firewall", "show", "rule", "name=all", check=False)
+        result = await context.services.host_ops.run_backend(
+            "netsh", "advfirewall", "firewall", "show", "rule", "name=all", check=False
+        )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "firewall status command failed")
     return {"rules_text": result.stdout, **result.to_dict()}
 
 
-async def set_enabled(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def set_enabled(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     enabled = bool(arguments.get("enabled", True))
     if context.services.host_ops.is_linux:
-        result = await context.services.host_ops.run_backend("ufw", "--force", "enable" if enabled else "disable", check=False)
+        result = await context.services.host_ops.run_backend(
+            "ufw", "--force", "enable" if enabled else "disable", check=False
+        )
     else:
         result = await context.services.host_ops.run_backend(
             "netsh",
@@ -41,14 +59,18 @@ async def set_enabled(context: ToolExecutionContext, arguments: dict[str, Any]) 
     return {"enabled": enabled, "changed": True, **result.to_dict()}
 
 
-async def upsert_rule(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def upsert_rule(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     name = str(require_argument(arguments, "name"))
     port = str(require_argument(arguments, "port"))
     protocol = str(arguments.get("protocol") or "tcp").lower()
     direction = str(arguments.get("direction") or "in").lower()
     action = str(arguments.get("action") or "allow").lower()
     if context.services.host_ops.is_linux:
-        result = await context.services.host_ops.run_backend("ufw", action, direction, f"{port}/{protocol}", check=False)
+        result = await context.services.host_ops.run_backend(
+            "ufw", action, direction, f"{port}/{protocol}", check=False
+        )
     else:
         mapped_action = "allow" if action == "allow" else "block"
         mapped_direction = "in" if direction == "in" else "out"
@@ -67,10 +89,19 @@ async def upsert_rule(context: ToolExecutionContext, arguments: dict[str, Any]) 
         )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "firewall rule update failed")
-    return {"name": name, "port": port, "protocol": protocol, "direction": direction, "action": action, **result.to_dict()}
+    return {
+        "name": name,
+        "port": port,
+        "protocol": protocol,
+        "direction": direction,
+        "action": action,
+        **result.to_dict(),
+    }
 
 
-async def delete_rule(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def delete_rule(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     name = str(arguments.get("name") or "")
     port = str(arguments.get("port") or "")
     protocol = str(arguments.get("protocol") or "tcp").lower()
@@ -79,14 +110,29 @@ async def delete_rule(context: ToolExecutionContext, arguments: dict[str, Any]) 
     if context.services.host_ops.is_linux:
         if not port:
             raise RuntimeError("Linux firewall rule deletion requires 'port'")
-        result = await context.services.host_ops.run_backend("ufw", "delete", action, direction, f"{port}/{protocol}", check=False)
+        result = await context.services.host_ops.run_backend(
+            "ufw", "delete", action, direction, f"{port}/{protocol}", check=False
+        )
     else:
         if not name:
             raise RuntimeError("Windows firewall rule deletion requires 'name'")
-        result = await context.services.host_ops.run_backend("netsh", "advfirewall", "firewall", "delete", "rule", f"name={name}", check=False)
+        result = await context.services.host_ops.run_backend(
+            "netsh",
+            "advfirewall",
+            "firewall",
+            "delete",
+            "rule",
+            f"name={name}",
+            check=False,
+        )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "firewall rule delete failed")
-    return {"name": name or None, "port": port or None, "deleted": True, **result.to_dict()}
+    return {
+        "name": name or None,
+        "port": port or None,
+        "deleted": True,
+        **result.to_dict(),
+    }
 
 
 PLUGIN = PluginDefinition(
@@ -96,8 +142,13 @@ PLUGIN = PluginDefinition(
         version="1.0.0",
         description="Просматривает и управляет локальными правилами файрвола через ufw на Linux и netsh на Windows.",
         permissions=[
-            PermissionDefinition(key="firewall.read", description="Читать статус и правила файрвола."),
-            PermissionDefinition(key="firewall.write", description="Включать, отключать и изменять правила файрвола."),
+            PermissionDefinition(
+                key="firewall.read", description="Читать статус и правила файрвола."
+            ),
+            PermissionDefinition(
+                key="firewall.write",
+                description="Включать, отключать и изменять правила файрвола.",
+            ),
         ],
         required_backends=["ufw", "netsh"],
         providers=["ufw", "netsh"],
@@ -108,7 +159,11 @@ PLUGIN = PluginDefinition(
                 key="firewall.list_rules",
                 name="Список правил файрвола",
                 description="Читает текущий набор правил файрвола через backend текущей платформы.",
-                input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
                 permissions=["firewall.read"],
                 tags=["firewall", "read"],
                 read_only=True,

@@ -2,6 +2,7 @@
 PyPI Mirror core — production copy of dev/pypi_mirror/pypi_mirror.py.
 Added: PEP 503 canonical name normalization applied in _get_pkg_dir / _get_ver_dir.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +31,7 @@ logger = logging.getLogger("multiplex.pypi_mirror")
 # PEP 503 name normalization
 # ---------------------------------------------------------------------------
 
+
 def normalize_package_name(name: str) -> str:
     """Return the PEP 503 canonical package name (lowercase, dashes only)."""
     return re.sub(r"[-_.]+", "-", name).lower()
@@ -39,11 +41,16 @@ def normalize_package_name(name: str) -> str:
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 class MirrorConfig(BaseModel):
     """PyPI mirror configuration."""
 
     api_base: str = "https://pypi.org/pypi"
-    data_dir: Path = Field(default_factory=lambda: Path(__file__).resolve().parents[2] / "data" / "pypi_storage")
+    data_dir: Path = Field(
+        default_factory=lambda: (
+            Path(__file__).resolve().parents[2] / "data" / "pypi_storage"
+        )
+    )
     proxies: Union[List[str], str, None] = None
     network_mode: str = Field(default="direct", pattern="^(direct|proxy|mix)$")
     rate_limit_mb: Optional[float] = Field(default=None, gt=0)
@@ -61,6 +68,7 @@ class MirrorConfig(BaseModel):
 # Mirror
 # ---------------------------------------------------------------------------
 
+
 class AsyncPypiMirror:
     """Async PyPI mirror with low-level and high-level API."""
 
@@ -68,7 +76,9 @@ class AsyncPypiMirror:
         self.cfg = config
         self.cfg.data_dir.mkdir(parents=True, exist_ok=True)
         self.proxies = self._load_proxies(self.cfg.proxies)
-        self._rate_limit_bytes = (self.cfg.rate_limit_mb * 1024 * 1024) if self.cfg.rate_limit_mb else None
+        self._rate_limit_bytes = (
+            (self.cfg.rate_limit_mb * 1024 * 1024) if self.cfg.rate_limit_mb else None
+        )
         self.cache = cache
 
     # ------------------------------------------------------------------
@@ -122,7 +132,11 @@ class AsyncPypiMirror:
 
         path = Path(str(proxies))
         if path.exists() and path.is_file():
-            return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            return [
+                line.strip()
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
 
         proxy = str(proxies).strip()
         return [proxy] if proxy else []
@@ -228,7 +242,9 @@ class AsyncPypiMirror:
         actual_sha256 = await asyncio.to_thread(_calc_sha256, file_path)
         return actual_sha256 == expected_sha256
 
-    async def _fetch_metadata(self, session: aiohttp.ClientSession, name: str) -> Optional[dict]:
+    async def _fetch_metadata(
+        self, session: aiohttp.ClientSession, name: str
+    ) -> Optional[dict]:
         norm = normalize_package_name(name)
         cache_key = f"pypi:meta:{norm}"
         if self.cache is not None:
@@ -237,9 +253,13 @@ class AsyncPypiMirror:
                 return cached
 
         url = f"{self.cfg.api_base}/{norm}/json"
-        
+
         # V3.3 Cache Stampede Protection
-        redis = self.cache._redis if self.cache is not None and self.cache.should_use_redis() else None
+        redis = (
+            self.cache._redis
+            if self.cache is not None and self.cache.should_use_redis()
+            else None
+        )
         lock_key = f"pypi:meta_lock:{norm}"
         stream_key = f"pypi:meta_events:{norm}"
 
@@ -250,7 +270,9 @@ class AsyncPypiMirror:
                 last_id = "0"
                 for _ in range(30):
                     try:
-                        streams = await redis.xread({stream_key: last_id}, count=1, block=1000)
+                        streams = await redis.xread(
+                            {stream_key: last_id}, count=1, block=1000
+                        )
                         if streams:
                             break
                     except Exception:
@@ -260,9 +282,11 @@ class AsyncPypiMirror:
                 if cached is not None:
                     return cached
                 # If still nothing, proceed to fetch
-                
+
         try:
-            async with session.get(url, proxy=self._choose_proxy(), ssl=self.cfg.verify_ssl) as resp:
+            async with session.get(
+                url, proxy=self._choose_proxy(), ssl=self.cfg.verify_ssl
+            ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     if self.cache is not None:
@@ -287,7 +311,9 @@ class AsyncPypiMirror:
         if (free - required_bytes) < min_bytes:
             raise IOError(f"Not enough free space: need={required_bytes} bytes")
 
-    async def _download_file(self, session: aiohttp.ClientSession, url: str, dest: Path) -> None:
+    async def _download_file(
+        self, session: aiohttp.ClientSession, url: str, dest: Path
+    ) -> None:
         proxy = self._choose_proxy()
         temp = dest.with_suffix(dest.suffix + ".tmp")
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -317,7 +343,9 @@ class AsyncPypiMirror:
                     pass
             raise
 
-    async def download_version(self, session: aiohttp.ClientSession, name: str, ver: str) -> bool:
+    async def download_version(
+        self, session: aiohttp.ClientSession, name: str, ver: str
+    ) -> bool:
         norm = normalize_package_name(name)
         metadata = await self._fetch_metadata(session, norm)
         releases = (metadata or {}).get("releases", {})
@@ -343,7 +371,7 @@ class AsyncPypiMirror:
                 return True
 
             await self._check_disk_space(int(file_info.get("size", 0)))
-            
+
             async with sem:
                 try:
                     await self._download_file(session, file_url, dest)
@@ -362,7 +390,9 @@ class AsyncPypiMirror:
         results = await asyncio.gather(*(_download_task(f) for f in release_files))
         return all(results)
 
-    async def download_all_versions(self, session: aiohttp.ClientSession, name: str) -> None:
+    async def download_all_versions(
+        self, session: aiohttp.ClientSession, name: str
+    ) -> None:
         norm = normalize_package_name(name)
         metadata = await self._fetch_metadata(session, norm)
         if not metadata:
@@ -377,8 +407,14 @@ class AsyncPypiMirror:
 
         await asyncio.gather(*(task(ver) for ver in versions_list))
 
-    async def check_integrity(self, session: aiohttp.ClientSession, name: Optional[str] = None) -> Dict[str, Any]:
-        libs = [normalize_package_name(name)] if name else [d.name for d in self.cfg.data_dir.iterdir() if d.is_dir()]
+    async def check_integrity(
+        self, session: aiohttp.ClientSession, name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        libs = (
+            [normalize_package_name(name)]
+            if name
+            else [d.name for d in self.cfg.data_dir.iterdir() if d.is_dir()]
+        )
         checked_files = 0
         missing_files: List[str] = []
         corrupted_files: List[str] = []
@@ -424,11 +460,17 @@ class AsyncPypiMirror:
             shutil.rmtree(target)
             logger.info("deleted=%s", target)
 
-    async def get_info(self, session: aiohttp.ClientSession, name: str) -> Dict[str, Any]:
+    async def get_info(
+        self, session: aiohttp.ClientSession, name: str
+    ) -> Dict[str, Any]:
         norm = normalize_package_name(name)
         metadata = await self._fetch_metadata(session, norm)
         pkg_dir = self._get_pkg_dir(norm)
-        downloaded = [d.name for d in pkg_dir.iterdir() if d.is_dir()] if pkg_dir.exists() else []
+        downloaded = (
+            [d.name for d in pkg_dir.iterdir() if d.is_dir()]
+            if pkg_dir.exists()
+            else []
+        )
         remote = list((metadata or {}).get("releases", {}).keys())
         return {
             "name": norm,
@@ -489,7 +531,9 @@ class AsyncPypiMirror:
             self._log_result(result)
             return result
         except Exception as exc:
-            result = self._result(False, "download_version", name=norm, version=ver, error=str(exc))
+            result = self._result(
+                False, "download_version", name=norm, version=ver, error=str(exc)
+            )
             self._log_result(result)
             return result
 
@@ -501,7 +545,9 @@ class AsyncPypiMirror:
             async with self._managed_session(session) as managed:
                 metadata = await self._fetch_metadata(managed, norm)
                 releases = (metadata or {}).get("releases", {})
-                versions_list = sorted(releases.keys(), key=lambda v: pkg_version.parse(v))
+                versions_list = sorted(
+                    releases.keys(), key=lambda v: pkg_version.parse(v)
+                )
                 sem = asyncio.Semaphore(self.cfg.parallel)
 
                 async def task(ver: str) -> Dict[str, Any]:
@@ -524,12 +570,16 @@ class AsyncPypiMirror:
             self._log_result(result)
             return result
         except Exception as exc:
-            result = self._result(False, "download_all_versions", name=norm, error=str(exc))
+            result = self._result(
+                False, "download_all_versions", name=norm, error=str(exc)
+            )
             self._log_result(result)
             return result
 
     async def verify(
-        self, name: Optional[str] = None, session: Optional[aiohttp.ClientSession] = None
+        self,
+        name: Optional[str] = None,
+        session: Optional[aiohttp.ClientSession] = None,
     ) -> Dict[str, Any]:
         try:
             async with self._managed_session(session) as managed:
@@ -552,7 +602,9 @@ class AsyncPypiMirror:
             return result
 
     async def repair(
-        self, name: Optional[str] = None, session: Optional[aiohttp.ClientSession] = None
+        self,
+        name: Optional[str] = None,
+        session: Optional[aiohttp.ClientSession] = None,
     ) -> Dict[str, Any]:
         try:
             repaired = 0
@@ -560,7 +612,11 @@ class AsyncPypiMirror:
             checked = 0
 
             async with self._managed_session(session) as managed:
-                libs = [normalize_package_name(name)] if name else [d.name for d in self.cfg.data_dir.iterdir() if d.is_dir()]
+                libs = (
+                    [normalize_package_name(name)]
+                    if name
+                    else [d.name for d in self.cfg.data_dir.iterdir() if d.is_dir()]
+                )
                 for lib in libs:
                     metadata = await self._fetch_metadata(managed, lib)
                     releases = (metadata or {}).get("releases", {})
@@ -573,7 +629,9 @@ class AsyncPypiMirror:
                         for file_info in release_files:
                             file_name = file_info.get("filename")
                             file_url = file_info.get("url")
-                            expected_hash = (file_info.get("digests") or {}).get("sha256")
+                            expected_hash = (file_info.get("digests") or {}).get(
+                                "sha256"
+                            )
                             if not file_name or not file_url or not expected_hash:
                                 continue
 
@@ -582,7 +640,9 @@ class AsyncPypiMirror:
                             if await self._verify_hash(target, expected_hash):
                                 continue
                             try:
-                                await self._check_disk_space(int(file_info.get("size", 0)))
+                                await self._check_disk_space(
+                                    int(file_info.get("size", 0))
+                                )
                                 await self._download_file(managed, file_url, target)
                                 if await self._verify_hash(target, expected_hash):
                                     repaired += 1
@@ -616,11 +676,18 @@ class AsyncPypiMirror:
             releases = (metadata or {}).get("releases", {})
             local_path = self._get_pkg_dir(norm)
             downloaded_versions = (
-                sorted([d.name for d in local_path.iterdir() if d.is_dir()], key=lambda v: pkg_version.parse(v))
+                sorted(
+                    [d.name for d in local_path.iterdir() if d.is_dir()],
+                    key=lambda v: pkg_version.parse(v),
+                )
                 if local_path.exists()
                 else []
             )
-            remote_versions = sorted(releases.keys(), key=lambda v: pkg_version.parse(v)) if releases else []
+            remote_versions = (
+                sorted(releases.keys(), key=lambda v: pkg_version.parse(v))
+                if releases
+                else []
+            )
             info = (metadata or {}).get("info", {})
 
             result = self._result(
@@ -632,7 +699,9 @@ class AsyncPypiMirror:
                 latest_version=info.get("version"),
                 remote_versions=remote_versions,
                 downloaded_versions=downloaded_versions,
-                missing_versions=[v for v in remote_versions if v not in downloaded_versions],
+                missing_versions=[
+                    v for v in remote_versions if v not in downloaded_versions
+                ],
                 local_path=str(local_path),
                 local_exists=local_path.exists(),
             )
@@ -662,7 +731,11 @@ class AsyncPypiMirror:
                     continue
                 local_path = local_dir / file_name
                 local_exists = local_path.exists()
-                valid_hash = bool(expected_hash and local_exists and await self._verify_hash(local_path, expected_hash))
+                valid_hash = bool(
+                    expected_hash
+                    and local_exists
+                    and await self._verify_hash(local_path, expected_hash)
+                )
                 files.append(
                     {
                         "filename": file_name,
@@ -686,7 +759,9 @@ class AsyncPypiMirror:
             self._log_result(result)
             return result
         except Exception as exc:
-            result = self._result(False, "get_version_info", name=norm, version=ver, error=str(exc))
+            result = self._result(
+                False, "get_version_info", name=norm, version=ver, error=str(exc)
+            )
             self._log_result(result)
             return result
 
@@ -720,7 +795,9 @@ class AsyncPypiMirror:
                 matched.append(item)
         return matched
 
-    def get_path_info(self, name: str, version_str: Optional[str] = None) -> Dict[str, Any]:
+    def get_path_info(
+        self, name: str, version_str: Optional[str] = None
+    ) -> Dict[str, Any]:
         try:
             path = self.get_path(name, version_str)
             if not path:
@@ -756,7 +833,9 @@ class AsyncPypiMirror:
             self._log_result(result)
             return result
         except Exception as exc:
-            result = self._result(False, "get_path_info", name=name, version=version_str, error=str(exc))
+            result = self._result(
+                False, "get_path_info", name=name, version=version_str, error=str(exc)
+            )
             self._log_result(result)
             return result
 
@@ -791,7 +870,9 @@ class AsyncPypiMirror:
             self._log_result(result)
             return result
         except Exception as exc:
-            result = self._result(False, "delete_target", name=name, version=ver, error=str(exc))
+            result = self._result(
+                False, "delete_target", name=name, version=ver, error=str(exc)
+            )
             self._log_result(result)
             return result
 

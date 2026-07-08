@@ -109,7 +109,9 @@ class HostOpsService:
     ) -> RuntimeAvailability:
         executable = self.executable_path(alias)
         if executable:
-            return RuntimeAvailability(available=True, required_backends=[alias], providers=providers or [])
+            return RuntimeAvailability(
+                available=True, required_backends=[alias], providers=providers or []
+            )
         return RuntimeAvailability(
             available=False,
             reason=reason or f"Required executable '{alias}' is not available in PATH",
@@ -126,11 +128,14 @@ class HostOpsService:
     ) -> RuntimeAvailability:
         for alias in aliases:
             if self.command_exists(alias):
-                return RuntimeAvailability(available=True, required_backends=aliases, providers=providers or [])
+                return RuntimeAvailability(
+                    available=True, required_backends=aliases, providers=providers or []
+                )
         joined = ", ".join(aliases)
         return RuntimeAvailability(
             available=False,
-            reason=reason or f"None of the required executables are available: {joined}",
+            reason=reason
+            or f"None of the required executables are available: {joined}",
             required_backends=aliases,
             providers=providers or [],
         )
@@ -138,7 +143,11 @@ class HostOpsService:
     def availability_for_psutil(self) -> RuntimeAvailability:
         if self.psutil_available():
             return RuntimeAvailability(available=True, required_backends=["psutil"])
-        return RuntimeAvailability(available=False, reason="Python package 'psutil' is not installed", required_backends=["psutil"])
+        return RuntimeAvailability(
+            available=False,
+            reason="Python package 'psutil' is not installed",
+            required_backends=["psutil"],
+        )
 
     async def run(
         self,
@@ -170,7 +179,9 @@ class HostOpsService:
         try:
             completed = await asyncio.to_thread(_run_sync)
         except subprocess.TimeoutExpired as exc:
-            raise HostOpsError(f"Command timed out after {timeout} seconds: {' '.join(command)}") from exc
+            raise HostOpsError(
+                f"Command timed out after {timeout} seconds: {' '.join(command)}"
+            ) from exc
 
         stdout, stdout_truncated = self._decode_and_truncate(completed.stdout)
         stderr, stderr_truncated = self._decode_and_truncate(completed.stderr)
@@ -183,11 +194,17 @@ class HostOpsService:
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         if check and result.returncode != 0:
-            detail = result.stderr.strip() or result.stdout.strip() or f"Command exited with code {result.returncode}"
+            detail = (
+                result.stderr.strip()
+                or result.stdout.strip()
+                or f"Command exited with code {result.returncode}"
+            )
             raise HostOpsError(detail)
         return result
 
-    async def run_backend(self, alias: str, *args: str, check: bool = False, **kwargs: Any) -> CommandResult:
+    async def run_backend(
+        self, alias: str, *args: str, check: bool = False, **kwargs: Any
+    ) -> CommandResult:
         executable = self.executable_path(alias)
         if not executable:
             raise HostOpsError(f"Executable '{alias}' is not available in PATH")
@@ -223,9 +240,13 @@ class HostOpsService:
     def configured_nginx_paths(self) -> list[Path]:
         return [self._normalize_root(path) for path in self.config.nginx_config_paths]
 
-    def resolve_managed_path(self, raw_path: str, *, roots: list[Path] | None = None) -> Path:
+    def resolve_managed_path(
+        self, raw_path: str, *, roots: list[Path] | None = None
+    ) -> Path:
         candidate = Path(raw_path)
-        allowed_roots = [self._normalize_root(root) for root in (roots or self.managed_file_roots())]
+        allowed_roots = [
+            self._normalize_root(root) for root in (roots or self.managed_file_roots())
+        ]
         if not allowed_roots:
             raise HostOpsError("No managed roots are configured")
 
@@ -246,7 +267,9 @@ class HostOpsService:
             raise HostOpsError("Resolved path escapes managed roots")
         return resolved
 
-    def list_directory(self, raw_path: str = ".", *, roots: list[Path] | None = None) -> dict[str, Any]:
+    def list_directory(
+        self, raw_path: str = ".", *, roots: list[Path] | None = None
+    ) -> dict[str, Any]:
         path = self.resolve_managed_path(raw_path, roots=roots)
         if not path.exists():
             raise HostOpsError("Directory does not exist")
@@ -296,7 +319,9 @@ class HostOpsService:
             "truncated": truncated,
         }
 
-    def tail_text(self, raw_path: str, *, roots: list[Path] | None = None, tail_lines: int = 100) -> dict[str, Any]:
+    def tail_text(
+        self, raw_path: str, *, roots: list[Path] | None = None, tail_lines: int = 100
+    ) -> dict[str, Any]:
         path = self.resolve_managed_path(raw_path, roots=roots)
         if not path.exists():
             raise HostOpsError("File does not exist")
@@ -309,27 +334,40 @@ class HostOpsService:
             encoded = payload.encode("utf-8")[: self.config.max_output_bytes]
             payload = encoded.decode("utf-8", errors="replace") + "\n...[truncated]"
             truncated = True
-        return {"path": str(path), "content": payload, "line_count": len(tail), "truncated": truncated}
+        return {
+            "path": str(path),
+            "content": payload,
+            "line_count": len(tail),
+            "truncated": truncated,
+        }
 
-    def mkdir(self, raw_path: str, *, roots: list[Path] | None = None) -> dict[str, Any]:
+    def mkdir(
+        self, raw_path: str, *, roots: list[Path] | None = None
+    ) -> dict[str, Any]:
         path = self.resolve_managed_path(raw_path, roots=roots)
         path.mkdir(parents=True, exist_ok=True)
         return {"path": str(path), "created": True}
 
-    def delete_path(self, raw_path: str, *, roots: list[Path] | None = None, recursive: bool = False) -> dict[str, Any]:
+    def delete_path(
+        self, raw_path: str, *, roots: list[Path] | None = None, recursive: bool = False
+    ) -> dict[str, Any]:
         path = self.resolve_managed_path(raw_path, roots=roots)
         self._ensure_safe_write_path(path, roots or self.managed_file_roots())
         if not path.exists():
             raise HostOpsError("Path does not exist")
         if path.is_dir():
             if not recursive:
-                raise HostOpsError("Refusing to delete a directory without recursive=true")
+                raise HostOpsError(
+                    "Refusing to delete a directory without recursive=true"
+                )
             shutil.rmtree(path)
         else:
             path.unlink()
         return {"path": str(path), "deleted": True}
 
-    def move_path(self, source: str, destination: str, *, roots: list[Path] | None = None) -> dict[str, Any]:
+    def move_path(
+        self, source: str, destination: str, *, roots: list[Path] | None = None
+    ) -> dict[str, Any]:
         source_path = self.resolve_managed_path(source, roots=roots)
         destination_path = self.resolve_managed_path(destination, roots=roots)
         write_roots = roots or self.managed_file_roots()
@@ -337,7 +375,11 @@ class HostOpsService:
         self._ensure_safe_write_path(destination_path, write_roots)
         destination_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(source_path), str(destination_path))
-        return {"source": str(source_path), "destination": str(destination_path), "moved": True}
+        return {
+            "source": str(source_path),
+            "destination": str(destination_path),
+            "moved": True,
+        }
 
     def atomic_write_text(
         self,
@@ -369,11 +411,17 @@ class HostOpsService:
         if path.exists() and backup_existing:
             self._backup_file(path)
             created_backup = True
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=str(path.parent)) as handle:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", delete=False, dir=str(path.parent)
+        ) as handle:
             handle.write(content)
             temp_name = handle.name
         Path(temp_name).replace(path)
-        return {"path": str(path), "written": len(content.encode("utf-8")), "backup_created": created_backup}
+        return {
+            "path": str(path),
+            "written": len(content.encode("utf-8")),
+            "backup_created": created_backup,
+        }
 
     def load_json_profile(self, profile_type: str, profile_name: str) -> dict[str, Any]:
         safe_name = Path(profile_name).name
@@ -381,7 +429,9 @@ class HostOpsService:
             raise HostOpsError("Profile name cannot contain path separators")
         path = self.profile_directory(profile_type) / f"{safe_name}.json"
         if not path.exists():
-            raise HostOpsError(f"{profile_type.title()} profile '{profile_name}' does not exist")
+            raise HostOpsError(
+                f"{profile_type.title()} profile '{profile_name}' does not exist"
+            )
         return json.loads(path.read_text(encoding="utf-8"))
 
     def list_profiles(self, profile_type: str) -> list[dict[str, Any]]:
@@ -394,7 +444,13 @@ class HostOpsService:
                 data = json.loads(item.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 continue
-            profiles.append({"name": item.stem, "path": str(item), "metadata": data.get("metadata", {})})
+            profiles.append(
+                {
+                    "name": item.stem,
+                    "path": str(item),
+                    "metadata": data.get("metadata", {}),
+                }
+            )
         return profiles
 
     def redact_arguments(
@@ -421,11 +477,16 @@ class HostOpsService:
             return "[REDACTED]"
         if isinstance(value, dict):
             return {
-                str(key): self._redact_value(item, sensitive_fields, max_string_length, path=(*path, str(key)))
+                str(key): self._redact_value(
+                    item, sensitive_fields, max_string_length, path=(*path, str(key))
+                )
                 for key, item in value.items()
             }
         if isinstance(value, list):
-            return [self._redact_value(item, sensitive_fields, max_string_length, path=path) for item in value]
+            return [
+                self._redact_value(item, sensitive_fields, max_string_length, path=path)
+                for item in value
+            ]
         if isinstance(value, str) and len(value) > max_string_length:
             return f"{value[:max_string_length]}...[truncated]"
         return value
@@ -455,7 +516,9 @@ class HostOpsService:
                 for part in relative.parts:
                     current = current / part
                     if current.exists() and self._is_link_or_reparse_point(current):
-                        raise HostOpsError("Refusing to write through a symlink or reparse point")
+                        raise HostOpsError(
+                            "Refusing to write through a symlink or reparse point"
+                        )
                 return
         raise HostOpsError("Path is outside of managed roots")
 
@@ -464,7 +527,10 @@ class HostOpsService:
             return True
         if os.name == "nt":
             try:
-                return bool(path.stat().st_file_attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+                return bool(
+                    path.stat().st_file_attributes
+                    & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+                )
             except (AttributeError, OSError):
                 return False
         return False

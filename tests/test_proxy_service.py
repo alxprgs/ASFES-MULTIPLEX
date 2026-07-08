@@ -77,7 +77,7 @@ def test_parse_proxifier_xml() -> None:
 """
     proxies = ProxyService.parse_proxifier_xml(xml_content)
     assert len(proxies) == 2  # SOCKS4 must be skipped!
-    
+
     p1 = proxies[0]
     assert p1["protocol"] == "https"
     assert p1["host"] == "45.153.163.129"
@@ -106,16 +106,16 @@ def test_export_as_proxifier_xml() -> None:
             "protocol": "socks5",
             "host": "127.0.0.1",
             "port": 10808,
-        }
+        },
     ]
 
     xml = ProxyService.export_as_proxifier_xml(proxies)
     assert 'type="HTTPS"' in xml
     assert 'type="SOCKS5"' in xml
-    assert '<Address>45.153.163.129</Address>' in xml
-    assert '<Port>10808</Port>' in xml
-    assert '<Password>pwd</Password>' in xml
-    assert '<Username>chodop2</Username>' in xml
+    assert "<Address>45.153.163.129</Address>" in xml
+    assert "<Port>10808</Port>" in xml
+    assert "<Password>pwd</Password>" in xml
+    assert "<Username>chodop2</Username>" in xml
 
     # Verify roundtrip
     parsed = ProxyService.parse_proxifier_xml(xml)
@@ -143,20 +143,24 @@ def test_export_formats() -> None:
 
     tg = ProxyService.export_as_tg_proxy(proxy, "mysecret")
     assert tg["deep_link"] == "tg://proxy?server=127.0.0.1&port=1080&secret=mysecret"
-    assert tg["web_url"] == "https://t.me/proxy?server=127.0.0.1&port=1080&secret=mysecret"
+    assert (
+        tg["web_url"] == "https://t.me/proxy?server=127.0.0.1&port=1080&secret=mysecret"
+    )
 
 
 def test_encryption_decryption() -> None:
     # Setup mock service dependencies
     mock_settings = MagicMock()
-    mock_settings.security.api_jwt_secret = SecretStr("my-super-secret-key-1234567890123")
-    
+    mock_settings.security.api_jwt_secret = SecretStr(
+        "my-super-secret-key-1234567890123"
+    )
+
     srv = ProxyService(MagicMock(), mock_settings)
-    
+
     plain = "secret-proxy-password"
     enc = srv.encryptor.encrypt(plain)
     assert enc != plain
-    
+
     dec = srv.encryptor.decrypt(enc)
     assert dec == plain
 

@@ -9,8 +9,16 @@ from server.core.config import Settings
 from server.host_ops import HostOpsService, CommandResult
 from server.models import ToolExecutionContext
 from server.mcp.plugins.system_stats import get_snapshot
-from server.mcp.plugins.process_manager import list_processes, inspect_process, start_process
-from server.mcp.plugins.logs_viewer import read_file_logs, read_system_logs, read_docker_logs
+from server.mcp.plugins.process_manager import (
+    list_processes,
+    inspect_process,
+    start_process,
+)
+from server.mcp.plugins.logs_viewer import (
+    read_file_logs,
+    read_system_logs,
+    read_docker_logs,
+)
 
 
 @pytest.fixture
@@ -19,11 +27,11 @@ def temp_workspace():
         tmp_path = Path(tmpdir)
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
-        
+
         # Write some log file
         log_file = log_dir / "app.log"
         log_file.write_text("Line 1\nLine 2\nLine 3\n", encoding="utf-8")
-        
+
         yield {
             "tmpdir": tmp_path,
             "log_dir": log_dir,
@@ -50,14 +58,14 @@ async def test_system_stats_get_snapshot(host_ops) -> None:
         mock_psutil.cpu_percent.return_value = 10.5
         mock_psutil.virtual_memory.return_value._asdict.return_value = {"total": 1000}
         mock_psutil.swap_memory.return_value._asdict.return_value = {"total": 500}
-        
+
         part = MagicMock()
         part.device = "/dev/sda1"
         part.mountpoint = "/"
         part.fstype = "ext4"
         mock_psutil.disk_partitions.return_value = [part]
         mock_psutil.disk_usage.return_value._asdict.return_value = {"free": 200}
-        
+
         mock_psutil.net_io_counters.return_value.items.return_value = []
         mock_psutil.net_if_addrs.return_value.items.return_value = []
 
@@ -78,7 +86,7 @@ async def test_process_manager_tools(host_ops) -> None:
         proc = MagicMock()
         proc.info = {"pid": 999, "name": "python"}
         mock_psutil.process_iter.return_value = [proc]
-        
+
         res = await list_processes(context, {"name": "py", "limit": 5})
         assert len(res["processes"]) == 1
         assert res["processes"][0]["pid"] == 999
@@ -106,7 +114,7 @@ async def test_process_manager_tools(host_ops) -> None:
         proc_stub = MagicMock()
         proc_stub.pid = 1234
         mock_exec.return_value = proc_stub
-        
+
         res = await start_process(context, {"command": ["python", "-c", "print(1)"]})
         assert res["pid"] == 1234
         mock_exec.assert_called_once_with("python", "-c", "print(1)", cwd=None)
@@ -129,26 +137,55 @@ async def test_logs_viewer_tools(host_ops, temp_workspace) -> None:
 
     # 2. read_system_logs (Linux / journalctl)
     with patch.object(host_ops, "platform_name", "linux"):
-        mock_run = AsyncMock(return_value=CommandResult(command=["journalctl"], returncode=0, stdout="Jun 28 System logs here", stderr=""))
+        mock_run = AsyncMock(
+            return_value=CommandResult(
+                command=["journalctl"],
+                returncode=0,
+                stdout="Jun 28 System logs here",
+                stderr="",
+            )
+        )
         with patch.object(host_ops, "run", mock_run):
             res2 = await read_system_logs(context, {"tail_lines": 5, "unit": "nginx"})
             assert "System logs here" in res2["logs"]
-            mock_run.assert_called_with(["journalctl", "-n", "5", "--no-pager", "-u", "nginx"], check=False)
+            mock_run.assert_called_with(
+                ["journalctl", "-n", "5", "--no-pager", "-u", "nginx"], check=False
+            )
 
     # 3. read_system_logs (Windows / powershell)
     with patch.object(host_ops, "platform_name", "windows"):
+
         def mock_exists(cmd):
             return cmd == "powershell"
+
         with patch.object(host_ops, "command_exists", mock_exists):
-            mock_run_win = AsyncMock(return_value=CommandResult(command=["powershell"], returncode=0, stdout='[{"TimeCreated":"today","Message":"log msg"}]', stderr=""))
+            mock_run_win = AsyncMock(
+                return_value=CommandResult(
+                    command=["powershell"],
+                    returncode=0,
+                    stdout='[{"TimeCreated":"today","Message":"log msg"}]',
+                    stderr="",
+                )
+            )
             with patch.object(host_ops, "run_backend", mock_run_win):
                 res3 = await read_system_logs(context, {"tail_lines": 10})
                 assert res3["source"] == "windows-event-log"
                 assert len(res3["entries"]) == 1
 
     # 4. read_docker_logs
-    mock_run_docker = AsyncMock(return_value=CommandResult(command=["docker"], returncode=0, stdout="Docker container output", stderr=""))
+    mock_run_docker = AsyncMock(
+        return_value=CommandResult(
+            command=["docker"],
+            returncode=0,
+            stdout="Docker container output",
+            stderr="",
+        )
+    )
     with patch.object(host_ops, "run_backend", mock_run_docker):
-        res4 = await read_docker_logs(context, {"container": "my_web_app", "tail_lines": 50})
+        res4 = await read_docker_logs(
+            context, {"container": "my_web_app", "tail_lines": 50}
+        )
         assert "Docker container output" in res4["logs"]
-        mock_run_docker.assert_called_with("docker", "logs", "--tail", "50", "my_web_app", check=False)
+        mock_run_docker.assert_called_with(
+            "docker", "logs", "--tail", "50", "my_web_app", check=False
+        )

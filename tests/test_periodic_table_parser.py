@@ -167,9 +167,13 @@ def test_parse_periodic_table_page_extracts_summary_and_candidates() -> None:
 
     assert parsed.title == "Периодическая система химических элементов"
     assert "атомному номеру" in (parsed.lead_summary or "")
-    assert "схожими химическими свойствами" in (parsed.section_summaries["groups"] or "")
+    assert "схожими химическими свойствами" in (
+        parsed.section_summaries["groups"] or ""
+    )
     assert len(parsed.candidate_urls) == 2
-    assert parsed.candidate_urls[0].endswith("/wiki/%D0%92%D0%BE%D0%B4%D0%BE%D1%80%D0%BE%D0%B4")
+    assert parsed.candidate_urls[0].endswith(
+        "/wiki/%D0%92%D0%BE%D0%B4%D0%BE%D1%80%D0%BE%D0%B4"
+    )
 
 
 def test_parse_element_page_maps_fields_sections_and_isotopes() -> None:
@@ -188,7 +192,9 @@ def test_parse_element_page_maps_fields_sections_and_isotopes() -> None:
     assert parsed["sections"]["production"] is not None
     assert parsed["sections"]["production_home"] is not None
     assert parsed["sections"]["production_laboratory"] is not None
-    assert parsed["sections"]["chemical_properties"]["summary"].startswith("Водород проявляет")
+    assert parsed["sections"]["chemical_properties"]["summary"].startswith(
+        "Водород проявляет"
+    )
     assert parsed["isotopes"][0]["isotope"] == "1H"
 
 
@@ -209,8 +215,12 @@ def test_parse_element_page_supports_combined_live_style_rows() -> None:
 
 
 def test_merge_element_records_prefers_ru_and_falls_back_to_en() -> None:
-    ru_record = parse_element_page(RU_HYDROGEN_HTML, language="ru", url="https://ru.wikipedia.org/wiki/Водород")
-    en_record = parse_element_page(EN_HYDROGEN_HTML, language="en", url="https://en.wikipedia.org/wiki/Hydrogen")
+    ru_record = parse_element_page(
+        RU_HYDROGEN_HTML, language="ru", url="https://ru.wikipedia.org/wiki/Водород"
+    )
+    en_record = parse_element_page(
+        EN_HYDROGEN_HTML, language="en", url="https://en.wikipedia.org/wiki/Hydrogen"
+    )
 
     merged = merge_element_records(ru_record, en_record, "2026-03-22T00:00:00Z")
 
@@ -219,7 +229,9 @@ def test_merge_element_records_prefers_ru_and_falls_back_to_en() -> None:
     assert merged["properties"]["atomic_mass"]["value"] == 1.008
     assert merged["properties"]["molar_mass"]["value"] == 1.008
     assert merged["properties"]["ionization_energy"]["value"] == 1312
-    assert merged["sections"]["purification"]["summary"].startswith("Hydrogen can be purified")
+    assert merged["sections"]["purification"]["summary"].startswith(
+        "Hydrogen can be purified"
+    )
 
 
 def test_build_periodic_table_dataset_smoke_with_fake_fetch() -> None:
@@ -248,4 +260,6 @@ def test_build_periodic_table_dataset_smoke_with_fake_fetch() -> None:
     assert dataset["groups"][1]["group"] == 18
     assert dataset["periods"][0]["period"] == 1
     assert dataset["blocks"][0]["block"] == "s"
-    assert dataset["elements"][0]["source_urls"]["ru"].endswith("/wiki/%D0%92%D0%BE%D0%B4%D0%BE%D1%80%D0%BE%D0%B4")
+    assert dataset["elements"][0]["source_urls"]["ru"].endswith(
+        "/wiki/%D0%92%D0%BE%D0%B4%D0%BE%D1%80%D0%BE%D0%B4"
+    )

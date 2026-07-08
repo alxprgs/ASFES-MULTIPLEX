@@ -37,11 +37,11 @@ def temp_workspace():
         tmp_path = Path(tmpdir)
         ssl_dir = tmp_path / "ssl_profiles"
         ssl_dir.mkdir()
-        
+
         # Write dummy SSL cert pem
         cert_file = tmp_path / "cert.pem"
         cert_file.write_text("DUMMY CERTIFICATE", encoding="utf-8")
-        
+
         # Save a dummy SSL profile pointing to cert_file
         {
             "provider": "certbot",
@@ -50,12 +50,12 @@ def temp_workspace():
             "certificate_path": str(cert_file),
         }
         (ssl_dir / "my_ssl.json").write_text(
-            "{\"provider\": \"certbot\", \"domains\": [\"example.com\"], \"email\": \"admin@example.com\", \"certificate_path\": \""
+            '{"provider": "certbot", "domains": ["example.com"], "email": "admin@example.com", "certificate_path": "'
             + str(cert_file).replace("\\", "\\\\")
-            + "\"}",
-            encoding="utf-8"
+            + '"}',
+            encoding="utf-8",
         )
-        
+
         yield {
             "tmpdir": tmp_path,
             "ssl_profiles": ssl_dir,
@@ -87,7 +87,11 @@ async def test_nginx_plugin(host_ops) -> None:
         proc.info = {"pid": 200, "name": "nginx"}
         mock_psutil.process_iter.return_value = [proc]
 
-        mock_run = AsyncMock(return_value=CommandResult(command=[], returncode=0, stdout="Syntax OK", stderr=""))
+        mock_run = AsyncMock(
+            return_value=CommandResult(
+                command=[], returncode=0, stdout="Syntax OK", stderr=""
+            )
+        )
         with patch.object(host_ops, "run_backend", mock_run):
             # 2. nginx_status
             status_res = await nginx_status(context, {})
@@ -115,14 +119,22 @@ async def test_ssl_plugin(host_ops, temp_workspace) -> None:
     assert "my_ssl" in list_res["profiles"][0]["name"]
 
     # 2. issue_certificate
-    mock_run = AsyncMock(return_value=CommandResult(command=[], returncode=0, stdout="Cert issued", stderr=""))
+    mock_run = AsyncMock(
+        return_value=CommandResult(
+            command=[], returncode=0, stdout="Cert issued", stderr=""
+        )
+    )
     with patch.object(host_ops, "run", mock_run):
         with patch.object(host_ops, "executable_path", return_value="/usr/bin/certbot"):
             issue_res = await ssl_issue_certificate(context, {"profile": "my_ssl"})
             assert issue_res["provider"] == "certbot"
 
     # 3. renew_certificate
-    mock_run = AsyncMock(return_value=CommandResult(command=[], returncode=0, stdout="Cert renewed", stderr=""))
+    mock_run = AsyncMock(
+        return_value=CommandResult(
+            command=[], returncode=0, stdout="Cert renewed", stderr=""
+        )
+    )
     with patch.object(host_ops, "run", mock_run):
         with patch.object(host_ops, "executable_path", return_value="/usr/bin/certbot"):
             renew_res = await ssl_renew_certificate(context, {"profile": "my_ssl"})
@@ -144,9 +156,13 @@ async def test_mail_plugin(host_ops) -> None:
     context = ToolExecutionContext(user=MagicMock(), services=services, request_meta={})
 
     # send_test_email
-    res = await send_test_email(context, {"recipient": "user@example.com", "subject": "test", "body": "msg"})
+    res = await send_test_email(
+        context, {"recipient": "user@example.com", "subject": "test", "body": "msg"}
+    )
     assert res["sent"] is True
-    services.mailer.send_email.assert_called_once_with("user@example.com", "test", "msg")
+    services.mailer.send_email.assert_called_once_with(
+        "user@example.com", "test", "msg"
+    )
 
 
 @pytest.mark.asyncio
@@ -166,7 +182,9 @@ async def test_alerts_plugin(host_ops) -> None:
     assert list_res["count"] == 1
 
     # 2. upsert_rule
-    upsert_res = await alerts_upsert_rule(context, {"name": "rule1", "source": "system", "condition": "cpu > 80"})
+    upsert_res = await alerts_upsert_rule(
+        context, {"name": "rule1", "source": "system", "condition": "cpu > 80"}
+    )
     assert upsert_res["rule_id"] == "rule1"
 
     # 3. delete_rule
@@ -182,5 +200,7 @@ async def test_alerts_plugin(host_ops) -> None:
     assert eval_res["evaluated"] is True
 
     # 6. send_test_notification
-    notify_res = await alerts_send_test_notification(context, {"recipients": ["admin@example.com"]})
+    notify_res = await alerts_send_test_notification(
+        context, {"recipients": ["admin@example.com"]}
+    )
     assert notify_res["sent"] is True

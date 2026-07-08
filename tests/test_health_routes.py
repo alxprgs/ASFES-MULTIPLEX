@@ -34,7 +34,10 @@ async def test_healthcheck_details_success(integration_env) -> None:
     # Login as root to get permission
     login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
@@ -65,7 +68,10 @@ async def test_healthcheck_details_degraded(integration_env) -> None:
     # Login
     login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 

@@ -5,21 +5,50 @@ import asyncio
 import contextlib
 import json
 import os
+from typing import Any
+from datetime import datetime, timedelta, UTC
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 
 from server.core.database import TOOL_POLICIES
-from server.core.deps import enforce_api_rate_limit, get_current_api_user, get_optional_api_user, get_services, require_permission
-from server.models import BootstrapResponse, MCPConnectedServiceResponse, PermissionDefinition, PermissionMutationRequest, PluginInfoResponse, PluginReloadRequest, ProfileUpdateRequest, RuntimeSettingsResponse, SystemUpdateOptions, SystemUpdateResponse, SystemUpdateSessionResponse, SystemUpdateSessionStartResponse, ToggleRequest, ToolInfoResponse, UserResponse, UserToolPolicyResponse, UserPrincipal, AuditEventListResponse
+from server.core.deps import (
+    enforce_api_rate_limit,
+    get_current_api_user,
+    get_optional_api_user,
+    get_services,
+    require_permission,
+)
+from server.models import (
+    BootstrapResponse,
+    MCPConnectedServiceResponse,
+    PermissionDefinition,
+    PermissionMutationRequest,
+    PluginInfoResponse,
+    PluginReloadRequest,
+    ProfileUpdateRequest,
+    RuntimeSettingsResponse,
+    SystemUpdateOptions,
+    SystemUpdateResponse,
+    SystemUpdateSessionResponse,
+    SystemUpdateSessionStartResponse,
+    ToggleRequest,
+    ToolInfoResponse,
+    UserResponse,
+    UserToolPolicyResponse,
+    UserPrincipal,
+    AuditEventListResponse,
+)
 from server.services import ApplicationServices
 
 
 router = APIRouter(tags=["admin"])
 
 
-def _runtime_response(services: ApplicationServices, runtime: dict) -> RuntimeSettingsResponse:
+def _runtime_response(
+    services: ApplicationServices, runtime: dict
+) -> RuntimeSettingsResponse:
     return RuntimeSettingsResponse(
         registration_enabled=bool(runtime.get("registration_enabled", False)),
         mcp_enabled=bool(runtime.get("mcp_enabled", True)),
@@ -37,7 +66,13 @@ def _system_script_command(script_path: str) -> list[str]:
 def _system_script_failure_detail(result) -> str:
     output = result.stderr.strip() or result.stdout.strip()
     lowered = output.lower()
-    if "sudo" in lowered or "password" in lowered or "permission" in lowered or "разреш" in lowered or "прав" in lowered:
+    if (
+        "sudo" in lowered
+        or "password" in lowered
+        or "permission" in lowered
+        or "разреш" in lowered
+        or "прав" in lowered
+    ):
         return "Системное действие недоступно: настройте sudo/system-разрешения для update/restart вручную."
     return output or "Системный скрипт завершился с ошибкой"
 
@@ -63,7 +98,11 @@ async def _audit_update_session(
         result="success" if session.status == "success" else "error",
         metadata={
             "kind": session.kind,
-            "stages": [stage.key for stage in session.stages.values() if stage.needed or stage.forced],
+            "stages": [
+                stage.key
+                for stage in session.stages.values()
+                if stage.needed or stage.forced
+            ],
             "returncode": result.returncode if result else None,
             "duration_ms": result.duration_ms if result else None,
             "requires_restart": session.requires_restart,
@@ -76,9 +115,15 @@ async def _wait_update_result(session) -> SystemUpdateResponse:
     if session.task is not None:
         await session.task
     if session.result is None:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=session.error or "Update session did not produce a result")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=session.error or "Update session did not produce a result",
+        )
     if session.status != "success":
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=_system_script_failure_detail(session.result))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_system_script_failure_detail(session.result),
+        )
     return SystemUpdateResponse.model_validate(session.result.to_dict())
 
 
@@ -94,8 +139,12 @@ async def bootstrap(
         await enforce_api_rate_limit(request, services, user=current_user)
         user_doc = await services.users.get_user_by_id(current_user.user_id)
         if user_doc:
-            user_response = UserResponse.model_validate(services.users.to_response(user_doc))
-        runtime_response = _runtime_response(services, await services.settings_service.get_runtime_settings())
+            user_response = UserResponse.model_validate(
+                services.users.to_response(user_doc)
+            )
+        runtime_response = _runtime_response(
+            services, await services.settings_service.get_runtime_settings()
+        )
     return BootstrapResponse(
         app_name=services.settings.app.name,
         app_version=services.settings.app.version,
@@ -117,7 +166,9 @@ async def update_profile(
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(get_current_api_user),
 ) -> UserResponse:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
     user_doc = await services.users.update_profile(
         current_user,
         email=str(payload.email) if payload.email else None,
@@ -145,7 +196,9 @@ async def list_users(
     current_user: UserPrincipal = Depends(require_permission("users.permission.grant")),
 ) -> list[UserResponse]:
     await enforce_api_rate_limit(request, services, user=current_user)
-    return [UserResponse.model_validate(item) for item in await services.users.list_users()]
+    return [
+        UserResponse.model_validate(item) for item in await services.users.list_users()
+    ]
 
 
 @router.put("/users/{user_id}/permissions", response_model=UserResponse)
@@ -156,13 +209,25 @@ async def mutate_permissions(
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(require_permission("users.permission.grant")),
 ) -> UserResponse:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
     try:
-        user_doc = await services.users.mutate_permissions(user_id, payload.permissions, payload.mode, actor=current_user, audit_ctx=audit_context_from_request(request))
+        user_doc = await services.users.mutate_permissions(
+            user_id,
+            payload.permissions,
+            payload.mode,
+            actor=current_user,
+            audit_ctx=audit_context_from_request(request),
+        )
     except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     return UserResponse.model_validate(services.users.to_response(user_doc))
 
 
@@ -182,10 +247,18 @@ async def set_registration_settings(
     payload: ToggleRequest,
     request: Request,
     services: ApplicationServices = Depends(get_services),
-    current_user: UserPrincipal = Depends(require_permission("settings.registration.update")),
+    current_user: UserPrincipal = Depends(
+        require_permission("settings.registration.update")
+    ),
 ) -> RuntimeSettingsResponse:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
-    runtime = await services.settings_service.set_registration(payload.enabled, actor=current_user, audit_ctx=audit_context_from_request(request))
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
+    runtime = await services.settings_service.set_registration(
+        payload.enabled,
+        actor=current_user,
+        audit_ctx=audit_context_from_request(request),
+    )
     return _runtime_response(services, runtime)
 
 
@@ -207,8 +280,14 @@ async def set_mcp_settings(
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(require_permission("mcp.enable")),
 ) -> RuntimeSettingsResponse:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
-    runtime = await services.settings_service.set_mcp(payload.enabled, actor=current_user, audit_ctx=audit_context_from_request(request))
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
+    runtime = await services.settings_service.set_mcp(
+        payload.enabled,
+        actor=current_user,
+        audit_ctx=audit_context_from_request(request),
+    )
     return _runtime_response(services, runtime)
 
 
@@ -230,11 +309,19 @@ async def set_redis_settings(
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(require_permission("settings.redis.update")),
 ) -> RuntimeSettingsResponse:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
     try:
-        runtime = await services.settings_service.set_redis_runtime(payload.enabled, actor=current_user, audit_ctx=audit_context_from_request(request))
+        runtime = await services.settings_service.set_redis_runtime(
+            payload.enabled,
+            actor=current_user,
+            audit_ctx=audit_context_from_request(request),
+        )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     return _runtime_response(services, runtime)
 
 
@@ -244,11 +331,15 @@ async def check_system_update(
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(require_permission("system.update")),
 ) -> SystemUpdateSessionStartResponse:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
     try:
         session = await services.updates.start_check()
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     return SystemUpdateSessionStartResponse(session_id=session.session_id)
 
 
@@ -259,19 +350,33 @@ async def run_system_update_session(
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(require_permission("system.update")),
 ) -> SystemUpdateSessionStartResponse:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
     try:
-        session = await services.updates.start_update(payload.stages, payload.force_stages)
+        session = await services.updates.start_update(
+            payload.stages, payload.force_stages
+        )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     audit_ctx = audit_context_from_request(request, services.settings)
-    asyncio.create_task(_audit_update_session(services, "system.update", current_user, session.session_id, audit_ctx))
+    asyncio.create_task(
+        _audit_update_session(
+            services, "system.update", current_user, session.session_id, audit_ctx
+        )
+    )
     return SystemUpdateSessionStartResponse(session_id=session.session_id)
 
 
-@router.get("/system/update/sessions/{session_id}", response_model=SystemUpdateSessionResponse)
+@router.get(
+    "/system/update/sessions/{session_id}", response_model=SystemUpdateSessionResponse
+)
 async def get_system_update_session(
     session_id: str,
     request: Request,
@@ -281,7 +386,9 @@ async def get_system_update_session(
     await enforce_api_rate_limit(request, services, user=current_user)
     session = services.updates.get_session(session_id)
     if session is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Update session not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Update session not found"
+        )
     return SystemUpdateSessionResponse.model_validate(session.to_dict())
 
 
@@ -295,7 +402,9 @@ async def stream_system_update_session(
     await enforce_api_rate_limit(request, services, user=current_user)
     session = services.updates.get_session(session_id)
     if session is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Update session not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Update session not found"
+        )
 
     async def event_stream():
         async for event in services.updates.events(session):
@@ -310,13 +419,22 @@ async def run_system_update(
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(require_permission("system.update")),
 ) -> SystemUpdateResponse:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
     try:
-        session = await services.updates.start_update(["code", "python", "frontend", "restart"], ["code", "python", "frontend", "restart"])
+        session = await services.updates.start_update(
+            ["code", "python", "frontend", "restart"],
+            ["code", "python", "frontend", "restart"],
+        )
     except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     audit_ctx = audit_context_from_request(request, services.settings)
-    await _audit_update_session(services, "system.update", current_user, session.session_id, audit_ctx)
+    await _audit_update_session(
+        services, "system.update", current_user, session.session_id, audit_ctx
+    )
     return await _wait_update_result(session)
 
 
@@ -326,17 +444,21 @@ async def run_system_restart(
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(require_permission("system.restart")),
 ) -> SystemUpdateResponse:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
     try:
         session = await services.updates.start_restart()
     except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     audit_ctx = audit_context_from_request(request, services.settings)
-    await _audit_update_session(services, "system.restart", current_user, session.session_id, audit_ctx)
+    await _audit_update_session(
+        services, "system.restart", current_user, session.session_id, audit_ctx
+    )
     return await _wait_update_result(session)
 
-
-from datetime import datetime, timedelta, UTC
 
 @router.get("/audit/logs", response_model=AuditEventListResponse)
 async def audit_logs(
@@ -351,12 +473,16 @@ async def audit_logs(
 ) -> AuditEventListResponse:
     await enforce_api_rate_limit(request, services, user=current_user)
     filters = {}
-    if event_type: filters["event_type"] = event_type
-    if correlation_id: filters["correlation_id"] = correlation_id
-    if actor_user_id: filters["actor.user_id"] = actor_user_id
-    
+    if event_type:
+        filters["event_type"] = event_type
+    if correlation_id:
+        filters["correlation_id"] = correlation_id
+    if actor_user_id:
+        filters["actor.user_id"] = actor_user_id
+
     items = await services.audit.list_events(limit=limit, skip=skip, **filters)
     return AuditEventListResponse(items=items)
+
 
 @router.get("/audit/logs/export")
 async def export_audit_logs(
@@ -369,31 +495,39 @@ async def export_audit_logs(
     actor_user_id: str | None = None,
 ):
     await enforce_api_rate_limit(request, services, user=current_user)
-    
+
     if not start_date:
         start_date = (datetime.now(UTC) - timedelta(days=7)).isoformat()
     if not end_date:
         end_date = datetime.now(UTC).isoformat()
-        
+
     # Check max 30 days limit
     start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
     end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
     if (end_dt - start_dt).days > 31:
-        raise HTTPException(status_code=400, detail="Export range cannot exceed 31 days")
+        raise HTTPException(
+            status_code=400, detail="Export range cannot exceed 31 days"
+        )
 
     filters = {}
-    if event_type: filters["event_type"] = event_type
-    if actor_user_id: filters["actor.user_id"] = actor_user_id
+    if event_type:
+        filters["event_type"] = event_type
+    if actor_user_id:
+        filters["actor.user_id"] = actor_user_id
 
     async def log_generator():
-        async for item in services.audit.export_stream(start_date=start_date, end_date=end_date, **filters):
+        async for item in services.audit.export_stream(
+            start_date=start_date, end_date=end_date, **filters
+        ):
             yield json.dumps(item, ensure_ascii=False) + "\\n"
-            
+
     now_str = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     return StreamingResponse(
         log_generator(),
         media_type="application/x-ndjson",
-        headers={"Content-Disposition": f'attachment; filename="audit_export_{now_str}.jsonl"'}
+        headers={
+            "Content-Disposition": f'attachment; filename="audit_export_{now_str}.jsonl"'
+        },
     )
 
 
@@ -404,7 +538,10 @@ async def list_plugins(
     current_user: UserPrincipal = Depends(require_permission("mcp.plugin.manage")),
 ) -> list[PluginInfoResponse]:
     await enforce_api_rate_limit(request, services, user=current_user)
-    return [PluginInfoResponse.model_validate(item) for item in await services.plugins.list_plugins()]
+    return [
+        PluginInfoResponse.model_validate(item)
+        for item in await services.plugins.list_plugins()
+    ]
 
 
 @router.get("/mcp/connected-services", response_model=list[MCPConnectedServiceResponse])
@@ -414,7 +551,10 @@ async def connected_mcp_services(
     current_user: UserPrincipal = Depends(require_permission("oauth.clients.manage")),
 ) -> list[MCPConnectedServiceResponse]:
     await enforce_api_rate_limit(request, services, user=current_user)
-    return [MCPConnectedServiceResponse.model_validate(item) for item in await services.oauth.connected_services()]
+    return [
+        MCPConnectedServiceResponse.model_validate(item)
+        for item in await services.oauth.connected_services()
+    ]
 
 
 @router.put("/mcp/plugins/{plugin_key}", response_model=PluginInfoResponse)
@@ -425,17 +565,35 @@ async def set_plugin_state(
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(require_permission("mcp.plugin.manage")),
 ) -> PluginInfoResponse:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
     try:
-        await services.plugins.set_plugin_enabled(plugin_key, payload.enabled, actor=current_user, audit_ctx=audit_context_from_request(request))
+        await services.plugins.set_plugin_enabled(
+            plugin_key,
+            payload.enabled,
+            actor=current_user,
+            audit_ctx=audit_context_from_request(request),
+        )
     except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     mcp_gateway = getattr(request.app.state, "mcp_gateway", None)
     if mcp_gateway is not None:
         await mcp_gateway.refresh_tools()
-    plugin = next((item for item in await services.plugins.list_plugins() if item["key"] == plugin_key), None)
+    plugin = next(
+        (
+            item
+            for item in await services.plugins.list_plugins()
+            if item["key"] == plugin_key
+        ),
+        None,
+    )
     if plugin is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found"
+        )
     return PluginInfoResponse.model_validate(plugin)
 
 
@@ -446,7 +604,9 @@ async def reload_plugins(
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(require_permission("mcp.plugin.manage")),
 ) -> dict[str, list[str]]:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
     loaded = await services.plugins.reload_plugins(payload.plugin_keys)
     await services.users.ensure_root_user()
     mcp_gateway = getattr(request.app.state, "mcp_gateway", None)
@@ -468,7 +628,10 @@ async def list_tools(
     current_user: UserPrincipal = Depends(get_current_api_user),
 ) -> list[ToolInfoResponse]:
     await enforce_api_rate_limit(request, services, user=current_user)
-    return [ToolInfoResponse.model_validate(item) for item in await services.plugins.list_tools()]
+    return [
+        ToolInfoResponse.model_validate(item)
+        for item in await services.plugins.list_tools()
+    ]
 
 
 @router.get("/mcp/tools/{tool_key}", response_model=ToolInfoResponse)
@@ -479,9 +642,18 @@ async def get_tool_info(
     current_user: UserPrincipal = Depends(get_current_api_user),
 ) -> ToolInfoResponse:
     await enforce_api_rate_limit(request, services, user=current_user)
-    tool = next((item for item in await services.plugins.list_tools() if item["key"] == tool_key), None)
+    tool = next(
+        (
+            item
+            for item in await services.plugins.list_tools()
+            if item["key"] == tool_key
+        ),
+        None,
+    )
     if tool is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tool not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Tool not found"
+        )
     return ToolInfoResponse.model_validate(tool)
 
 
@@ -493,18 +665,38 @@ async def set_tool_global_state(
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(require_permission("mcp.tool.toggle")),
 ) -> ToolInfoResponse:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
     try:
-        await services.plugins.set_global_tool_enabled(tool_key, payload.enabled, actor=current_user, audit_ctx=audit_context_from_request(request))
+        await services.plugins.set_global_tool_enabled(
+            tool_key,
+            payload.enabled,
+            actor=current_user,
+            audit_ctx=audit_context_from_request(request),
+        )
     except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    tool = next((item for item in await services.plugins.list_tools() if item["key"] == tool_key), None)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    tool = next(
+        (
+            item
+            for item in await services.plugins.list_tools()
+            if item["key"] == tool_key
+        ),
+        None,
+    )
     if tool is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tool not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Tool not found"
+        )
     return ToolInfoResponse.model_validate(tool)
 
 
-@router.get("/mcp/users/{user_id}/tools/{tool_key}", response_model=UserToolPolicyResponse)
+@router.get(
+    "/mcp/users/{user_id}/tools/{tool_key}", response_model=UserToolPolicyResponse
+)
 async def get_user_tool_state(
     user_id: str,
     tool_key: str,
@@ -515,13 +707,25 @@ async def get_user_tool_state(
     await enforce_api_rate_limit(request, services, user=current_user)
     target_user_doc = await services.users.get_user_by_id(user_id)
     if not target_user_doc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found")
-    user_policy = await services.db.collection(TOOL_POLICIES).find_one({"tool_key": tool_key, "scope": "user", "subject_id": user_id})
-    effective = await services.plugins.is_tool_enabled_for_user(services.users.to_principal(target_user_doc), tool_key)
-    return UserToolPolicyResponse(key=tool_key, user_enabled=user_policy.get("enabled") if user_policy else None, effective_enabled=effective)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found"
+        )
+    user_policy = await services.db.collection(TOOL_POLICIES).find_one(
+        {"tool_key": tool_key, "scope": "user", "subject_id": user_id}
+    )
+    effective = await services.plugins.is_tool_enabled_for_user(
+        services.users.to_principal(target_user_doc), tool_key
+    )
+    return UserToolPolicyResponse(
+        key=tool_key,
+        user_enabled=user_policy.get("enabled") if user_policy else None,
+        effective_enabled=effective,
+    )
 
 
-@router.put("/mcp/users/{user_id}/tools/{tool_key}", response_model=UserToolPolicyResponse)
+@router.put(
+    "/mcp/users/{user_id}/tools/{tool_key}", response_model=UserToolPolicyResponse
+)
 async def set_user_tool_state(
     user_id: str,
     tool_key: str,
@@ -530,13 +734,29 @@ async def set_user_tool_state(
     services: ApplicationServices = Depends(get_services),
     current_user: UserPrincipal = Depends(require_permission("mcp.tool.toggle")),
 ) -> UserToolPolicyResponse:
-    await enforce_api_rate_limit(request, services, user=current_user, policy_name="rest_write")
+    await enforce_api_rate_limit(
+        request, services, user=current_user, policy_name="rest_write"
+    )
     target_user_doc = await services.users.get_user_by_id(user_id)
     if not target_user_doc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found"
+        )
     try:
-        await services.plugins.set_user_tool_enabled(user_id, tool_key, payload.enabled, actor=current_user, audit_ctx=audit_context_from_request(request))
+        await services.plugins.set_user_tool_enabled(
+            user_id,
+            tool_key,
+            payload.enabled,
+            actor=current_user,
+            audit_ctx=audit_context_from_request(request),
+        )
     except LookupError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    effective = await services.plugins.is_tool_enabled_for_user(services.users.to_principal(target_user_doc), tool_key)
-    return UserToolPolicyResponse(key=tool_key, user_enabled=payload.enabled, effective_enabled=effective)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    effective = await services.plugins.is_tool_enabled_for_user(
+        services.users.to_principal(target_user_doc), tool_key
+    )
+    return UserToolPolicyResponse(
+        key=tool_key, user_enabled=payload.enabled, effective_enabled=effective
+    )

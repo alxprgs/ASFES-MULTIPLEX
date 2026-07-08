@@ -65,7 +65,9 @@ class RedisRateLimiterBackend:
         try:
             from redis.asyncio import from_url
         except ImportError as exc:
-            raise RuntimeError("redis dependency is required for Redis-backed rate limiting") from exc
+            raise RuntimeError(
+                "redis dependency is required for Redis-backed rate limiting"
+            ) from exc
         self._redis = from_url(self.redis_url, decode_responses=True)
         await self._redis.ping()
 
@@ -87,7 +89,13 @@ class RedisRateLimiterBackend:
         retry_after = max(1, ttl if ttl > 0 else policy.window_seconds)
         allowed = int(count) <= policy.limit
         remaining = max(0, policy.limit - int(count))
-        return RateLimitResult(allowed, policy.limit, remaining if allowed else 0, 0 if allowed else retry_after, retry_after)
+        return RateLimitResult(
+            allowed,
+            policy.limit,
+            remaining if allowed else 0,
+            0 if allowed else retry_after,
+            retry_after,
+        )
 
 
 class RateLimiter:
@@ -115,7 +123,9 @@ class RateLimiter:
     async def initialize(self) -> None:
         if self.should_use_redis():
             if not self._redis:
-                raise RuntimeError("REDIS__URL must be configured when Redis is enabled")
+                raise RuntimeError(
+                    "REDIS__URL must be configured when Redis is enabled"
+                )
             await self._redis.connect()
 
     async def shutdown(self) -> None:
@@ -124,18 +134,26 @@ class RateLimiter:
 
     async def set_runtime_enabled(self, enabled: bool) -> None:
         if self.redis_mode == "required" and not enabled:
-            raise ValueError("Redis runtime disable is forbidden when REDIS__MODE=required")
+            raise ValueError(
+                "Redis runtime disable is forbidden when REDIS__MODE=required"
+            )
         self.redis_runtime_enabled = enabled
         if self.should_use_redis():
             if not self._redis:
-                raise RuntimeError("REDIS__URL must be configured when Redis is enabled")
+                raise RuntimeError(
+                    "REDIS__URL must be configured when Redis is enabled"
+                )
             await self._redis.connect()
         elif self._redis is not None:
             await self._redis.close()
 
     async def consume(self, policy_name: str, key: str) -> RateLimitResult:
         policy = self.policies[policy_name]
-        backend = self._redis if self.should_use_redis() and self._redis is not None else self._memory
+        backend = (
+            self._redis
+            if self.should_use_redis() and self._redis is not None
+            else self._memory
+        )
         return await backend.consume(key, policy)
 
     async def enforce(self, policy_name: str, key: str) -> RateLimitResult:

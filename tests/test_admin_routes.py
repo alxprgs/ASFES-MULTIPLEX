@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 
-
 @pytest.mark.asyncio
 async def test_admin_bootstrap_anonymous(integration_env) -> None:
     client = integration_env["client"]
@@ -21,7 +20,10 @@ async def test_admin_profile_update(integration_env) -> None:
     # Login
     login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
@@ -29,7 +31,7 @@ async def test_admin_profile_update(integration_env) -> None:
     resp = await client.put(
         "/api/account/profile",
         headers=headers,
-        json={"email": "new_email@example.com", "tg_id": "999", "vk_id": "888"}
+        json={"email": "new_email@example.com", "tg_id": "999", "vk_id": "888"},
     )
     assert resp.status_code == 200
     assert resp.json()["email"] == "new_email@example.com"
@@ -44,7 +46,10 @@ async def test_admin_permissions_list(integration_env) -> None:
 
     login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
@@ -61,7 +66,10 @@ async def test_admin_mutate_permissions_failures(integration_env) -> None:
 
     login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
@@ -69,7 +77,7 @@ async def test_admin_mutate_permissions_failures(integration_env) -> None:
     resp1 = await client.put(
         "/api/users/64c9a51d2f6f4e1f7a8b9c1d/permissions",
         headers=headers,
-        json={"permissions": ["docker.containers.read"], "mode": "grant"}
+        json={"permissions": ["docker.containers.read"], "mode": "grant"},
     )
     assert resp1.status_code == 404
 
@@ -85,7 +93,7 @@ async def test_admin_mutate_permissions_failures(integration_env) -> None:
     resp2 = await client.put(
         f"/api/users/{user_id}/permissions",
         headers=headers,
-        json={"permissions": ["alerts.read"], "mode": "invalid_mode"}
+        json={"permissions": ["alerts.read"], "mode": "invalid_mode"},
     )
     assert resp2.status_code == 400
 
@@ -97,7 +105,10 @@ async def test_admin_settings_getters(integration_env) -> None:
 
     login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
@@ -114,7 +125,10 @@ async def test_admin_settings_redis_conflict(integration_env) -> None:
 
     login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
@@ -122,7 +136,9 @@ async def test_admin_settings_redis_conflict(integration_env) -> None:
     original_mode = cfg.redis.mode
     cfg.redis.mode = "required"
     try:
-        resp = await client.put("/api/settings/redis", headers=headers, json={"enabled": False})
+        resp = await client.put(
+            "/api/settings/redis", headers=headers, json={"enabled": False}
+        )
         assert resp.status_code == 409
     finally:
         cfg.redis.mode = original_mode
@@ -135,7 +151,10 @@ async def test_admin_mcp_tools_failures(integration_env) -> None:
 
     login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
@@ -144,15 +163,24 @@ async def test_admin_mcp_tools_failures(integration_env) -> None:
     assert resp.status_code == 404
 
     # 2. PUT non-existing tool -> 404
-    resp = await client.put("/api/mcp/tools/non_existent_tool", headers=headers, json={"enabled": True})
+    resp = await client.put(
+        "/api/mcp/tools/non_existent_tool", headers=headers, json={"enabled": True}
+    )
     assert resp.status_code == 404
 
     # 3. GET user tool state for non-existing user -> 404
-    resp = await client.get("/api/mcp/users/64c9a51d2f6f4e1f7a8b9c1d/tools/docker.list_containers", headers=headers)
+    resp = await client.get(
+        "/api/mcp/users/64c9a51d2f6f4e1f7a8b9c1d/tools/docker.list_containers",
+        headers=headers,
+    )
     assert resp.status_code == 404
 
     # 4. PUT user tool state for non-existing user -> 404
-    resp = await client.put("/api/mcp/users/64c9a51d2f6f4e1f7a8b9c1d/tools/docker.list_containers", headers=headers, json={"enabled": True})
+    resp = await client.put(
+        "/api/mcp/users/64c9a51d2f6f4e1f7a8b9c1d/tools/docker.list_containers",
+        headers=headers,
+        json={"enabled": True},
+    )
     assert resp.status_code == 404
 
 
@@ -163,16 +191,23 @@ async def test_admin_update_sessions_404(integration_env) -> None:
 
     login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
     # Get session 404
-    resp1 = await client.get("/api/system/update/sessions/non_existent_session", headers=headers)
+    resp1 = await client.get(
+        "/api/system/update/sessions/non_existent_session", headers=headers
+    )
     assert resp1.status_code == 404
 
     # Stream session events 404
-    resp2 = await client.get("/api/system/update/sessions/non_existent_session/events", headers=headers)
+    resp2 = await client.get(
+        "/api/system/update/sessions/non_existent_session/events", headers=headers
+    )
     assert resp2.status_code == 404
 
 
@@ -183,10 +218,15 @@ async def test_admin_mcp_plugins_404_and_mutations(integration_env) -> None:
 
     login = await client.post(
         "/api/auth/login",
-        json={"username": cfg.root.username, "password": cfg.root.password.get_secret_value()},
+        json={
+            "username": cfg.root.username,
+            "password": cfg.root.password.get_secret_value(),
+        },
     )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
     # PUT non-existing plugin -> 404
-    resp1 = await client.put("/api/mcp/plugins/non_existent_plugin", headers=headers, json={"enabled": False})
+    resp1 = await client.put(
+        "/api/mcp/plugins/non_existent_plugin", headers=headers, json={"enabled": False}
+    )
     assert resp1.status_code == 404

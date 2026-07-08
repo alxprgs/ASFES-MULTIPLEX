@@ -39,14 +39,21 @@ class Mailer:
         message.set_content(body)
         smtp_client: smtplib.SMTP | smtplib.SMTP_SSL
         if self.smtp.use_ssl:
-            smtp_client = smtplib.SMTP_SSL(self.smtp.host, self.smtp.port, timeout=self.smtp.timeout_seconds)
+            smtp_client = smtplib.SMTP_SSL(
+                self.smtp.host, self.smtp.port, timeout=self.smtp.timeout_seconds
+            )
         else:
-            smtp_client = smtplib.SMTP(self.smtp.host, self.smtp.port, timeout=self.smtp.timeout_seconds)
+            smtp_client = smtplib.SMTP(
+                self.smtp.host, self.smtp.port, timeout=self.smtp.timeout_seconds
+            )
         with smtp_client as client:
             if self.smtp.starttls and not self.smtp.use_ssl:
                 client.starttls()
             if self.smtp.username:
-                client.login(self.smtp.username, self.smtp.password.get_secret_value() if self.smtp.password else "")
+                client.login(
+                    self.smtp.username,
+                    self.smtp.password.get_secret_value() if self.smtp.password else "",
+                )
             client.send_message(message)
         return True
 
@@ -188,21 +195,37 @@ class IntegrityLogManager:
             "payload": payload,
         }
         if record.exc_info:
-            serialized["exception"] = logging.Formatter().formatException(record.exc_info)
+            serialized["exception"] = logging.Formatter().formatException(
+                record.exc_info
+            )
 
         with self._lock:
             if self._db is None:
                 return
             file_path = self._ensure_current_file(created_at)
             prev_hash = self._last_line_hash_by_file.get(str(file_path), "")
-            canonical = json.dumps(serialized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            canonical = json.dumps(
+                serialized, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
             line_hash = sha256(f"{prev_hash}|{canonical}".encode("utf-8")).hexdigest()
             serialized["prev_hash"] = prev_hash
             serialized["line_hash"] = line_hash
             with file_path.open("a", encoding="utf-8") as log_file:
-                log_file.write(json.dumps(serialized, ensure_ascii=False, sort_keys=True) + "\n")
+                log_file.write(
+                    json.dumps(serialized, ensure_ascii=False, sort_keys=True) + "\n"
+                )
             self._last_line_hash_by_file[str(file_path)] = line_hash
-            self._mirror_to_sqlite(created_at, record.levelname, record.name, event_type, record.getMessage(), str(file_path), prev_hash, line_hash, payload)
+            self._mirror_to_sqlite(
+                created_at,
+                record.levelname,
+                record.name,
+                event_type,
+                record.getMessage(),
+                str(file_path),
+                prev_hash,
+                line_hash,
+                payload,
+            )
 
     def _mirror_to_sqlite(
         self,
@@ -274,12 +297,16 @@ class IntegrityLogManager:
     async def verify_integrity(self) -> list[TamperDetection]:
         with self._lock:
             assert self._db is not None
-            rows = self._db.execute("SELECT file_path, sealed_hash FROM log_files WHERE status='sealed'").fetchall()
+            rows = self._db.execute(
+                "SELECT file_path, sealed_hash FROM log_files WHERE status='sealed'"
+            ).fetchall()
         detections: list[TamperDetection] = []
         for row in rows:
             file_path = Path(row["file_path"])
             if not file_path.exists():
-                detection = TamperDetection(str(file_path), None, "log file missing", None)
+                detection = TamperDetection(
+                    str(file_path), None, "log file missing", None
+                )
                 detections.append(detection)
                 await self._mark_tampered(detection)
                 continue
@@ -305,16 +332,33 @@ class IntegrityLogManager:
                 try:
                     data = json.loads(raw_line)
                 except json.JSONDecodeError:
-                    return TamperDetection(str(file_path), index, "invalid JSON line", raw_line.rstrip())
+                    return TamperDetection(
+                        str(file_path), index, "invalid JSON line", raw_line.rstrip()
+                    )
                 stored_prev_hash = data.get("prev_hash", "")
                 stored_line_hash = data.get("line_hash", "")
-                canonical_payload = {key: value for key, value in data.items() if key not in {"prev_hash", "line_hash"}}
-                canonical = json.dumps(canonical_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-                computed_line_hash = sha256(f"{stored_prev_hash}|{canonical}".encode("utf-8")).hexdigest()
+                canonical_payload = {
+                    key: value
+                    for key, value in data.items()
+                    if key not in {"prev_hash", "line_hash"}
+                }
+                canonical = json.dumps(
+                    canonical_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                computed_line_hash = sha256(
+                    f"{stored_prev_hash}|{canonical}".encode("utf-8")
+                ).hexdigest()
                 if stored_prev_hash != previous_hash:
-                    return TamperDetection(str(file_path), index, "hash chain mismatch", raw_line.rstrip())
+                    return TamperDetection(
+                        str(file_path), index, "hash chain mismatch", raw_line.rstrip()
+                    )
                 if stored_line_hash != computed_line_hash:
-                    return TamperDetection(str(file_path), index, "line hash mismatch", raw_line.rstrip())
+                    return TamperDetection(
+                        str(file_path), index, "line hash mismatch", raw_line.rstrip()
+                    )
                 previous_hash = stored_line_hash
         return TamperDetection(str(file_path), None, "sealed file hash mismatch", None)
 
@@ -323,7 +367,12 @@ class IntegrityLogManager:
             assert self._db is not None
             self._db.execute(
                 "UPDATE log_files SET status=?, tamper_reason=?, last_verified_at=? WHERE file_path=?",
-                ("tampered", detection.reason, utc_now().isoformat(), detection.file_path),
+                (
+                    "tampered",
+                    detection.reason,
+                    utc_now().isoformat(),
+                    detection.file_path,
+                ),
             )
             self._db.commit()
         logging.getLogger("multiplex.integrity").critical(
@@ -356,7 +405,10 @@ class IntegrityLogManager:
 
     def finalize(self) -> None:
         with self._lock:
-            if self._current_file_path is not None and self._current_hour_key is not None:
+            if (
+                self._current_file_path is not None
+                and self._current_hour_key is not None
+            ):
                 self._seal_file(self._current_file_path, self._current_hour_key)
             if self._db is not None:
                 self._db.close()

@@ -5,7 +5,15 @@ import io
 from typing import Any
 
 from server.mcp.plugins._common import require_argument
-from server.models import MCPTool, MCPToolManifest, PermissionDefinition, PluginDefinition, PluginManifest, RuntimeAvailability, ToolExecutionContext
+from server.models import (
+    MCPTool,
+    MCPToolManifest,
+    PermissionDefinition,
+    PluginDefinition,
+    PluginManifest,
+    RuntimeAvailability,
+    ToolExecutionContext,
+)
 
 
 TASK_PREFIX = "multiplex_"
@@ -13,8 +21,12 @@ TASK_PREFIX = "multiplex_"
 
 async def _scheduler_availability(services) -> RuntimeAvailability:
     if services.host_ops.is_linux:
-        return services.host_ops.availability_for_command("crontab", providers=["crontab"])
-    return services.host_ops.availability_for_command("schtasks", providers=["schtasks"])
+        return services.host_ops.availability_for_command(
+            "crontab", providers=["crontab"]
+        )
+    return services.host_ops.availability_for_command(
+        "schtasks", providers=["schtasks"]
+    )
 
 
 def _windows_task_name(name: str) -> str:
@@ -32,16 +44,28 @@ def _linux_schedule(arguments: dict[str, Any]) -> str:
         return f"{minute} {hour} * * *"
     if schedule == "weekly":
         days = arguments.get("days") or ["MON"]
-        mapping = {"MON": "1", "TUE": "2", "WED": "3", "THU": "4", "FRI": "5", "SAT": "6", "SUN": "0"}
+        mapping = {
+            "MON": "1",
+            "TUE": "2",
+            "WED": "3",
+            "THU": "4",
+            "FRI": "5",
+            "SAT": "6",
+            "SUN": "0",
+        }
         resolved = ",".join(mapping[str(day).upper()] for day in days)
         return f"{minute} {hour} * * {resolved}"
-    raise RuntimeError("Linux scheduler supports schedule values: hourly, daily, weekly")
+    raise RuntimeError(
+        "Linux scheduler supports schedule values: hourly, daily, weekly"
+    )
 
 
 def _windows_schedule_args(arguments: dict[str, Any]) -> list[str]:
     schedule = str(require_argument(arguments, "schedule")).upper()
     if schedule not in {"HOURLY", "DAILY", "WEEKLY"}:
-        raise RuntimeError("Windows scheduler supports schedule values: hourly, daily, weekly")
+        raise RuntimeError(
+            "Windows scheduler supports schedule values: hourly, daily, weekly"
+        )
     task_args = ["/SC", "MINUTE" if schedule == "HOURLY" else schedule]
     if schedule == "HOURLY":
         task_args.extend(["/MO", str(max(1, int(arguments.get("interval") or 60)))])
@@ -53,9 +77,13 @@ def _windows_schedule_args(arguments: dict[str, Any]) -> list[str]:
     return task_args
 
 
-async def list_tasks(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def list_tasks(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     if context.services.host_ops.is_linux:
-        result = await context.services.host_ops.run_backend("crontab", "-l", check=False)
+        result = await context.services.host_ops.run_backend(
+            "crontab", "-l", check=False
+        )
         if result.returncode != 0 and "no crontab" not in result.stderr.lower():
             raise RuntimeError(result.stderr.strip() or "crontab -l failed")
         items = []
@@ -64,10 +92,19 @@ async def list_tasks(context: ToolExecutionContext, arguments: dict[str, Any]) -
                 continue
             schedule, remainder = line.split(" ", 5)[:5], line.split(" ", 5)[5]
             command, marker = remainder.rsplit("# multiplex:", 1)
-            items.append({"name": marker.strip(), "schedule": " ".join(schedule), "command": command.strip(), "platform": "linux"})
+            items.append(
+                {
+                    "name": marker.strip(),
+                    "schedule": " ".join(schedule),
+                    "command": command.strip(),
+                    "platform": "linux",
+                }
+            )
         return {"tasks": items, "count": len(items)}
 
-    result = await context.services.host_ops.run_backend("schtasks", "/Query", "/FO", "CSV", "/V", check=False)
+    result = await context.services.host_ops.run_backend(
+        "schtasks", "/Query", "/FO", "CSV", "/V", check=False
+    )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "schtasks query failed")
     reader = csv.DictReader(io.StringIO(result.stdout))
@@ -89,17 +126,25 @@ async def list_tasks(context: ToolExecutionContext, arguments: dict[str, Any]) -
     return {"tasks": items, "count": len(items)}
 
 
-async def upsert_task(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def upsert_task(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     name = str(require_argument(arguments, "name")).strip()
     command = str(require_argument(arguments, "command")).strip()
     if context.services.host_ops.is_linux:
         cron = _linux_schedule(arguments)
-        current = await context.services.host_ops.run_backend("crontab", "-l", check=False)
+        current = await context.services.host_ops.run_backend(
+            "crontab", "-l", check=False
+        )
         existing_lines = [] if current.returncode != 0 else current.stdout.splitlines()
-        filtered = [line for line in existing_lines if f"# multiplex:{name}" not in line]
+        filtered = [
+            line for line in existing_lines if f"# multiplex:{name}" not in line
+        ]
         filtered.append(f"{cron} {command} # multiplex:{name}")
         payload = "\n".join(filtered).strip() + "\n"
-        result = await context.services.host_ops.run(["crontab", "-"], input_text=payload, check=False)
+        result = await context.services.host_ops.run(
+            ["crontab", "-"], input_text=payload, check=False
+        )
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "crontab update failed")
         return {"name": name, "platform": "linux", "updated": True, "schedule": cron}
@@ -118,42 +163,70 @@ async def upsert_task(context: ToolExecutionContext, arguments: dict[str, Any]) 
     result = await context.services.host_ops.run(command_args, check=False)
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "schtasks create failed")
-    return {"name": name, "task_name": task_name, "platform": "windows", "updated": True}
+    return {
+        "name": name,
+        "task_name": task_name,
+        "platform": "windows",
+        "updated": True,
+    }
 
 
-async def delete_task(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def delete_task(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     name = str(require_argument(arguments, "name")).strip()
     if context.services.host_ops.is_linux:
-        current = await context.services.host_ops.run_backend("crontab", "-l", check=False)
+        current = await context.services.host_ops.run_backend(
+            "crontab", "-l", check=False
+        )
         existing_lines = [] if current.returncode != 0 else current.stdout.splitlines()
-        filtered = [line for line in existing_lines if f"# multiplex:{name}" not in line]
+        filtered = [
+            line for line in existing_lines if f"# multiplex:{name}" not in line
+        ]
         payload = ("\n".join(filtered).strip() + "\n") if filtered else "\n"
-        result = await context.services.host_ops.run(["crontab", "-"], input_text=payload, check=False)
+        result = await context.services.host_ops.run(
+            ["crontab", "-"], input_text=payload, check=False
+        )
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "crontab delete failed")
         return {"name": name, "platform": "linux", "deleted": True}
 
-    result = await context.services.host_ops.run_backend("schtasks", "/Delete", "/F", "/TN", _windows_task_name(name), check=False)
+    result = await context.services.host_ops.run_backend(
+        "schtasks", "/Delete", "/F", "/TN", _windows_task_name(name), check=False
+    )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "schtasks delete failed")
     return {"name": name, "platform": "windows", "deleted": True}
 
 
-async def run_task(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def run_task(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     name = str(require_argument(arguments, "name")).strip()
     if context.services.host_ops.is_linux:
-        current = await context.services.host_ops.run_backend("crontab", "-l", check=False)
+        current = await context.services.host_ops.run_backend(
+            "crontab", "-l", check=False
+        )
         for line in current.stdout.splitlines():
             if f"# multiplex:{name}" not in line:
                 continue
             command = line.rsplit("# multiplex:", 1)[0].split(" ", 5)[-1].strip()
-            result = await context.services.host_ops.run(["/bin/sh", "-lc", command], check=False)
+            result = await context.services.host_ops.run(
+                ["/bin/sh", "-lc", command], check=False
+            )
             if result.returncode != 0:
                 raise RuntimeError(result.stderr.strip() or "scheduled command failed")
-            return {"name": name, "platform": "linux", "triggered": True, **result.to_dict()}
+            return {
+                "name": name,
+                "platform": "linux",
+                "triggered": True,
+                **result.to_dict(),
+            }
         raise RuntimeError("Managed task not found")
 
-    result = await context.services.host_ops.run_backend("schtasks", "/Run", "/TN", _windows_task_name(name), check=False)
+    result = await context.services.host_ops.run_backend(
+        "schtasks", "/Run", "/TN", _windows_task_name(name), check=False
+    )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "schtasks run failed")
     return {"name": name, "platform": "windows", "triggered": True, **result.to_dict()}
@@ -166,8 +239,14 @@ PLUGIN = PluginDefinition(
         version="1.0.0",
         description="Управляет запланированными задачами через crontab на Linux и schtasks на Windows.",
         permissions=[
-            PermissionDefinition(key="scheduler.read", description="Читать управляемые запланированные задачи."),
-            PermissionDefinition(key="scheduler.write", description="Создавать, удалять и запускать управляемые запланированные задачи."),
+            PermissionDefinition(
+                key="scheduler.read",
+                description="Читать управляемые запланированные задачи.",
+            ),
+            PermissionDefinition(
+                key="scheduler.write",
+                description="Создавать, удалять и запускать управляемые запланированные задачи.",
+            ),
         ],
         required_backends=["crontab", "schtasks"],
         providers=["crontab", "schtasks"],
@@ -178,7 +257,11 @@ PLUGIN = PluginDefinition(
                 key="scheduler.list_tasks",
                 name="Список запланированных задач",
                 description="Показывает задачи, управляемые Multiplex на текущей платформе.",
-                input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
                 permissions=["scheduler.read"],
                 tags=["scheduler", "read"],
                 read_only=True,
@@ -199,7 +282,17 @@ PLUGIN = PluginDefinition(
                     "properties": {
                         "name": {"type": "string"},
                         "command": {"type": "string"},
-                        "schedule": {"type": "string", "enum": ["hourly", "daily", "weekly", "HOURLY", "DAILY", "WEEKLY"]},
+                        "schedule": {
+                            "type": "string",
+                            "enum": [
+                                "hourly",
+                                "daily",
+                                "weekly",
+                                "HOURLY",
+                                "DAILY",
+                                "WEEKLY",
+                            ],
+                        },
                         "time": {"type": "string"},
                         "interval": {"type": "integer"},
                         "days": {"type": "array", "items": {"type": "string"}},

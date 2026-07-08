@@ -15,20 +15,72 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from pymongo.errors import DuplicateKeyError
-from webauthn import generate_authentication_options, generate_registration_options, options_to_json, verify_authentication_response, verify_registration_response
-from webauthn.helpers.structs import AuthenticatorSelectionCriteria, PublicKeyCredentialDescriptor, ResidentKeyRequirement, UserVerificationRequirement
+from webauthn import (
+    generate_authentication_options,
+    generate_registration_options,
+    options_to_json,
+    verify_authentication_response,
+    verify_registration_response,
+)
+from webauthn.helpers.structs import (
+    AuthenticatorSelectionCriteria,
+    PublicKeyCredentialDescriptor,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
+)
 
 from server.alerting import AlertingService
 from server.core.config import Settings
-from server.core.database import API_KEYS, AUDIT_EVENTS, OAUTH_CLIENTS, OAUTH_CODES, PASSKEYS, PASSKEY_CHALLENGES, PLUGINS, REFRESH_TOKENS, SETTINGS, TOOL_POLICIES, USERS, DatabaseManager
+from server.core.database import (
+    API_KEYS,
+    AUDIT_EVENTS,
+    OAUTH_CLIENTS,
+    OAUTH_CODES,
+    PASSKEYS,
+    PASSKEY_CHALLENGES,
+    PLUGINS,
+    REFRESH_TOKENS,
+    SETTINGS,
+    TOOL_POLICIES,
+    USERS,
+    DatabaseManager,
+)
 from server.core.logging import IntegrityLogManager, Mailer, get_logger
 from server.core.qr import qr_svg
 from server.core.ratelimit import RateLimitPolicy, RateLimiter
 from server.core.cache import CacheManager
-from server.core.security import TokenBundle, b64url_decode, b64url_encode, build_totp_uri, create_jwt, decode_jwt, generate_totp_secret, hash_password, now_utc, random_token, sha256_text, verify_password, verify_pkce, verify_totp_code
+from server.core.security import (
+    TokenBundle,
+    b64url_decode,
+    b64url_encode,
+    build_totp_uri,
+    create_jwt,
+    decode_jwt,
+    generate_totp_secret,
+    hash_password,
+    now_utc,
+    random_token,
+    sha256_text,
+    verify_password,
+    verify_pkce,
+    verify_totp_code,
+)
 from server.host_ops import HostOpsService
-from server.audit import AuditCollector, ensure_audit_context, AuditEnricher, AuditRepository, AuditArchiverJob
-from server.models import MCPTool, PermissionDefinition, PluginDefinition, RuntimeAvailability, ToolExecutionContext, UserPrincipal
+from server.audit import (
+    AuditCollector,
+    ensure_audit_context,
+    AuditEnricher,
+    AuditRepository,
+    AuditArchiverJob,
+)
+from server.models import (
+    MCPTool,
+    PermissionDefinition,
+    PluginDefinition,
+    RuntimeAvailability,
+    ToolExecutionContext,
+    UserPrincipal,
+)
 from server.update_manager import UpdateManager
 from server.proxy_service import ProxyService
 from server.pypi_service import PyPIMirrorService
@@ -57,9 +109,13 @@ CORE_PERMISSIONS = {
 
 def validate_password_strength(password: str, settings: Settings) -> None:
     if len(password) < settings.password_policy.min_length:
-        raise ValueError(f"Password must contain at least {settings.password_policy.min_length} characters")
+        raise ValueError(
+            f"Password must contain at least {settings.password_policy.min_length} characters"
+        )
     normalized = password.strip().lower()
-    forbidden = {item.strip().lower() for item in settings.password_policy.forbidden_passwords}
+    forbidden = {
+        item.strip().lower() for item in settings.password_policy.forbidden_passwords
+    }
     if normalized in forbidden:
         raise ValueError("Password is too common")
 
@@ -69,8 +125,14 @@ def validate_redirect_uris(redirect_uris: list[str]) -> list[str]:
     for raw_uri in redirect_uris:
         uri = str(raw_uri).strip()
         parsed = urlparse(uri)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.fragment:
-            raise ValueError("Redirect URI must use http/https, include a host, and must not include a fragment")
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "Redirect URI must use http/https, include a host, and must not include a fragment"
+            )
         normalized.append(uri)
     if not normalized:
         raise ValueError("At least one redirect URI is required")
@@ -79,11 +141,17 @@ def validate_redirect_uris(redirect_uris: list[str]) -> list[str]:
 
 def validate_runtime_security(settings: Settings) -> None:
     if settings.is_production and settings._uses_default_secret_values():
-        raise RuntimeError("Production mode requires custom SECURITY secrets and ROOT password")
+        raise RuntimeError(
+            "Production mode requires custom SECURITY secrets and ROOT password"
+        )
     validate_password_strength(settings.root.password.get_secret_value(), settings)
-    if settings.is_production and str(settings.app.public_base_url).startswith("https://"):
+    if settings.is_production and str(settings.app.public_base_url).startswith(
+        "https://"
+    ):
         if not settings.effective_cookie_secure:
-            raise RuntimeError("Production HTTPS mode requires Secure cookies (effective_cookie_secure=True)")
+            raise RuntimeError(
+                "Production HTTPS mode requires Secure cookies (effective_cookie_secure=True)"
+            )
 
 
 def serialize_datetime(value: Any) -> str | None:
@@ -143,7 +211,9 @@ class PermissionCatalog:
         for key, description in permissions.items():
             self.register(key, description)
 
-    def register_plugin_permissions(self, definitions: list[PermissionDefinition]) -> None:
+    def register_plugin_permissions(
+        self, definitions: list[PermissionDefinition]
+    ) -> None:
         for item in definitions:
             self._permissions[item.key] = item
 
@@ -158,7 +228,14 @@ class PermissionCatalog:
 
 
 class SettingsService:
-    def __init__(self, db: DatabaseManager, settings: Settings, rate_limiter: RateLimiter, audit: AuditCollector, cache: CacheManager) -> None:
+    def __init__(
+        self,
+        db: DatabaseManager,
+        settings: Settings,
+        rate_limiter: RateLimiter,
+        audit: AuditCollector,
+        cache: CacheManager,
+    ) -> None:
         self.db = db
         self.settings = settings
         self.rate_limiter = rate_limiter
@@ -171,7 +248,8 @@ class SettingsService:
             "kind": "runtime",
             "registration_enabled": False,
             "mcp_enabled": True,
-            "redis_runtime_enabled": self.settings.redis.enabled_on_startup or self.settings.redis.mode == "required",
+            "redis_runtime_enabled": self.settings.redis.enabled_on_startup
+            or self.settings.redis.mode == "required",
             "created_at": now_utc(),
         }
 
@@ -198,7 +276,14 @@ class SettingsService:
             document = await self.ensure_runtime_settings()
         return document
 
-    async def set_registration(self, enabled: bool, *, actor: UserPrincipal, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+    async def set_registration(
+        self,
+        enabled: bool,
+        *,
+        actor: UserPrincipal,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
+    ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         await self.db.collection(SETTINGS).update_one(
             {"_id": "runtime"},
@@ -215,7 +300,14 @@ class SettingsService:
         )
         return document
 
-    async def set_mcp(self, enabled: bool, *, actor: UserPrincipal, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+    async def set_mcp(
+        self,
+        enabled: bool,
+        *,
+        actor: UserPrincipal,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
+    ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         await self.db.collection(SETTINGS).update_one(
             {"_id": "runtime"},
@@ -232,10 +324,19 @@ class SettingsService:
         )
         return document
 
-    async def set_redis_runtime(self, enabled: bool, *, actor: UserPrincipal, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+    async def set_redis_runtime(
+        self,
+        enabled: bool,
+        *,
+        actor: UserPrincipal,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
+    ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         if self.settings.redis.mode == "required" and not enabled:
-            raise ValueError("Redis cannot be disabled while REDIS__MODE is set to 'required'")
+            raise ValueError(
+                "Redis cannot be disabled while REDIS__MODE is set to 'required'"
+            )
         await self.rate_limiter.set_runtime_enabled(enabled)
         await self.cache.set_runtime_enabled(enabled)
         await self.db.collection(SETTINGS).update_one(
@@ -255,7 +356,13 @@ class SettingsService:
 
 
 class UserService:
-    def __init__(self, db: DatabaseManager, settings: Settings, permissions: PermissionCatalog, audit: AuditCollector) -> None:
+    def __init__(
+        self,
+        db: DatabaseManager,
+        settings: Settings,
+        permissions: PermissionCatalog,
+        audit: AuditCollector,
+    ) -> None:
         self.db = db
         self.settings = settings
         self.permissions = permissions
@@ -267,7 +374,9 @@ class UserService:
         password_hash = current.get("password_hash") if current else None
         pepper = self.settings.security.password_pepper.get_secret_value()
         root_password = self.settings.root.password.get_secret_value()
-        if not password_hash or not verify_password(root_password, password_hash, pepper):
+        if not password_hash or not verify_password(
+            root_password, password_hash, pepper
+        ):
             password_hash = hash_password(root_password, pepper)
         created_at = current.get("created_at") if current else now_utc()
         document = {
@@ -279,7 +388,9 @@ class UserService:
             "email": str(self.settings.root.email),
             "tg_id": current.get("tg_id") if current else None,
             "vk_id": current.get("vk_id") if current else None,
-            "two_factor": current.get("two_factor", {"enabled": False}) if current else {"enabled": False},
+            "two_factor": current.get("two_factor", {"enabled": False})
+            if current
+            else {"enabled": False},
             "created_at": created_at,
             "updated_at": now_utc(),
         }
@@ -305,7 +416,8 @@ class UserService:
         tg_id: str | None = None,
         vk_id: str | None = None,
         actor: UserPrincipal | None,
-        audit_ctx: Any = None, request_meta: Any = None,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
     ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         existing = await self.get_user_by_username(username)
@@ -345,7 +457,9 @@ class UserService:
             return None
         return self.to_principal(user)
 
-    async def verify_password_for_user(self, user: UserPrincipal, password: str) -> bool:
+    async def verify_password_for_user(
+        self, user: UserPrincipal, password: str
+    ) -> bool:
         document = await self.get_user_by_id(user.user_id)
         if not document:
             return False
@@ -353,7 +467,11 @@ class UserService:
         return verify_password(password, document["password_hash"], pepper)
 
     async def list_passkeys(self, user: UserPrincipal) -> list[dict[str, Any]]:
-        cursor = self.db.collection(PASSKEYS).find({"user_id": user.user_id}).sort("created_at", -1)
+        cursor = (
+            self.db.collection(PASSKEYS)
+            .find({"user_id": user.user_id})
+            .sort("created_at", -1)
+        )
         return [self.to_passkey_response(item) async for item in cursor]
 
     async def begin_passkey_registration(
@@ -365,7 +483,8 @@ class UserService:
         rp_id: str,
         rp_name: str,
         origin: str,
-        audit_ctx: Any = None, request_meta: Any = None,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
     ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         if not await self.verify_password_for_user(user, current_password):
@@ -400,7 +519,10 @@ class UserService:
             audit_ctx=audit_ctx,
             target={"user_id": user.user_id},
         )
-        return {"challenge_id": challenge_id, "options": json.loads(options_to_json(options))}
+        return {
+            "challenge_id": challenge_id,
+            "options": json.loads(options_to_json(options)),
+        }
 
     async def finish_passkey_registration(
         self,
@@ -409,10 +531,13 @@ class UserService:
         challenge_id: str,
         name: str | None,
         credential: dict[str, Any],
-        audit_ctx: Any = None, request_meta: Any = None,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
     ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
-        challenge = await self._consume_passkey_challenge(challenge_id, purpose="registration")
+        challenge = await self._consume_passkey_challenge(
+            challenge_id, purpose="registration"
+        )
         if challenge.get("user_id") != user.user_id:
             raise ValueError("Passkey challenge does not belong to this user")
         verification = verify_registration_response(
@@ -427,7 +552,9 @@ class UserService:
         document = {
             "_id": f"passkey_{uuid4().hex}",
             "user_id": user.user_id,
-            "name": clean_passkey_name(name, challenge.get("metadata", {}).get("name") or "Passkey"),
+            "name": clean_passkey_name(
+                name, challenge.get("metadata", {}).get("name") or "Passkey"
+            ),
             "credential_id": b64url_encode(verification.credential_id),
             "credential_public_key": b64url_encode(verification.credential_public_key),
             "sign_count": verification.sign_count,
@@ -458,7 +585,8 @@ class UserService:
         username: str | None,
         rp_id: str,
         origin: str,
-        audit_ctx: Any = None, request_meta: Any = None,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
     ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         username = username.strip() if username else None
@@ -491,21 +619,29 @@ class UserService:
             audit_ctx=audit_ctx,
             target={"username": username},
         )
-        return {"challenge_id": challenge_id, "options": json.loads(options_to_json(options))}
+        return {
+            "challenge_id": challenge_id,
+            "options": json.loads(options_to_json(options)),
+        }
 
     async def finish_passkey_authentication(
         self,
         *,
         challenge_id: str,
         credential: dict[str, Any],
-        audit_ctx: Any = None, request_meta: Any = None,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
     ) -> tuple[UserPrincipal, dict[str, Any]]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
-        challenge = await self._consume_passkey_challenge(challenge_id, purpose="authentication")
+        challenge = await self._consume_passkey_challenge(
+            challenge_id, purpose="authentication"
+        )
         credential_id = credential.get("id") or credential.get("rawId")
         if not isinstance(credential_id, str) or not credential_id:
             raise ValueError("Passkey credential id is required")
-        passkey = await self.db.collection(PASSKEYS).find_one({"credential_id": credential_id})
+        passkey = await self.db.collection(PASSKEYS).find_one(
+            {"credential_id": credential_id}
+        )
         if not passkey:
             raise LookupError("Passkey is not registered")
         if challenge.get("user_id") and challenge["user_id"] != passkey["user_id"]:
@@ -527,7 +663,9 @@ class UserService:
             {
                 "$set": {
                     "sign_count": verification.new_sign_count,
-                    "credential_device_type": enum_value(verification.credential_device_type),
+                    "credential_device_type": enum_value(
+                        verification.credential_device_type
+                    ),
                     "credential_backed_up": bool(verification.credential_backed_up),
                     "last_used_at": now_utc(),
                     "updated_at": now_utc(),
@@ -543,7 +681,15 @@ class UserService:
         )
         return user, user_doc
 
-    async def rename_passkey(self, user: UserPrincipal, passkey_id: str, name: str, *, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+    async def rename_passkey(
+        self,
+        user: UserPrincipal,
+        passkey_id: str,
+        name: str,
+        *,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
+    ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         result = await self.db.collection(PASSKEYS).update_one(
             {"_id": passkey_id, "user_id": user.user_id},
@@ -551,7 +697,9 @@ class UserService:
         )
         if result.matched_count == 0:
             raise LookupError("Passkey not found")
-        updated = await self.db.collection(PASSKEYS).find_one({"_id": passkey_id, "user_id": user.user_id})
+        updated = await self.db.collection(PASSKEYS).find_one(
+            {"_id": passkey_id, "user_id": user.user_id}
+        )
         assert updated is not None
         await self.audit.record(
             "account.passkey.rename",
@@ -562,9 +710,18 @@ class UserService:
         )
         return self.to_passkey_response(updated)
 
-    async def delete_passkey(self, user: UserPrincipal, passkey_id: str, *, audit_ctx: Any = None, request_meta: Any = None) -> None:
+    async def delete_passkey(
+        self,
+        user: UserPrincipal,
+        passkey_id: str,
+        *,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
+    ) -> None:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
-        result = await self.db.collection(PASSKEYS).delete_one({"_id": passkey_id, "user_id": user.user_id})
+        result = await self.db.collection(PASSKEYS).delete_one(
+            {"_id": passkey_id, "user_id": user.user_id}
+        )
         if result.deleted_count == 0:
             raise LookupError("Passkey not found")
         await self.audit.record(
@@ -577,14 +734,24 @@ class UserService:
     def two_factor_enabled(self, document: dict[str, Any]) -> bool:
         return bool(document.get("two_factor", {}).get("enabled"))
 
-    async def begin_two_factor_setup(self, user: UserPrincipal, *, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, str]:
+    async def begin_two_factor_setup(
+        self, user: UserPrincipal, *, audit_ctx: Any = None, request_meta: Any = None
+    ) -> dict[str, str]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         secret = generate_totp_secret()
         issuer = "ASFES"
-        otpauth_uri = build_totp_uri(secret=secret, issuer=issuer, account_name=user.user_id)
+        otpauth_uri = build_totp_uri(
+            secret=secret, issuer=issuer, account_name=user.user_id
+        )
         await self.db.collection(USERS).update_one(
             {"_id": user.user_id},
-            {"$set": {"two_factor.pending_secret": secret, "two_factor.pending_at": now_utc(), "updated_at": now_utc()}},
+            {
+                "$set": {
+                    "two_factor.pending_secret": secret,
+                    "two_factor.pending_at": now_utc(),
+                    "updated_at": now_utc(),
+                }
+            },
         )
         await self.audit.record(
             "account.2fa.setup",
@@ -592,9 +759,20 @@ class UserService:
             audit_ctx=audit_ctx,
             target={"user_id": user.user_id},
         )
-        return {"secret": secret, "otpauth_uri": otpauth_uri, "qr_svg": qr_svg(otpauth_uri)}
+        return {
+            "secret": secret,
+            "otpauth_uri": otpauth_uri,
+            "qr_svg": qr_svg(otpauth_uri),
+        }
 
-    async def enable_two_factor(self, user: UserPrincipal, code: str, *, audit_ctx: Any = None, request_meta: Any = None) -> tuple[dict[str, Any], list[str]]:
+    async def enable_two_factor(
+        self,
+        user: UserPrincipal,
+        code: str,
+        *,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
+    ) -> tuple[dict[str, Any], list[str]]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         document = await self.get_user_by_id(user.user_id)
         if not document:
@@ -604,7 +782,10 @@ class UserService:
             raise ValueError("Two-factor setup has not been started")
         if not verify_totp_code(secret, code):
             raise ValueError("Invalid two-factor code")
-        recovery_codes = [random_token(8).replace("-", "").replace("_", "")[:10].upper() for _ in range(8)]
+        recovery_codes = [
+            random_token(8).replace("-", "").replace("_", "")[:10].upper()
+            for _ in range(8)
+        ]
         await self.db.collection(USERS).update_one(
             {"_id": user.user_id},
             {
@@ -613,7 +794,9 @@ class UserService:
                         "enabled": True,
                         "secret": secret,
                         "enabled_at": now_utc(),
-                        "recovery_code_hashes": [sha256_text(item) for item in recovery_codes],
+                        "recovery_code_hashes": [
+                            sha256_text(item) for item in recovery_codes
+                        ],
                     },
                     "updated_at": now_utc(),
                 },
@@ -629,7 +812,15 @@ class UserService:
         )
         return updated, recovery_codes
 
-    async def disable_two_factor(self, user: UserPrincipal, code: str, *, current_password: str, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+    async def disable_two_factor(
+        self,
+        user: UserPrincipal,
+        code: str,
+        *,
+        current_password: str,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
+    ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         document = await self.get_user_by_id(user.user_id)
         if not document:
@@ -654,7 +845,9 @@ class UserService:
         )
         return updated
 
-    async def verify_second_factor(self, document: dict[str, Any], code: str, *, consume_recovery: bool = True) -> bool:
+    async def verify_second_factor(
+        self, document: dict[str, Any], code: str, *, consume_recovery: bool = True
+    ) -> bool:
         two_factor = document.get("two_factor", {})
         if not two_factor.get("enabled"):
             return True
@@ -669,7 +862,12 @@ class UserService:
             recovery_hashes.remove(code_hash)
             await self.db.collection(USERS).update_one(
                 {"_id": document["_id"]},
-                {"$set": {"two_factor.recovery_code_hashes": recovery_hashes, "updated_at": now_utc()}},
+                {
+                    "$set": {
+                        "two_factor.recovery_code_hashes": recovery_hashes,
+                        "updated_at": now_utc(),
+                    }
+                },
             )
         return True
 
@@ -680,12 +878,20 @@ class UserService:
         email: str | None,
         tg_id: str | None,
         vk_id: str | None,
-        audit_ctx: Any = None, request_meta: Any = None,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
     ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         await self.db.collection(USERS).update_one(
             {"_id": user.user_id},
-            {"$set": {"email": email, "tg_id": tg_id, "vk_id": vk_id, "updated_at": now_utc()}},
+            {
+                "$set": {
+                    "email": email,
+                    "tg_id": tg_id,
+                    "vk_id": vk_id,
+                    "updated_at": now_utc(),
+                }
+            },
         )
         document = await self.get_user_by_id(user.user_id)
         assert document is not None
@@ -705,11 +911,14 @@ class UserService:
         mode: str,
         *,
         actor: UserPrincipal,
-        audit_ctx: Any = None, request_meta: Any = None,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
     ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         if user_id == "user_root":
-            raise ValueError("Root permissions are managed implicitly and cannot be modified")
+            raise ValueError(
+                "Root permissions are managed implicitly and cannot be modified"
+            )
         for permission in permissions:
             if not self.permissions.exists(permission):
                 raise ValueError(f"Unknown permission: {permission}")
@@ -739,7 +948,11 @@ class UserService:
         return updated
 
     def to_principal(self, document: dict[str, Any]) -> UserPrincipal:
-        permissions = self.permissions.keys() if document.get("is_root") else sorted(document.get("permissions", []))
+        permissions = (
+            self.permissions.keys()
+            if document.get("is_root")
+            else sorted(document.get("permissions", []))
+        )
         return UserPrincipal(
             user_id=document["_id"],
             username=document["username"],
@@ -807,8 +1020,12 @@ class UserService:
         )
         return challenge_id
 
-    async def _consume_passkey_challenge(self, challenge_id: str, *, purpose: str) -> dict[str, Any]:
-        document = await self.db.collection(PASSKEY_CHALLENGES).find_one({"_id": challenge_id, "purpose": purpose})
+    async def _consume_passkey_challenge(
+        self, challenge_id: str, *, purpose: str
+    ) -> dict[str, Any]:
+        document = await self.db.collection(PASSKEY_CHALLENGES).find_one(
+            {"_id": challenge_id, "purpose": purpose}
+        )
         if not document or is_expired(document.get("expires_at")):
             raise ValueError("Passkey challenge is invalid or expired")
         await self.db.collection(PASSKEY_CHALLENGES).delete_one({"_id": challenge_id})
@@ -816,13 +1033,21 @@ class UserService:
 
 
 class AuthService:
-    def __init__(self, db: DatabaseManager, settings: Settings, users: UserService, cache: CacheManager | None = None) -> None:
+    def __init__(
+        self,
+        db: DatabaseManager,
+        settings: Settings,
+        users: UserService,
+        cache: CacheManager | None = None,
+    ) -> None:
         self.db = db
         self.settings = settings
         self.users = users
         self.cache = cache
 
-    async def issue_api_tokens(self, user: UserPrincipal, audit_ctx: Any = None, request_meta: Any = None) -> TokenBundle:
+    async def issue_api_tokens(
+        self, user: UserPrincipal, audit_ctx: Any = None, request_meta: Any = None
+    ) -> TokenBundle:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         access_token = create_jwt(
             subject=user.user_id,
@@ -831,10 +1056,16 @@ class AuthService:
             audience=self.settings.security.api_audience,
             token_type="api_access",
             ttl=timedelta(minutes=self.settings.security.access_token_ttl_minutes),
-            extra={"username": user.username, "is_root": user.is_root, "permissions": user.permissions},
+            extra={
+                "username": user.username,
+                "is_root": user.is_root,
+                "permissions": user.permissions,
+            },
         )
         refresh_token = random_token(48)
-        expires_at = now_utc() + timedelta(days=self.settings.security.refresh_token_ttl_days)
+        expires_at = now_utc() + timedelta(
+            days=self.settings.security.refresh_token_ttl_days
+        )
         await self.db.collection(REFRESH_TOKENS).insert_one(
             {
                 "_id": uuid4().hex,
@@ -847,7 +1078,11 @@ class AuthService:
                 "metadata": {},
             }
         )
-        return TokenBundle(access_token=access_token, refresh_token=refresh_token, expires_in=self.settings.security.access_token_ttl_minutes * 60)
+        return TokenBundle(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_in=self.settings.security.access_token_ttl_minutes * 60,
+        )
 
     def issue_2fa_challenge(self, user: UserPrincipal) -> str:
         return create_jwt(
@@ -869,10 +1104,14 @@ class AuthService:
             token_type="api_2fa_challenge",
         )
 
-    async def refresh_api_tokens(self, refresh_token: str, audit_ctx: Any = None, request_meta: Any = None) -> TokenBundle:
+    async def refresh_api_tokens(
+        self, refresh_token: str, audit_ctx: Any = None, request_meta: Any = None
+    ) -> TokenBundle:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         token_hash = sha256_text(refresh_token)
-        document = await self.db.collection(REFRESH_TOKENS).find_one({"token_hash": token_hash, "purpose": "api"})
+        document = await self.db.collection(REFRESH_TOKENS).find_one(
+            {"token_hash": token_hash, "purpose": "api"}
+        )
         if not document:
             raise ValueError("Refresh token is invalid")
         if is_expired(document.get("expires_at")):
@@ -881,10 +1120,14 @@ class AuthService:
         if not user_doc:
             raise LookupError("User not found")
         await self.db.collection(REFRESH_TOKENS).delete_one({"_id": document["_id"]})
-        return await self.issue_api_tokens(self.users.to_principal(user_doc), request_meta)
+        return await self.issue_api_tokens(
+            self.users.to_principal(user_doc), request_meta
+        )
 
     async def revoke_refresh_token(self, refresh_token: str) -> None:
-        await self.db.collection(REFRESH_TOKENS).delete_one({"token_hash": sha256_text(refresh_token)})
+        await self.db.collection(REFRESH_TOKENS).delete_one(
+            {"token_hash": sha256_text(refresh_token)}
+        )
 
     async def revoke_api_access_token(self, token_jti: str, expires_at: int) -> None:
         if self.cache is not None:
@@ -908,7 +1151,13 @@ class AuthService:
 
 
 class OAuthService:
-    def __init__(self, db: DatabaseManager, settings: Settings, users: UserService, audit: AuditCollector) -> None:
+    def __init__(
+        self,
+        db: DatabaseManager,
+        settings: Settings,
+        users: UserService,
+        audit: AuditCollector,
+    ) -> None:
         self.db = db
         self.settings = settings
         self.users = users
@@ -921,9 +1170,18 @@ class OAuthService:
             clients.append(self.serialize_client(item))
         return clients
 
-    async def create_client(self, name: str, redirect_uris: list[str], allowed_scopes: list[str], client_id: str | None, confidential: bool) -> dict[str, Any]:
+    async def create_client(
+        self,
+        name: str,
+        redirect_uris: list[str],
+        allowed_scopes: list[str],
+        client_id: str | None,
+        confidential: bool,
+    ) -> dict[str, Any]:
         supported = set(self.settings.oauth.supported_scopes)
-        scopes = sorted({scope for scope in allowed_scopes if scope in supported}) or ["mcp"]
+        scopes = sorted({scope for scope in allowed_scopes if scope in supported}) or [
+            "mcp"
+        ]
         client_identifier = client_id or f"mcp_{uuid4().hex}"
         client_secret = random_token(24) if confidential else None
         normalized_redirect_uris = validate_redirect_uris(redirect_uris)
@@ -943,7 +1201,9 @@ class OAuthService:
         return serialized
 
     async def rotate_client_secret(self, client_id: str) -> dict[str, str]:
-        client = await self.db.collection(OAUTH_CLIENTS).find_one({"client_id": client_id})
+        client = await self.db.collection(OAUTH_CLIENTS).find_one(
+            {"client_id": client_id}
+        )
         if not client:
             raise LookupError("Unknown OAuth client")
         if not client.get("confidential"):
@@ -951,27 +1211,42 @@ class OAuthService:
         client_secret = random_token(24)
         await self.db.collection(OAUTH_CLIENTS).update_one(
             {"client_id": client_id},
-            {"$set": {"client_secret_hash": sha256_text(client_secret), "updated_at": now_utc()}},
+            {
+                "$set": {
+                    "client_secret_hash": sha256_text(client_secret),
+                    "updated_at": now_utc(),
+                }
+            },
         )
         return {"client_id": client_id, "client_secret": client_secret}
 
-    async def validate_client(self, client_id: str, redirect_uri: str) -> dict[str, Any]:
-        client = await self.db.collection(OAUTH_CLIENTS).find_one({"client_id": client_id})
+    async def validate_client(
+        self, client_id: str, redirect_uri: str
+    ) -> dict[str, Any]:
+        client = await self.db.collection(OAUTH_CLIENTS).find_one(
+            {"client_id": client_id}
+        )
         if not client:
             raise LookupError("Unknown OAuth client")
         if redirect_uri not in client.get("redirect_uris", []):
             raise ValueError("Redirect URI is not registered for this client")
         return client
 
-    async def authenticate_client(self, client_id: str, client_secret: str | None) -> dict[str, Any]:
-        client = await self.db.collection(OAUTH_CLIENTS).find_one({"client_id": client_id})
+    async def authenticate_client(
+        self, client_id: str, client_secret: str | None
+    ) -> dict[str, Any]:
+        client = await self.db.collection(OAUTH_CLIENTS).find_one(
+            {"client_id": client_id}
+        )
         if not client:
             raise LookupError("Unknown OAuth client")
         if not client.get("confidential"):
             return client
         if not client_secret or not client.get("client_secret_hash"):
             raise ValueError("Client authentication required")
-        if not hmac.compare_digest(str(client["client_secret_hash"]), sha256_text(client_secret)):
+        if not hmac.compare_digest(
+            str(client["client_secret_hash"]), sha256_text(client_secret)
+        ):
             raise ValueError("Client authentication failed")
         return client
 
@@ -984,7 +1259,8 @@ class OAuthService:
         scopes: list[str],
         code_challenge: str,
         code_challenge_method: str,
-        audit_ctx: Any = None, request_meta: Any = None,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
     ) -> str:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         method = code_challenge_method.upper()
@@ -1004,7 +1280,10 @@ class OAuthService:
                 "code_challenge": code_challenge,
                 "code_challenge_method": method,
                 "created_at": now_utc(),
-                "expires_at": now_utc() + timedelta(minutes=self.settings.security.oauth_authorization_code_ttl_minutes),
+                "expires_at": now_utc()
+                + timedelta(
+                    minutes=self.settings.security.oauth_authorization_code_ttl_minutes
+                ),
             }
         )
         await self.audit.record(
@@ -1024,12 +1303,15 @@ class OAuthService:
         client_secret: str | None,
         redirect_uri: str,
         code_verifier: str,
-        audit_ctx: Any = None, request_meta: Any = None,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
     ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         client = await self.validate_client(client_id, redirect_uri)
         await self.authenticate_client(client_id, client_secret)
-        document = await self.db.collection(OAUTH_CODES).find_one({"code": code, "client_id": client_id})
+        document = await self.db.collection(OAUTH_CODES).find_one(
+            {"code": code, "client_id": client_id}
+        )
         if not document:
             raise ValueError("Authorization code is invalid")
         if is_expired(document.get("expires_at")):
@@ -1041,7 +1323,9 @@ class OAuthService:
         method = str(document["code_challenge_method"]).upper()
         if method == "PLAIN" and not self.settings.oauth.allow_plain_pkce:
             raise ValueError("plain PKCE is not allowed")
-        if not verify_pkce(code_verifier, document["code_challenge"], document["code_challenge_method"]):
+        if not verify_pkce(
+            code_verifier, document["code_challenge"], document["code_challenge_method"]
+        ):
             raise ValueError("PKCE verification failed")
         await self.db.collection(OAUTH_CODES).delete_one({"_id": document["_id"]})
         user_doc = await self.users.get_user_by_id(document["user_id"])
@@ -1054,7 +1338,9 @@ class OAuthService:
             issuer=self.settings.oauth_issuer,
             audience=self.settings.security.mcp_audience,
             token_type="oauth_access",
-            ttl=timedelta(minutes=self.settings.security.oauth_access_token_ttl_minutes),
+            ttl=timedelta(
+                minutes=self.settings.security.oauth_access_token_ttl_minutes
+            ),
             extra={
                 "client_id": client_id,
                 "scopes": document["scopes"],
@@ -1073,7 +1359,8 @@ class OAuthService:
                 "client_id": client_id,
                 "scopes": document["scopes"],
                 "created_at": now_utc(),
-                "expires_at": now_utc() + timedelta(days=self.settings.security.oauth_refresh_token_ttl_days),
+                "expires_at": now_utc()
+                + timedelta(days=self.settings.security.oauth_refresh_token_ttl_days),
                 "metadata": {},
             }
         )
@@ -1093,10 +1380,24 @@ class OAuthService:
             "client_name": client["name"],
         }
 
-    async def refresh_token(self, *, refresh_token: str, client_id: str, client_secret: str | None, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+    async def refresh_token(
+        self,
+        *,
+        refresh_token: str,
+        client_id: str,
+        client_secret: str | None,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
+    ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         await self.authenticate_client(client_id, client_secret)
-        document = await self.db.collection(REFRESH_TOKENS).find_one({"token_hash": sha256_text(refresh_token), "purpose": "oauth", "client_id": client_id})
+        document = await self.db.collection(REFRESH_TOKENS).find_one(
+            {
+                "token_hash": sha256_text(refresh_token),
+                "purpose": "oauth",
+                "client_id": client_id,
+            }
+        )
         if not document:
             raise ValueError("Refresh token is invalid")
         if is_expired(document.get("expires_at")):
@@ -1112,7 +1413,9 @@ class OAuthService:
             issuer=self.settings.oauth_issuer,
             audience=self.settings.security.mcp_audience,
             token_type="oauth_access",
-            ttl=timedelta(minutes=self.settings.security.oauth_access_token_ttl_minutes),
+            ttl=timedelta(
+                minutes=self.settings.security.oauth_access_token_ttl_minutes
+            ),
             extra={
                 "client_id": client_id,
                 "scopes": document.get("scopes", ["mcp"]),
@@ -1131,7 +1434,8 @@ class OAuthService:
                 "client_id": client_id,
                 "scopes": document.get("scopes", ["mcp"]),
                 "created_at": now_utc(),
-                "expires_at": now_utc() + timedelta(days=self.settings.security.oauth_refresh_token_ttl_days),
+                "expires_at": now_utc()
+                + timedelta(days=self.settings.security.oauth_refresh_token_ttl_days),
                 "metadata": {},
             }
         )
@@ -1143,7 +1447,9 @@ class OAuthService:
             "scope": " ".join(document.get("scopes", ["mcp"])),
         }
 
-    async def revoke_token(self, token: str, client_id: str | None, client_secret: str | None) -> None:
+    async def revoke_token(
+        self, token: str, client_id: str | None, client_secret: str | None
+    ) -> None:
         query: dict[str, Any] = {"token_hash": sha256_text(token)}
         if client_id:
             await self.authenticate_client(client_id, client_secret)
@@ -1180,18 +1486,28 @@ class OAuthService:
             item["active_session_count"] += 1
             item["user_ids"].add(str(token_doc.get("user_id")))
             created_at = normalize_utc_datetime(token_doc.get("created_at"))
-            if created_at and (item["last_token_issued_at"] is None or created_at > item["last_token_issued_at"]):
+            if created_at and (
+                item["last_token_issued_at"] is None
+                or created_at > item["last_token_issued_at"]
+            ):
                 item["last_token_issued_at"] = created_at
 
         services: list[dict[str, Any]] = []
         for client_id, item in grouped.items():
-            client = await self.db.collection(OAUTH_CLIENTS).find_one({"client_id": client_id})
+            client = await self.db.collection(OAUTH_CLIENTS).find_one(
+                {"client_id": client_id}
+            )
             if not client:
                 continue
             users = []
             for user_id in sorted(item["user_ids"]):
                 user_doc = await self.users.get_user_by_id(user_id)
-                users.append({"user_id": user_id, "username": user_doc.get("username") if user_doc else None})
+                users.append(
+                    {
+                        "user_id": user_id,
+                        "username": user_doc.get("username") if user_doc else None,
+                    }
+                )
             last_call = await self.db.collection(AUDIT_EVENTS).find_one(
                 {"event_type": "mcp.tool.call", "metadata.oauth_client_id": client_id},
                 sort=[("timestamp", -1)],
@@ -1205,8 +1521,14 @@ class OAuthService:
                     "active_session_count": item["active_session_count"],
                     "user_count": len(users),
                     "users": users,
-                    "last_token_issued_at": serialize_datetime(item["last_token_issued_at"]),
-                    "last_tool_call_at": serialize_datetime(last_call.get("created_at") or last_call.get("timestamp")) if last_call else None,
+                    "last_token_issued_at": serialize_datetime(
+                        item["last_token_issued_at"]
+                    ),
+                    "last_tool_call_at": serialize_datetime(
+                        last_call.get("created_at") or last_call.get("timestamp")
+                    )
+                    if last_call
+                    else None,
                 }
             )
         return sorted(services, key=lambda value: value["client_name"].lower())
@@ -1220,7 +1542,9 @@ class OAuthService:
             token_type="oauth_access",
         )
 
-    def authorization_server_metadata(self, base_url: str | None = None) -> dict[str, Any]:
+    def authorization_server_metadata(
+        self, base_url: str | None = None
+    ) -> dict[str, Any]:
         base = base_url.rstrip("/") if base_url else self.settings.public_base_url
         oauth_issuer = f"{base}{self.settings.oauth.issuer_path}"
         return {
@@ -1232,12 +1556,19 @@ class OAuthService:
             "jwks_uri": f"{base}{self.settings.oauth.jwks_path}",
             "response_types_supported": ["code"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
-            "token_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
-            "code_challenge_methods_supported": ["S256"] + (["plain"] if self.settings.oauth.allow_plain_pkce else []),
+            "token_endpoint_auth_methods_supported": [
+                "none",
+                "client_secret_post",
+                "client_secret_basic",
+            ],
+            "code_challenge_methods_supported": ["S256"]
+            + (["plain"] if self.settings.oauth.allow_plain_pkce else []),
             "scopes_supported": self.settings.oauth.supported_scopes,
         }
 
-    def protected_resource_metadata(self, base_url: str | None = None) -> dict[str, Any]:
+    def protected_resource_metadata(
+        self, base_url: str | None = None
+    ) -> dict[str, Any]:
         base = base_url.rstrip("/") if base_url else self.settings.public_base_url
         return {
             "resource": f"{base}{self.settings.mcp_path}",
@@ -1286,12 +1617,17 @@ class PluginRegistry:
 
     async def reload_plugins(self, plugin_keys: list[str] | None = None) -> list[str]:
         loaded: list[str] = []
-        targets = plugin_keys or [module_name.rsplit(".", 1)[-1] for module_name in self._iter_plugin_module_names()]
+        targets = plugin_keys or [
+            module_name.rsplit(".", 1)[-1]
+            for module_name in self._iter_plugin_module_names()
+        ]
         for key in targets:
             old_plugin = self.plugins.get(key)
             if old_plugin and old_plugin.shutdown and self._services:
                 await old_plugin.shutdown(self._services)
-            await self._load_plugin_module(f"server.mcp.plugins.{key}", reload_existing=True)
+            await self._load_plugin_module(
+                f"server.mcp.plugins.{key}", reload_existing=True
+            )
             loaded.append(key)
         return loaded
 
@@ -1303,7 +1639,9 @@ class PluginRegistry:
             if not module.name.startswith("_")
         )
 
-    async def _load_plugin_module(self, module_name: str, reload_existing: bool = False) -> None:
+    async def _load_plugin_module(
+        self, module_name: str, reload_existing: bool = False
+    ) -> None:
         module = importlib.import_module(module_name)
         if reload_existing:
             module = importlib.reload(module)
@@ -1335,7 +1673,9 @@ class PluginRegistry:
             upsert=True,
         )
         for tool in plugin.tools.values():
-            default_enabled = tool.manifest.default_global_enabled and tool.manifest.read_only
+            default_enabled = (
+                tool.manifest.default_global_enabled and tool.manifest.read_only
+            )
             await self.db.collection(TOOL_POLICIES).update_one(
                 {"tool_key": tool.manifest.key, "scope": "global", "subject_id": "*"},
                 {
@@ -1352,7 +1692,15 @@ class PluginRegistry:
                 upsert=True,
             )
 
-    async def set_plugin_enabled(self, plugin_key: str, enabled: bool, *, actor: UserPrincipal, audit_ctx: Any = None, request_meta: Any = None) -> None:
+    async def set_plugin_enabled(
+        self,
+        plugin_key: str,
+        enabled: bool,
+        *,
+        actor: UserPrincipal,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
+    ) -> None:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         if plugin_key not in self.plugins:
             raise LookupError("Plugin not found")
@@ -1382,7 +1730,11 @@ class PluginRegistry:
         documents: list[dict[str, Any]] = []
         async for item in cursor:
             runtime_plugin = self.plugins.get(item["key"])
-            availability = await self._plugin_availability(runtime_plugin) if runtime_plugin else RuntimeAvailability(available=False, reason="Plugin is not loaded")
+            availability = (
+                await self._plugin_availability(runtime_plugin)
+                if runtime_plugin
+                else RuntimeAvailability(available=False, reason="Plugin is not loaded")
+            )
             documents.append(
                 {
                     "key": item["key"],
@@ -1391,7 +1743,9 @@ class PluginRegistry:
                     "description": item["description"],
                     "enabled": bool(item.get("enabled", True)),
                     "os_support": item.get("os_support", []),
-                    "tool_keys": sorted(runtime_plugin.tools.keys()) if runtime_plugin else [],
+                    "tool_keys": sorted(runtime_plugin.tools.keys())
+                    if runtime_plugin
+                    else [],
                     "available": availability.available,
                     "availability_reason": availability.reason,
                     "required_backends": availability.required_backends,
@@ -1403,11 +1757,19 @@ class PluginRegistry:
     async def list_tools(self) -> list[dict[str, Any]]:
         documents: list[dict[str, Any]] = []
         for plugin in self.plugins.values():
-            plugin_doc = await self.db.collection(PLUGINS).find_one({"key": plugin.manifest.key})
+            plugin_doc = await self.db.collection(PLUGINS).find_one(
+                {"key": plugin.manifest.key}
+            )
             if plugin_doc and not plugin_doc.get("enabled", True):
                 continue
             for tool in plugin.tools.values():
-                global_policy = await self.db.collection(TOOL_POLICIES).find_one({"tool_key": tool.manifest.key, "scope": "global", "subject_id": "*"})
+                global_policy = await self.db.collection(TOOL_POLICIES).find_one(
+                    {
+                        "tool_key": tool.manifest.key,
+                        "scope": "global",
+                        "subject_id": "*",
+                    }
+                )
                 availability = await self._tool_availability(plugin, tool)
                 documents.append(
                     {
@@ -1418,7 +1780,9 @@ class PluginRegistry:
                         "read_only": tool.manifest.read_only,
                         "permissions": tool.manifest.permissions,
                         "tags": tool.manifest.tags,
-                        "global_enabled": bool(global_policy.get("enabled", True)) if global_policy else True,
+                        "global_enabled": bool(global_policy.get("enabled", True))
+                        if global_policy
+                        else True,
                         "available": availability.available,
                         "availability_reason": availability.reason,
                         "os_support": tool.manifest.os_support,
@@ -1428,13 +1792,23 @@ class PluginRegistry:
                 )
         return documents
 
-    async def set_global_tool_enabled(self, tool_key: str, enabled: bool, *, actor: UserPrincipal, audit_ctx: Any = None, request_meta: Any = None) -> None:
+    async def set_global_tool_enabled(
+        self,
+        tool_key: str,
+        enabled: bool,
+        *,
+        actor: UserPrincipal,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
+    ) -> None:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         tool = self.get_tool(tool_key)
         if tool is None:
             raise LookupError("Tool not found")
         plugin = self.get_plugin_for_tool(tool_key)
-        current = await self.db.collection(TOOL_POLICIES).find_one({"tool_key": tool_key, "scope": "global", "subject_id": "*"})
+        current = await self.db.collection(TOOL_POLICIES).find_one(
+            {"tool_key": tool_key, "scope": "global", "subject_id": "*"}
+        )
         previous_enabled = bool(current.get("enabled", True)) if current else None
         await self.db.collection(TOOL_POLICIES).update_one(
             {"tool_key": tool_key, "scope": "global", "subject_id": "*"},
@@ -1465,7 +1839,8 @@ class PluginRegistry:
         enabled: bool,
         *,
         actor: UserPrincipal,
-        audit_ctx: Any = None, request_meta: Any = None,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
     ) -> None:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         if self.get_tool(tool_key) is None:
@@ -1474,7 +1849,10 @@ class PluginRegistry:
             {"tool_key": tool_key, "scope": "user", "subject_id": user_id},
             {
                 "$set": {"enabled": enabled, "updated_at": now_utc()},
-                "$setOnInsert": {"_id": f"user:{user_id}:{tool_key}", "created_at": now_utc()},
+                "$setOnInsert": {
+                    "_id": f"user:{user_id}:{tool_key}",
+                    "created_at": now_utc(),
+                },
             },
             upsert=True,
         )
@@ -1498,7 +1876,9 @@ class PluginRegistry:
                 return plugin
         return None
 
-    async def _plugin_availability(self, plugin: PluginDefinition | None) -> RuntimeAvailability:
+    async def _plugin_availability(
+        self, plugin: PluginDefinition | None
+    ) -> RuntimeAvailability:
         if plugin is None:
             return RuntimeAvailability(available=False, reason="Plugin is not loaded")
         availability = RuntimeAvailability(
@@ -1513,10 +1893,14 @@ class PluginRegistry:
             self._services.host_ops.availability_for_os(plugin.manifest.os_support),
         )
         if plugin.availability:
-            availability = self._merge_availability(availability, await plugin.availability(self._services))
+            availability = self._merge_availability(
+                availability, await plugin.availability(self._services)
+            )
         return availability
 
-    async def _tool_availability(self, plugin: PluginDefinition, tool: MCPTool) -> RuntimeAvailability:
+    async def _tool_availability(
+        self, plugin: PluginDefinition, tool: MCPTool
+    ) -> RuntimeAvailability:
         availability = self._merge_availability(
             await self._plugin_availability(plugin),
             RuntimeAvailability(
@@ -1532,13 +1916,19 @@ class PluginRegistry:
             self._services.host_ops.availability_for_os(tool.manifest.os_support),
         )
         if tool.availability:
-            availability = self._merge_availability(availability, await tool.availability(self._services))
+            availability = self._merge_availability(
+                availability, await tool.availability(self._services)
+            )
         return availability
 
     def _merge_availability(self, *items: RuntimeAvailability) -> RuntimeAvailability:
         available = all(item.available for item in items)
-        reason = next((item.reason for item in items if not item.available and item.reason), None)
-        required_backends = sorted({backend for item in items for backend in item.required_backends})
+        reason = next(
+            (item.reason for item in items if not item.available and item.reason), None
+        )
+        required_backends = sorted(
+            {backend for item in items for backend in item.required_backends}
+        )
         providers = sorted({provider for item in items for provider in item.providers})
         return RuntimeAvailability(
             available=available,
@@ -1547,7 +1937,9 @@ class PluginRegistry:
             providers=providers,
         )
 
-    async def is_tool_enabled_for_user(self, user: UserPrincipal, tool_key: str) -> bool:
+    async def is_tool_enabled_for_user(
+        self, user: UserPrincipal, tool_key: str
+    ) -> bool:
         runtime = await self.settings_service.get_runtime_settings()
         if not runtime.get("mcp_enabled", True):
             return False
@@ -1559,26 +1951,36 @@ class PluginRegistry:
             return False
         if not (await self._tool_availability(plugin, tool)).available:
             return False
-        plugin_doc = await self.db.collection(PLUGINS).find_one({"key": plugin.manifest.key})
+        plugin_doc = await self.db.collection(PLUGINS).find_one(
+            {"key": plugin.manifest.key}
+        )
         if plugin_doc and not plugin_doc.get("enabled", True):
             return False
-        global_policy = await self.db.collection(TOOL_POLICIES).find_one({"tool_key": tool_key, "scope": "global", "subject_id": "*"})
+        global_policy = await self.db.collection(TOOL_POLICIES).find_one(
+            {"tool_key": tool_key, "scope": "global", "subject_id": "*"}
+        )
         if global_policy and not global_policy.get("enabled", True):
             return False
         if user.is_root:
             return True
         if not set(tool.manifest.permissions).issubset(set(user.permissions)):
             return False
-        user_policy = await self.db.collection(TOOL_POLICIES).find_one({"tool_key": tool_key, "scope": "user", "subject_id": user.user_id})
+        user_policy = await self.db.collection(TOOL_POLICIES).find_one(
+            {"tool_key": tool_key, "scope": "user", "subject_id": user.user_id}
+        )
         return bool(user_policy and user_policy.get("enabled"))
 
-    async def describe_tools_for_user(self, user: UserPrincipal) -> list[dict[str, Any]]:
+    async def describe_tools_for_user(
+        self, user: UserPrincipal
+    ) -> list[dict[str, Any]]:
         runtime = await self.settings_service.get_runtime_settings()
         if not runtime.get("mcp_enabled", True):
             return []
         tools: list[dict[str, Any]] = []
         for plugin in self.plugins.values():
-            plugin_doc = await self.db.collection(PLUGINS).find_one({"key": plugin.manifest.key})
+            plugin_doc = await self.db.collection(PLUGINS).find_one(
+                {"key": plugin.manifest.key}
+            )
             if plugin_doc and not plugin_doc.get("enabled", True):
                 continue
             for tool in plugin.tools.values():
@@ -1595,7 +1997,14 @@ class PluginRegistry:
                     )
         return sorted(tools, key=lambda item: item["name"])
 
-    async def call_tool(self, user: UserPrincipal, tool_key: str, arguments: dict[str, Any], audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+    async def call_tool(
+        self,
+        user: UserPrincipal,
+        tool_key: str,
+        arguments: dict[str, Any],
+        audit_ctx: Any = None,
+        request_meta: Any = None,
+    ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         tool = self.get_tool(tool_key)
         if tool is None:
@@ -1612,7 +2021,9 @@ class PluginRegistry:
         await self.rate_limiter.enforce(policy_name, f"{user.user_id}:{tool_key}")
         if self._services is None:
             raise RuntimeError("Plugin services are not attached")
-        context = ToolExecutionContext(user=user, services=self._services, audit_ctx=audit_ctx)
+        context = ToolExecutionContext(
+            user=user, services=self._services, audit_ctx=audit_ctx
+        )
         result = await tool.handler(context, arguments)
         redacted_arguments = self._services.host_ops.redact_arguments(
             arguments,
@@ -1634,7 +2045,9 @@ class PluginRegistry:
 
 
 class ApiKeyService:
-    def __init__(self, db: DatabaseManager, users: UserService, audit: AuditCollector) -> None:
+    def __init__(
+        self, db: DatabaseManager, users: UserService, audit: AuditCollector
+    ) -> None:
         self.db = db
         self.users = users
         self.audit = audit
@@ -1647,15 +2060,27 @@ class ApiKeyService:
         token_prefix = token[:12]
         return token, token_hash, token_prefix
 
-    async def create_key(self, user: UserPrincipal, *, name: str, expires_in_days: int | None, audit_ctx: Any = None, request_meta: Any = None) -> tuple[str, dict[str, Any]]:
+    async def create_key(
+        self,
+        user: UserPrincipal,
+        *,
+        name: str,
+        expires_in_days: int | None,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
+    ) -> tuple[str, dict[str, Any]]:
         # Enforce max 20 keys
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
-        count = await self.db.collection(API_KEYS).count_documents({"user_id": user.user_id, "is_active": True})
+        count = await self.db.collection(API_KEYS).count_documents(
+            {"user_id": user.user_id, "is_active": True}
+        )
         if count >= 20:
             raise ValueError("Maximum number of API keys (20) reached")
         token, token_hash, token_prefix = self._generate_token()
         created_at = now_utc()
-        expires_at = created_at + timedelta(days=expires_in_days) if expires_in_days else None
+        expires_at = (
+            created_at + timedelta(days=expires_in_days) if expires_in_days else None
+        )
         document = {
             "_id": f"apikey_{uuid4().hex}",
             "user_id": user.user_id,
@@ -1668,21 +2093,54 @@ class ApiKeyService:
             "is_active": True,
         }
         await self.db.collection(API_KEYS).insert_one(document)
-        await self.audit.record("account.api_key.create", actor=user, audit_ctx=audit_ctx, target={"user_id": user.user_id, "key_id": document["_id"]}, metadata={"name": document["name"]})
+        await self.audit.record(
+            "account.api_key.create",
+            actor=user,
+            audit_ctx=audit_ctx,
+            target={"user_id": user.user_id, "key_id": document["_id"]},
+            metadata={"name": document["name"]},
+        )
         return token, document
 
     async def list_keys(self, user: UserPrincipal) -> list[dict[str, Any]]:
-        cursor = self.db.collection(API_KEYS).find({"user_id": user.user_id}).sort("created_at", -1)
+        cursor = (
+            self.db.collection(API_KEYS)
+            .find({"user_id": user.user_id})
+            .sort("created_at", -1)
+        )
         return [self.to_response(item) async for item in cursor]
 
-    async def revoke_key(self, user: UserPrincipal, key_id: str, *, audit_ctx: Any = None, request_meta: Any = None) -> None:
+    async def revoke_key(
+        self,
+        user: UserPrincipal,
+        key_id: str,
+        *,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
+    ) -> None:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
-        result = await self.db.collection(API_KEYS).delete_one({"_id": key_id, "user_id": user.user_id})
+        result = await self.db.collection(API_KEYS).delete_one(
+            {"_id": key_id, "user_id": user.user_id}
+        )
         if result.deleted_count == 0:
             raise LookupError("API key not found")
-        await self.audit.record("account.api_key.revoke", actor=user, audit_ctx=audit_ctx, target={"user_id": user.user_id, "key_id": key_id})
+        await self.audit.record(
+            "account.api_key.revoke",
+            actor=user,
+            audit_ctx=audit_ctx,
+            target={"user_id": user.user_id, "key_id": key_id},
+        )
 
-    async def update_key(self, user: UserPrincipal, key_id: str, *, name: str | None, expires_in_days: int | None, audit_ctx: Any = None, request_meta: Any = None) -> dict[str, Any]:
+    async def update_key(
+        self,
+        user: UserPrincipal,
+        key_id: str,
+        *,
+        name: str | None,
+        expires_in_days: int | None,
+        audit_ctx: Any = None,
+        request_meta: Any = None,
+    ) -> dict[str, Any]:
         audit_ctx = ensure_audit_context(audit_ctx or request_meta)
         updates: dict[str, Any] = {"updated_at": now_utc()}
         if name is not None:
@@ -1692,26 +2150,37 @@ class ApiKeyService:
                 updates["expires_at"] = None
             else:
                 updates["expires_at"] = now_utc() + timedelta(days=expires_in_days)
-        result = await self.db.collection(API_KEYS).update_one({"_id": key_id, "user_id": user.user_id}, {"$set": updates})
+        result = await self.db.collection(API_KEYS).update_one(
+            {"_id": key_id, "user_id": user.user_id}, {"$set": updates}
+        )
         if result.matched_count == 0:
             raise LookupError("API key not found")
         updated = await self.db.collection(API_KEYS).find_one({"_id": key_id})
         assert updated is not None
-        await self.audit.record("account.api_key.update", actor=user, audit_ctx=audit_ctx, target={"user_id": user.user_id, "key_id": key_id})
+        await self.audit.record(
+            "account.api_key.update",
+            actor=user,
+            audit_ctx=audit_ctx,
+            target={"user_id": user.user_id, "key_id": key_id},
+        )
         return self.to_response(updated)
 
     async def verify_token(self, token: str) -> UserPrincipal | None:
         if not token.startswith("asfes_"):
             return None
         token_hash = sha256_text(token)
-        document = await self.db.collection(API_KEYS).find_one({"token_hash": token_hash, "is_active": True})
+        document = await self.db.collection(API_KEYS).find_one(
+            {"token_hash": token_hash, "is_active": True}
+        )
         if not document:
             return None
         if is_expired(document.get("expires_at")):
             return None
         # Update last_used_at (fire-and-forget)
         asyncio.create_task(
-            self.db.collection(API_KEYS).update_one({"_id": document["_id"]}, {"$set": {"last_used_at": now_utc()}})
+            self.db.collection(API_KEYS).update_one(
+                {"_id": document["_id"]}, {"$set": {"last_used_at": now_utc()}}
+            )
         )
         user_doc = await self.users.get_user_by_id(document["user_id"])
         if not user_doc:
@@ -1758,17 +2227,47 @@ class ApplicationServices:
 
 def build_rate_limit_policies(settings: Settings) -> dict[str, RateLimitPolicy]:
     return {
-        "login": RateLimitPolicy("login", settings.rate_limits.login_limit, settings.rate_limits.login_window_seconds),
-        "register": RateLimitPolicy("register", settings.rate_limits.register_limit, settings.rate_limits.register_window_seconds),
-        "oauth_token": RateLimitPolicy("oauth_token", settings.rate_limits.oauth_token_limit, settings.rate_limits.oauth_token_window_seconds),
-        "rest_read": RateLimitPolicy("rest_read", settings.rate_limits.rest_read_limit, settings.rate_limits.rest_read_window_seconds),
-        "rest_write": RateLimitPolicy("rest_write", settings.rate_limits.rest_write_limit, settings.rate_limits.rest_write_window_seconds),
-        "mcp_read": RateLimitPolicy("mcp_read", settings.rate_limits.mcp_read_limit, settings.rate_limits.mcp_read_window_seconds),
-        "mcp_write": RateLimitPolicy("mcp_write", settings.rate_limits.mcp_write_limit, settings.rate_limits.mcp_write_window_seconds),
+        "login": RateLimitPolicy(
+            "login",
+            settings.rate_limits.login_limit,
+            settings.rate_limits.login_window_seconds,
+        ),
+        "register": RateLimitPolicy(
+            "register",
+            settings.rate_limits.register_limit,
+            settings.rate_limits.register_window_seconds,
+        ),
+        "oauth_token": RateLimitPolicy(
+            "oauth_token",
+            settings.rate_limits.oauth_token_limit,
+            settings.rate_limits.oauth_token_window_seconds,
+        ),
+        "rest_read": RateLimitPolicy(
+            "rest_read",
+            settings.rate_limits.rest_read_limit,
+            settings.rate_limits.rest_read_window_seconds,
+        ),
+        "rest_write": RateLimitPolicy(
+            "rest_write",
+            settings.rate_limits.rest_write_limit,
+            settings.rate_limits.rest_write_window_seconds,
+        ),
+        "mcp_read": RateLimitPolicy(
+            "mcp_read",
+            settings.rate_limits.mcp_read_limit,
+            settings.rate_limits.mcp_read_window_seconds,
+        ),
+        "mcp_write": RateLimitPolicy(
+            "mcp_write",
+            settings.rate_limits.mcp_write_limit,
+            settings.rate_limits.mcp_write_window_seconds,
+        ),
     }
 
 
-async def build_application_services(settings: Settings, logger_manager: IntegrityLogManager, mailer: Mailer) -> ApplicationServices:
+async def build_application_services(
+    settings: Settings, logger_manager: IntegrityLogManager, mailer: Mailer
+) -> ApplicationServices:
     validate_runtime_security(settings)
     db = DatabaseManager(settings)
     await db.connect()
@@ -1782,14 +2281,16 @@ async def build_application_services(settings: Settings, logger_manager: Integri
         build_rate_limit_policies(settings),
         redis_mode=settings.redis.mode,
         redis_url=settings.redis.url,
-        redis_runtime_enabled=settings.redis.enabled_on_startup or settings.redis.mode == "required",
+        redis_runtime_enabled=settings.redis.enabled_on_startup
+        or settings.redis.mode == "required",
     )
     await rate_limiter.initialize()
 
     cache = CacheManager(
         redis_mode=settings.redis.mode,
         redis_url=settings.redis.url,
-        redis_runtime_enabled=settings.redis.enabled_on_startup or settings.redis.mode == "required",
+        redis_runtime_enabled=settings.redis.enabled_on_startup
+        or settings.redis.mode == "required",
     )
     await cache.connect()
 
@@ -1804,8 +2305,12 @@ async def build_application_services(settings: Settings, logger_manager: Integri
     auth = AuthService(db, settings, users, cache)
     oauth = OAuthService(db, settings, users, audit)
     api_key_service = ApiKeyService(db, users, audit)
-    alerts = AlertingService(db, host_ops, mailer, settings.host_ops.alert_poll_interval_seconds)
-    plugins = PluginRegistry(db, settings, permissions, audit, settings_service, rate_limiter)
+    alerts = AlertingService(
+        db, host_ops, mailer, settings.host_ops.alert_poll_interval_seconds
+    )
+    plugins = PluginRegistry(
+        db, settings, permissions, audit, settings_service, rate_limiter
+    )
     updates = UpdateManager(settings)
     proxy_service = ProxyService(db, settings)
     pypi_mirror_service = PyPIMirrorService(

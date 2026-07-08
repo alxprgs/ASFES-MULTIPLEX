@@ -29,7 +29,9 @@ def temp_workspace():
         proj_dir = tmp_path / "my_project"
         proj_dir.mkdir()
         compose_yml = proj_dir / "docker-compose.yml"
-        compose_yml.write_text("version: '3'\nservices:\n  web:\n    image: nginx", encoding="utf-8")
+        compose_yml.write_text(
+            "version: '3'\nservices:\n  web:\n    image: nginx", encoding="utf-8"
+        )
         yield {
             "tmpdir": tmp_path,
             "project_dir": proj_dir,
@@ -69,13 +71,17 @@ async def test_docker_plugin_handlers(host_ops) -> None:
             assert res["requested_by"] == "alice"
 
         # 3. inspect_container with redaction
-        inspect_stdout = json.dumps([{
-            "Id": "123",
-            "Config": {
-                "Env": ["DB_PASSWORD=secret123", "PORT=80"],
-                "Labels": {"api_key": "somekey", "version": "1.0"}
-            }
-        }])
+        inspect_stdout = json.dumps(
+            [
+                {
+                    "Id": "123",
+                    "Config": {
+                        "Env": ["DB_PASSWORD=secret123", "PORT=80"],
+                        "Labels": {"api_key": "somekey", "version": "1.0"},
+                    },
+                }
+            ]
+        )
         mock_run = AsyncMock(return_value=(0, inspect_stdout, ""))
         with patch("server.mcp.plugins.docker._run_docker_command", mock_run):
             res = await inspect_container(context, {"container": "123"})
@@ -107,16 +113,29 @@ async def test_docker_compose_plugin_handlers(host_ops, temp_workspace) -> None:
     availability_mock = MagicMock()
     availability_mock.available = True
     availability_mock.providers = ["docker compose"]
-    
-    with patch("server.mcp.plugins.docker_compose._compose_availability", AsyncMock(return_value=availability_mock)):
+
+    with patch(
+        "server.mcp.plugins.docker_compose._compose_availability",
+        AsyncMock(return_value=availability_mock),
+    ):
         with patch.object(host_ops, "executable_path", return_value="/usr/bin/docker"):
             # 1. compose_ps
-            mock_run = AsyncMock(return_value=CommandResult(command=[], returncode=0, stdout='[{"Service":"web","State":"running"}]', stderr=""))
+            mock_run = AsyncMock(
+                return_value=CommandResult(
+                    command=[],
+                    returncode=0,
+                    stdout='[{"Service":"web","State":"running"}]',
+                    stderr="",
+                )
+            )
             with patch.object(host_ops, "run", mock_run):
-                res = await compose_ps(context, {
-                    "project_dir": str(temp_workspace["project_dir"]),
-                    "files": ["my_project/docker-compose.yml"],
-                })
+                res = await compose_ps(
+                    context,
+                    {
+                        "project_dir": str(temp_workspace["project_dir"]),
+                        "files": ["my_project/docker-compose.yml"],
+                    },
+                )
                 assert len(res["services"]) == 1
                 assert res["services"][0]["Service"] == "web"
                 # Check that -f resolved compose path is in command
@@ -126,10 +145,17 @@ async def test_docker_compose_plugin_handlers(host_ops, temp_workspace) -> None:
                 assert "-f" in call_args
 
             # 2. compose_up
-            mock_run = AsyncMock(return_value=CommandResult(command=[], returncode=0, stdout="Created", stderr=""))
+            mock_run = AsyncMock(
+                return_value=CommandResult(
+                    command=[], returncode=0, stdout="Created", stderr=""
+                )
+            )
             with patch.object(host_ops, "run", mock_run):
-                res = await compose_up(context, {
-                    "project_dir": str(temp_workspace["project_dir"]),
-                    "detach": True,
-                })
+                res = await compose_up(
+                    context,
+                    {
+                        "project_dir": str(temp_workspace["project_dir"]),
+                        "detach": True,
+                    },
+                )
                 assert res["changed"] is True

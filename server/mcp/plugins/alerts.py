@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.models import MCPTool, MCPToolManifest, PermissionDefinition, PluginDefinition, PluginManifest, ToolExecutionContext
+from server.models import (
+    MCPTool,
+    MCPToolManifest,
+    PermissionDefinition,
+    PluginDefinition,
+    PluginManifest,
+    ToolExecutionContext,
+)
 
 
 async def alerts_startup(services) -> None:
@@ -13,36 +20,52 @@ async def alerts_shutdown(services) -> None:
     await services.alerts.stop()
 
 
-async def list_rules(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def list_rules(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     items = await context.services.alerts.list_rules()
     return {"rules": items, "count": len(items)}
 
 
-async def upsert_rule(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def upsert_rule(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     return await context.services.alerts.upsert_rule(arguments)
 
 
-async def delete_rule(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def delete_rule(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     rule_id = str(arguments.get("rule_id") or "")
     if not rule_id:
         raise RuntimeError("The 'rule_id' argument is required")
     return await context.services.alerts.delete_rule(rule_id)
 
 
-async def list_events(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def list_events(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     limit = max(1, int(arguments.get("limit") or 100))
     items = await context.services.alerts.list_events(limit=limit)
     return {"events": items, "count": len(items)}
 
 
-async def evaluate_now(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def evaluate_now(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     return await context.services.alerts.evaluate_rules_once()
 
 
-async def send_test_notification(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    recipients = [str(item) for item in arguments.get("recipients", []) if str(item).strip()]
+async def send_test_notification(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    recipients = [
+        str(item) for item in arguments.get("recipients", []) if str(item).strip()
+    ]
     if not recipients:
-        raise RuntimeError("The 'recipients' argument must contain at least one email address")
+        raise RuntimeError(
+            "The 'recipients' argument must contain at least one email address"
+        )
     return await context.services.alerts.send_test_notification(
         recipients,
         subject=str(arguments.get("subject") or "Multiplex alert test"),
@@ -57,8 +80,14 @@ PLUGIN = PluginDefinition(
         version="1.0.0",
         description="Управляет фоновыми правилами оповещений и доставкой уведомлений по сигналам локального хоста.",
         permissions=[
-            PermissionDefinition(key="alerts.read", description="Читать правила оповещений и события оповещений."),
-            PermissionDefinition(key="alerts.write", description="Создавать, удалять и проверять правила оповещений."),
+            PermissionDefinition(
+                key="alerts.read",
+                description="Читать правила оповещений и события оповещений.",
+            ),
+            PermissionDefinition(
+                key="alerts.write",
+                description="Создавать, удалять и проверять правила оповещений.",
+            ),
         ],
     ),
     tools={
@@ -67,7 +96,11 @@ PLUGIN = PluginDefinition(
                 key="alerts.list_rules",
                 name="Список правил оповещений",
                 description="Показывает сохранённые правила оповещений и их последнее состояние.",
-                input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
                 permissions=["alerts.read"],
                 tags=["alerts", "read"],
                 read_only=True,
@@ -141,7 +174,11 @@ PLUGIN = PluginDefinition(
                 key="alerts.evaluate_now",
                 name="Проверить оповещения сейчас",
                 description="Запускает немедленную проверку всех включённых правил оповещений.",
-                input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
                 permissions=["alerts.write"],
                 tags=["alerts", "write"],
                 read_only=False,

@@ -5,20 +5,35 @@ from pathlib import Path
 from typing import Any
 
 from server.mcp.plugins._common import require_argument
-from server.models import MCPTool, MCPToolManifest, PermissionDefinition, PluginDefinition, PluginManifest, RuntimeAvailability, ToolExecutionContext
+from server.models import (
+    MCPTool,
+    MCPToolManifest,
+    PermissionDefinition,
+    PluginDefinition,
+    PluginManifest,
+    RuntimeAvailability,
+    ToolExecutionContext,
+)
 
 
 async def _database_availability(services) -> RuntimeAvailability:
-    return services.host_ops.availability_for_any_command(["mysql", "mysqldump", "psql", "pg_dump"], providers=["mysql", "postgres"])
+    return services.host_ops.availability_for_any_command(
+        ["mysql", "mysqldump", "psql", "pg_dump"], providers=["mysql", "postgres"]
+    )
 
 
 def _load_profile(context: ToolExecutionContext, name: str) -> dict[str, Any]:
     return context.services.host_ops.load_json_profile("database", name)
 
 
-def _resolve_dump_path(context: ToolExecutionContext, arguments: dict[str, Any], profile_name: str) -> Path:
+def _resolve_dump_path(
+    context: ToolExecutionContext, arguments: dict[str, Any], profile_name: str
+) -> Path:
     if arguments.get("dump_path"):
-        return context.services.host_ops.resolve_managed_path(str(arguments["dump_path"]), roots=context.services.host_ops.managed_file_roots())
+        return context.services.host_ops.resolve_managed_path(
+            str(arguments["dump_path"]),
+            roots=context.services.host_ops.managed_file_roots(),
+        )
     backup_root = context.services.host_ops.backup_directory() / "databases"
     backup_root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
@@ -35,11 +50,15 @@ def _database_env(profile: dict[str, Any]) -> dict[str, str]:
     return {}
 
 
-async def list_profiles(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def list_profiles(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     return {"profiles": context.services.host_ops.list_profiles("database")}
 
 
-async def connection_status(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def connection_status(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     profile_name = str(require_argument(arguments, "profile"))
     profile = _load_profile(context, profile_name)
     engine = str(profile.get("engine") or "").lower()
@@ -49,16 +68,46 @@ async def connection_status(context: ToolExecutionContext, arguments: dict[str, 
     user = str(profile.get("username") or "")
     env = _database_env(profile)
     if engine == "postgres":
-        command = ["psql", "-h", host, "-p", port, "-U", user, "-d", database, "-c", "SELECT 1;"]
+        command = [
+            "psql",
+            "-h",
+            host,
+            "-p",
+            port,
+            "-U",
+            user,
+            "-d",
+            database,
+            "-c",
+            "SELECT 1;",
+        ]
     elif engine in {"mysql", "mariadb"}:
-        command = ["mysql", "-h", host, "-P", port, "-u", user, database, "-e", "SELECT 1;"]
+        command = [
+            "mysql",
+            "-h",
+            host,
+            "-P",
+            port,
+            "-u",
+            user,
+            database,
+            "-e",
+            "SELECT 1;",
+        ]
     else:
         raise RuntimeError("Unsupported database engine")
     result = await context.services.host_ops.run(command, env=env, check=False)
-    return {"profile": profile_name, "engine": engine, "connected": result.returncode == 0, **result.to_dict()}
+    return {
+        "profile": profile_name,
+        "engine": engine,
+        "connected": result.returncode == 0,
+        **result.to_dict(),
+    }
 
 
-async def backup_database(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def backup_database(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     profile_name = str(require_argument(arguments, "profile"))
     profile = _load_profile(context, profile_name)
     engine = str(profile.get("engine") or "").lower()
@@ -70,20 +119,52 @@ async def backup_database(context: ToolExecutionContext, arguments: dict[str, An
     dump_path = _resolve_dump_path(context, arguments, profile_name)
     dump_path.parent.mkdir(parents=True, exist_ok=True)
     if engine == "postgres":
-        command = ["pg_dump", "-h", host, "-p", port, "-U", user, "-d", database, "-f", str(dump_path)]
+        command = [
+            "pg_dump",
+            "-h",
+            host,
+            "-p",
+            port,
+            "-U",
+            user,
+            "-d",
+            database,
+            "-f",
+            str(dump_path),
+        ]
     elif engine in {"mysql", "mariadb"}:
-        command = ["mysqldump", "-h", host, "-P", port, "-u", user, f"--result-file={dump_path}", database]
+        command = [
+            "mysqldump",
+            "-h",
+            host,
+            "-P",
+            port,
+            "-u",
+            user,
+            f"--result-file={dump_path}",
+            database,
+        ]
     else:
         raise RuntimeError("Unsupported database engine")
     result = await context.services.host_ops.run(command, env=env, check=False)
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "database backup failed")
-    return {"profile": profile_name, "engine": engine, "dump_path": str(dump_path), **result.to_dict()}
+    return {
+        "profile": profile_name,
+        "engine": engine,
+        "dump_path": str(dump_path),
+        **result.to_dict(),
+    }
 
 
-async def restore_database(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def restore_database(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     profile_name = str(require_argument(arguments, "profile"))
-    dump_path = context.services.host_ops.resolve_managed_path(str(require_argument(arguments, "dump_path")), roots=context.services.host_ops.managed_file_roots())
+    dump_path = context.services.host_ops.resolve_managed_path(
+        str(require_argument(arguments, "dump_path")),
+        roots=context.services.host_ops.managed_file_roots(),
+    )
     profile = _load_profile(context, profile_name)
     engine = str(profile.get("engine") or "").lower()
     host = str(profile.get("host") or "127.0.0.1")
@@ -92,15 +173,43 @@ async def restore_database(context: ToolExecutionContext, arguments: dict[str, A
     user = str(profile.get("username") or "")
     env = _database_env(profile)
     if engine == "postgres":
-        command = ["psql", "-h", host, "-p", port, "-U", user, "-d", database, "-f", str(dump_path)]
+        command = [
+            "psql",
+            "-h",
+            host,
+            "-p",
+            port,
+            "-U",
+            user,
+            "-d",
+            database,
+            "-f",
+            str(dump_path),
+        ]
     elif engine in {"mysql", "mariadb"}:
-        command = ["mysql", "-h", host, "-P", port, "-u", user, database, "-e", f"source {dump_path}"]
+        command = [
+            "mysql",
+            "-h",
+            host,
+            "-P",
+            port,
+            "-u",
+            user,
+            database,
+            "-e",
+            f"source {dump_path}",
+        ]
     else:
         raise RuntimeError("Unsupported database engine")
     result = await context.services.host_ops.run(command, env=env, check=False)
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "database restore failed")
-    return {"profile": profile_name, "engine": engine, "dump_path": str(dump_path), **result.to_dict()}
+    return {
+        "profile": profile_name,
+        "engine": engine,
+        "dump_path": str(dump_path),
+        **result.to_dict(),
+    }
 
 
 PLUGIN = PluginDefinition(
@@ -110,8 +219,14 @@ PLUGIN = PluginDefinition(
         version="1.0.0",
         description="Проверяет, резервирует и восстанавливает базы данных через именованные серверные профили.",
         permissions=[
-            PermissionDefinition(key="database.read", description="Читать метаданные профилей баз данных и статус подключения."),
-            PermissionDefinition(key="database.write", description="Создавать резервные копии и восстанавливать базы данных через именованные профили."),
+            PermissionDefinition(
+                key="database.read",
+                description="Читать метаданные профилей баз данных и статус подключения.",
+            ),
+            PermissionDefinition(
+                key="database.write",
+                description="Создавать резервные копии и восстанавливать базы данных через именованные профили.",
+            ),
         ],
         providers=["mysql", "postgres"],
     ),
@@ -121,7 +236,11 @@ PLUGIN = PluginDefinition(
                 key="database_manager.list_profiles",
                 name="Список профилей баз данных",
                 description="Показывает именованные профили баз данных, сохранённые на сервере.",
-                input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
                 permissions=["database.read"],
                 tags=["database", "read"],
                 read_only=True,

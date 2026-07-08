@@ -25,6 +25,7 @@ else:
     import aiohttp as _aiohttp
 
     if not hasattr(_aiohttp, "ClientError"):
+
         class _ClientError(Exception):
             pass
 
@@ -61,7 +62,9 @@ from python_mirror import MirrorConfig, AsyncPythonMirror
 
 
 class FakeResponse:
-    def __init__(self, *, status=200, headers=None, text_data="", chunks=None, raise_exc=None):
+    def __init__(
+        self, *, status=200, headers=None, text_data="", chunks=None, raise_exc=None
+    ):
         self.status = status
         self.headers = headers or {}
         self._text_data = text_data
@@ -88,7 +91,9 @@ class FakeResponse:
 
 
 class FakeSession:
-    def __init__(self, get_response=None, head_response=None, get_exc=None, head_exc=None):
+    def __init__(
+        self, get_response=None, head_response=None, get_exc=None, head_exc=None
+    ):
         self._get_response = get_response
         self._head_response = head_response
         self._get_exc = get_exc
@@ -156,7 +161,9 @@ def test_load_proxies_variants(temp_dir):
     mirror = AsyncPythonMirror(MirrorConfig(data_dir=temp_dir, proxies=None))
     assert mirror.proxies == []
 
-    mirror = AsyncPythonMirror(MirrorConfig(data_dir=temp_dir, proxies=["http://p1", "http://p2"]))
+    mirror = AsyncPythonMirror(
+        MirrorConfig(data_dir=temp_dir, proxies=["http://p1", "http://p2"])
+    )
     assert mirror.proxies == ["http://p1", "http://p2"]
 
     proxy_file = temp_dir / "proxies.txt"
@@ -186,7 +193,9 @@ def test_format_size(mirror):
 
 def test_get_remote_file_size_success_and_fail(mirror):
     async def _run():
-        ok = FakeSession(head_response=FakeResponse(status=200, headers={"Content-Length": "321"}))
+        ok = FakeSession(
+            head_response=FakeResponse(status=200, headers={"Content-Length": "321"})
+        )
         assert await mirror._get_remote_file_size(ok, "3.12.0", "a.exe") == 321
 
         bad_status = FakeSession(head_response=FakeResponse(status=404, headers={}))
@@ -214,17 +223,29 @@ def test_check_disk_space_insufficient_and_zero_total(mirror, monkeypatch):
 def test_check_file_integrity_variants(mirror, temp_dir):
     async def _run():
         dest = temp_dir / "f.bin"
-        assert await mirror._check_file_integrity(MagicMock(), "3.12.0", "f.bin", dest) is False
+        assert (
+            await mirror._check_file_integrity(MagicMock(), "3.12.0", "f.bin", dest)
+            is False
+        )
 
         dest.write_bytes(b"1234")
-        ok = FakeSession(head_response=FakeResponse(status=200, headers={"Content-Length": "4"}))
+        ok = FakeSession(
+            head_response=FakeResponse(status=200, headers={"Content-Length": "4"})
+        )
         assert await mirror._check_file_integrity(ok, "3.12.0", "f.bin", dest) is True
 
-        mismatch = FakeSession(head_response=FakeResponse(status=200, headers={"Content-Length": "5"}))
-        assert await mirror._check_file_integrity(mismatch, "3.12.0", "f.bin", dest) is False
+        mismatch = FakeSession(
+            head_response=FakeResponse(status=200, headers={"Content-Length": "5"})
+        )
+        assert (
+            await mirror._check_file_integrity(mismatch, "3.12.0", "f.bin", dest)
+            is False
+        )
 
         broken = FakeSession(head_exc=RuntimeError("boom"))
-        assert await mirror._check_file_integrity(broken, "3.12.0", "f.bin", dest) is False
+        assert (
+            await mirror._check_file_integrity(broken, "3.12.0", "f.bin", dest) is False
+        )
 
     asyncio.run(_run())
 
@@ -274,18 +295,24 @@ def test_download_single_variants(mirror):
 
         mirror._check_file_integrity = AsyncMock(return_value=True)
         mirror._download_file = AsyncMock(return_value=True)
-        assert await mirror._download_single(MagicMock(), "3.12.0", "a.exe", sem) is True
+        assert (
+            await mirror._download_single(MagicMock(), "3.12.0", "a.exe", sem) is True
+        )
         mirror._download_file.assert_not_awaited()
 
         mirror._check_file_integrity = AsyncMock(return_value=False)
         mirror._download_file = AsyncMock(return_value=True)
-        assert await mirror._download_single(MagicMock(), "3.12.0", "a.exe", sem) is True
+        assert (
+            await mirror._download_single(MagicMock(), "3.12.0", "a.exe", sem) is True
+        )
 
         async def fail_download(*_args, **_kwargs):
             raise RuntimeError("boom")
 
         mirror._download_file = fail_download
-        assert await mirror._download_single(MagicMock(), "3.12.0", "a.exe", sem) is False
+        assert (
+            await mirror._download_single(MagicMock(), "3.12.0", "a.exe", sem) is False
+        )
 
     asyncio.run(_run())
 

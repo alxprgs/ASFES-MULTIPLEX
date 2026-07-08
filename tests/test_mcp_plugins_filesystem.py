@@ -29,11 +29,11 @@ def temp_workspace():
         root2.mkdir()
         backup = tmp_path / "backup"
         backup.mkdir()
-        
+
         # Write some sample files
         (root1 / "file1.txt").write_text("Hello World from root1", encoding="utf-8")
         (root2 / "file2.txt").write_text("Hello World from root2", encoding="utf-8")
-        
+
         yield {
             "root1": root1,
             "root2": root2,
@@ -105,14 +105,20 @@ def test_host_ops_read_and_write(host_ops, temp_workspace) -> None:
     assert read_res_limit["truncated"] is True
 
     # 2. Atomic write (new file)
-    write_res = host_ops.atomic_write_text("new_file.txt", "New Content", backup_existing=False)
+    write_res = host_ops.atomic_write_text(
+        "new_file.txt", "New Content", backup_existing=False
+    )
     assert write_res["written"] == 11
-    assert (temp_workspace["root1"] / "new_file.txt").read_text(encoding="utf-8") == "New Content"
+    assert (temp_workspace["root1"] / "new_file.txt").read_text(
+        encoding="utf-8"
+    ) == "New Content"
 
     # 3. Append file
     append_res = host_ops.atomic_write_text("new_file.txt", " Added", append=True)
     assert append_res["appended"] is True
-    assert (temp_workspace["root1"] / "new_file.txt").read_text(encoding="utf-8") == "New Content Added"
+    assert (temp_workspace["root1"] / "new_file.txt").read_text(
+        encoding="utf-8"
+    ) == "New Content Added"
 
 
 def test_host_ops_tail_mkdir_move_delete(host_ops, temp_workspace) -> None:
@@ -159,11 +165,15 @@ async def test_file_manager_plugin_handlers(host_ops) -> None:
     assert "entries" in list_res
 
     # 2. read_file
-    read_res = await read_file(context, {"path": "file2.txt", "offset": 0, "max_bytes": 100})
+    read_res = await read_file(
+        context, {"path": "file2.txt", "offset": 0, "max_bytes": 100}
+    )
     assert read_res["content"] == "Hello World from root2"
 
     # 3. write_file
-    write_res = await write_file(context, {"path": "file3.txt", "content": "File 3 data"})
+    write_res = await write_file(
+        context, {"path": "file3.txt", "content": "File 3 data"}
+    )
     assert write_res["written"] == 11
 
     # 4. append_file
@@ -175,7 +185,9 @@ async def test_file_manager_plugin_handlers(host_ops) -> None:
     assert mkdir_res["created"] is True
 
     # 6. move_path
-    move_res = await move_path(context, {"source": "file3.txt", "destination": "subdir/file3_moved.txt"})
+    move_res = await move_path(
+        context, {"source": "file3.txt", "destination": "subdir/file3_moved.txt"}
+    )
     assert move_res["moved"] is True
 
     # 7. delete_path

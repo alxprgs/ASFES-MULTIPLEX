@@ -17,7 +17,15 @@ async def test_list_containers_parses_docker_json(monkeypatch) -> None:
 
     monkeypatch.setattr(docker, "_run_docker_command", fake_run)
     result = await docker.list_containers(
-        context=type("Context", (), {"user": UserPrincipal(user_id="root", username="root", is_root=True), "services": DummyServices(), "request_meta": {}})(),
+        context=type(
+            "Context",
+            (),
+            {
+                "user": UserPrincipal(user_id="root", username="root", is_root=True),
+                "services": DummyServices(),
+                "request_meta": {},
+            },
+        )(),
         arguments={},
     )
     assert result["count"] == 1
@@ -28,6 +36,16 @@ async def test_list_containers_parses_docker_json(monkeypatch) -> None:
 async def test_restart_container_requires_container_name() -> None:
     with pytest.raises(RuntimeError):
         await docker.restart_container(
-            context=type("Context", (), {"user": UserPrincipal(user_id="root", username="root", is_root=True), "services": DummyServices(), "request_meta": {}})(),
+            context=type(
+                "Context",
+                (),
+                {
+                    "user": UserPrincipal(
+                        user_id="root", username="root", is_root=True
+                    ),
+                    "services": DummyServices(),
+                    "request_meta": {},
+                },
+            )(),
             arguments={},
         )

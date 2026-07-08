@@ -33,7 +33,9 @@ def now_utc() -> datetime:
 
 def hash_password(password: str, pepper: str) -> str:
     salt = secrets.token_bytes(16)
-    digest = hashlib.scrypt((password + pepper).encode("utf-8"), salt=salt, n=2**14, r=8, p=1)
+    digest = hashlib.scrypt(
+        (password + pepper).encode("utf-8"), salt=salt, n=2**14, r=8, p=1
+    )
     return f"scrypt${b64url_encode(salt)}${b64url_encode(digest)}"
 
 
@@ -46,7 +48,9 @@ def verify_password(password: str, encoded: str, pepper: str) -> bool:
         return False
     salt = b64url_decode(salt_b64)
     expected = b64url_decode(digest_b64)
-    actual = hashlib.scrypt((password + pepper).encode("utf-8"), salt=salt, n=2**14, r=8, p=1)
+    actual = hashlib.scrypt(
+        (password + pepper).encode("utf-8"), salt=salt, n=2**14, r=8, p=1
+    )
     return hmac.compare_digest(actual, expected)
 
 
@@ -68,21 +72,32 @@ def _decode_totp_secret(secret: str) -> bytes:
     return base64.b32decode(f"{normalized}{padding}", casefold=True)
 
 
-def totp_code(secret: str, *, for_time: int | None = None, period: int = 30, digits: int = 6) -> str:
+def totp_code(
+    secret: str, *, for_time: int | None = None, period: int = 30, digits: int = 6
+) -> str:
     counter = int((for_time or time.time()) // period)
-    digest = hmac.new(_decode_totp_secret(secret), struct.pack(">Q", counter), hashlib.sha1).digest()
+    digest = hmac.new(
+        _decode_totp_secret(secret), struct.pack(">Q", counter), hashlib.sha1
+    ).digest()
     offset = digest[-1] & 0x0F
     value = struct.unpack(">I", digest[offset : offset + 4])[0] & 0x7FFFFFFF
     return str(value % (10**digits)).zfill(digits)
 
 
-def verify_totp_code(secret: str, code: str, *, window: int = 1, period: int = 30, digits: int = 6) -> bool:
+def verify_totp_code(
+    secret: str, code: str, *, window: int = 1, period: int = 30, digits: int = 6
+) -> bool:
     normalized = "".join(ch for ch in code if ch.isdigit())
     if len(normalized) != digits:
         return False
     current_time = int(time.time())
     for offset in range(-window, window + 1):
-        expected = totp_code(secret, for_time=current_time + offset * period, period=period, digits=digits)
+        expected = totp_code(
+            secret,
+            for_time=current_time + offset * period,
+            period=period,
+            digits=digits,
+        )
         if hmac.compare_digest(expected, normalized):
             return True
     return False
@@ -90,7 +105,9 @@ def verify_totp_code(secret: str, code: str, *, window: int = 1, period: int = 3
 
 def build_totp_uri(*, secret: str, issuer: str, account_name: str) -> str:
     label = f"{issuer}:{account_name}"
-    return f"otpauth://totp/{quote(label)}?secret={quote(secret)}&issuer={quote(issuer)}"
+    return (
+        f"otpauth://totp/{quote(label)}?secret={quote(secret)}&issuer={quote(issuer)}"
+    )
 
 
 def build_pkce_challenge(verifier: str) -> str:
@@ -119,7 +136,14 @@ def encode_jwt(payload: dict[str, Any], secret: str) -> str:
     return jwt.encode(payload, secret, algorithm="HS256", headers={"typ": "JWT"})
 
 
-def decode_jwt(token: str, secret: str, *, issuer: str, audience: str, token_type: str | None = None) -> dict[str, Any]:
+def decode_jwt(
+    token: str,
+    secret: str,
+    *,
+    issuer: str,
+    audience: str,
+    token_type: str | None = None,
+) -> dict[str, Any]:
     try:
         header = jwt.get_unverified_header(token)
     except jwt.PyJWTError as exc:

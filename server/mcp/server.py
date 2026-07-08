@@ -11,7 +11,12 @@ from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.tools.tool import Tool, ToolResult
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.shared.exceptions import McpError
-from mcp.types import CallToolRequestParams, ErrorData, ListToolsRequest, ToolAnnotations
+from mcp.types import (
+    CallToolRequestParams,
+    ErrorData,
+    ListToolsRequest,
+    ToolAnnotations,
+)
 from pydantic import AnyHttpUrl, PrivateAttr
 from starlette.requests import Request
 
@@ -44,7 +49,11 @@ def _principal_from_access_token(access_token: AccessToken) -> UserPrincipal:
     permissions = claims.get("resolved_permissions") or claims.get("permissions") or []
     return UserPrincipal(
         user_id=str(claims.get("sub") or access_token.resource_owner or ""),
-        username=str(claims.get("resolved_username") or claims.get("username") or access_token.client_id),
+        username=str(
+            claims.get("resolved_username")
+            or claims.get("username")
+            or access_token.client_id
+        ),
         is_root=bool(claims.get("resolved_is_root", claims.get("is_root", False))),
         permissions=sorted(str(permission) for permission in permissions),
         email=claims.get("resolved_email"),
@@ -176,7 +185,9 @@ class MultiplexAccessMiddleware(Middleware):
         services = self._services_getter()
 
         try:
-            await services.rate_limiter.enforce("mcp_read", f"{user.user_id}:tools/list")
+            await services.rate_limiter.enforce(
+                "mcp_read", f"{user.user_id}:tools/list"
+            )
         except RateLimitError as exc:
             raise _mcp_error(
                 f"Rate limit exceeded for {exc.policy_name}. Retry after {exc.retry_after} seconds.",
@@ -240,18 +251,25 @@ class ManagedPluginTool(Tool):
         request = get_http_request()
         services = self._services_getter()
         user = _resolve_request_user(request)
-        
+
         # V3.3 MCP Tool Safety Layer
-        dangerous_tools = {"host_ops.docker", "host_ops.nginx", "host_ops.firewall", "host_ops.systemd"}
+        dangerous_tools = {
+            "host_ops.docker",
+            "host_ops.nginx",
+            "host_ops.firewall",
+            "host_ops.systemd",
+        }
         is_dangerous = any(d in self._tool_key for d in dangerous_tools)
-        
+
         redis = services.cache._redis if services.cache.should_use_redis() else None
         lock_key = f"mcp:lock:{self._tool_key}"
-        
+
         if is_dangerous and redis:
             lock_acquired = await redis.set(lock_key, "1", nx=True, ex=60)
             if not lock_acquired:
-                raise ToolError(f"Tool {self._tool_key} is currently locked by another process (Rate limit / Safety guard). Try again later.")
+                raise ToolError(
+                    f"Tool {self._tool_key} is currently locked by another process (Rate limit / Safety guard). Try again later."
+                )
 
         try:
             audit_ctx = audit_context_from_request(request, services.settings)
@@ -321,5 +339,7 @@ class MultiplexMCPGateway:
         return sorted(self._registered_tool_keys)
 
 
-def create_mcp_gateway(settings: Settings, services_getter: ServiceGetter) -> MultiplexMCPGateway:
+def create_mcp_gateway(
+    settings: Settings, services_getter: ServiceGetter
+) -> MultiplexMCPGateway:
     return MultiplexMCPGateway(settings, services_getter)

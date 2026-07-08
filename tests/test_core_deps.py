@@ -77,9 +77,19 @@ async def test_get_optional_api_user_cookie_and_token() -> None:
     credentials = MagicMock()
     credentials.credentials = "bearer_token"
     mock_services.auth.verify_api_access_token.return_value = {"sub": "user_1"}
-    mock_user = {"_id": "user_1", "username": "alice", "is_root": False, "permissions": []}
+    mock_user = {
+        "_id": "user_1",
+        "username": "alice",
+        "is_root": False,
+        "permissions": [],
+    }
     mock_services.users.get_user_by_id.return_value = mock_user
-    mock_services.users.to_principal = lambda u: UserPrincipal(user_id=u["_id"], username=u["username"], is_root=u["is_root"], permissions=u["permissions"])
+    mock_services.users.to_principal = lambda u: UserPrincipal(
+        user_id=u["_id"],
+        username=u["username"],
+        is_root=u["is_root"],
+        permissions=u["permissions"],
+    )
     res = await get_optional_api_user(request, mock_services, credentials)
     assert res.user_id == "user_1"
 
@@ -124,9 +134,19 @@ async def test_get_current_mcp_user() -> None:
     # Case 3: oauth token valid
     credentials.credentials = "oauth_token"
     mock_services.oauth.verify_access_token.return_value = {"sub": "user_2"}
-    mock_user = {"_id": "user_2", "username": "bob", "is_root": False, "permissions": []}
+    mock_user = {
+        "_id": "user_2",
+        "username": "bob",
+        "is_root": False,
+        "permissions": [],
+    }
     mock_services.users.get_user_by_id.return_value = mock_user
-    mock_services.users.to_principal = lambda u: UserPrincipal(user_id=u["_id"], username=u["username"], is_root=u["is_root"], permissions=u["permissions"])
+    mock_services.users.to_principal = lambda u: UserPrincipal(
+        user_id=u["_id"],
+        username=u["username"],
+        is_root=u["is_root"],
+        permissions=u["permissions"],
+    )
     res = await get_current_mcp_user(mock_services, credentials)
     assert res.user_id == "user_2"
 
@@ -136,15 +156,21 @@ async def test_require_permission() -> None:
     dep = require_permission("admin.write")
 
     # root user allowed
-    root_user = UserPrincipal(user_id="1", username="root", is_root=True, permissions=[])
+    root_user = UserPrincipal(
+        user_id="1", username="root", is_root=True, permissions=[]
+    )
     assert await dep(root_user) == root_user
 
     # permitted user allowed
-    permitted_user = UserPrincipal(user_id="2", username="bob", is_root=False, permissions=["admin.write"])
+    permitted_user = UserPrincipal(
+        user_id="2", username="bob", is_root=False, permissions=["admin.write"]
+    )
     assert await dep(permitted_user) == permitted_user
 
     # forbidden user raises 403
-    regular_user = UserPrincipal(user_id="3", username="alice", is_root=False, permissions=[])
+    regular_user = UserPrincipal(
+        user_id="3", username="alice", is_root=False, permissions=[]
+    )
     with pytest.raises(HTTPException) as exc:
         await dep(regular_user)
     assert exc.value.status_code == 403
@@ -181,7 +207,7 @@ async def test_enforce_api_rate_limit() -> None:
 
     request.client = MagicMock()
     request.client.host = "127.0.0.1"
-    
+
     # Success case
     await enforce_api_rate_limit(request, mock_services)
 

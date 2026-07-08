@@ -60,7 +60,9 @@ def test_decode_jwt_malformed_and_invalid() -> None:
     assert "Malformed JWT" in str(exc.value)
 
     # Invalid header
-    bad_header_token = jwt.encode({"sub": "1"}, secret, algorithm="HS256", headers={"typ": "NOT_JWT"})
+    bad_header_token = jwt.encode(
+        {"sub": "1"}, secret, algorithm="HS256", headers={"typ": "NOT_JWT"}
+    )
     with pytest.raises(SecurityError) as exc:
         decode_jwt(bad_header_token, secret, issuer="iss", audience="aud")
     assert "Invalid JWT header" in str(exc.value)
@@ -75,7 +77,9 @@ def test_decode_jwt_malformed_and_invalid() -> None:
         ttl=timedelta(minutes=5),
     )
     with pytest.raises(SecurityError) as exc:
-        decode_jwt(token_with_type, secret, issuer="iss", audience="aud", token_type="refresh")
+        decode_jwt(
+            token_with_type, secret, issuer="iss", audience="aud", token_type="refresh"
+        )
     assert "Unexpected token type" in str(exc.value)
 
 

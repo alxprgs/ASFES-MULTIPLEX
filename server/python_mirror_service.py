@@ -6,12 +6,12 @@ Wraps PythonReleaseProvider + DownloadEngine with:
   - .mirror_cache.json management (cache-only, FS is source-of-truth)
   - Audit logging for destructive operations
 """
+
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import json
-import logging
 import os
 import re
 import shutil
@@ -31,7 +31,7 @@ from server.core.config import PythonMirrorConfig
 from server.core.database import DatabaseManager
 from server.core.logging import get_logger
 from server.core.proxy_router import ProxyRouter
-from server.core.python_release_provider import PythonReleaseProvider, ReleaseFile
+from server.core.python_release_provider import PythonReleaseProvider
 from server.models import (
     PythonMirrorFile,
     PythonMirrorJobStatus,
@@ -53,6 +53,7 @@ CACHE_VERSION = 1
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
+
 
 def _fmt_size(size_bytes: int) -> str:
     value = float(max(size_bytes, 0))
@@ -88,6 +89,7 @@ class IntegrityError(Exception):
 # Integrity verifiers
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class VerifyResult:
     ok: bool
@@ -110,13 +112,18 @@ class VerifierStrategy(ABC):
 class ContentLengthVerifier(VerifierStrategy):
     async def verify(self, path, expected_md5=None, expected_size=None) -> VerifyResult:
         if not path.exists():
-            return VerifyResult(ok=False, strategy="content_length",
-                                expected=str(expected_size), actual=None,
-                                error="file not found")
+            return VerifyResult(
+                ok=False,
+                strategy="content_length",
+                expected=str(expected_size),
+                actual=None,
+                error="file not found",
+            )
         actual = path.stat().st_size
         if expected_size is None:
-            return VerifyResult(ok=True, strategy="content_length",
-                                expected=None, actual=str(actual))
+            return VerifyResult(
+                ok=True, strategy="content_length", expected=None, actual=str(actual)
+            )
         return VerifyResult(
             ok=(actual == expected_size),
             strategy="content_length",
@@ -128,13 +135,16 @@ class ContentLengthVerifier(VerifierStrategy):
 class MD5Verifier(VerifierStrategy):
     async def verify(self, path, expected_md5=None, expected_size=None) -> VerifyResult:
         if not path.exists():
-            return VerifyResult(ok=False, strategy="md5",
-                                expected=expected_md5, actual=None,
-                                error="file not found")
+            return VerifyResult(
+                ok=False,
+                strategy="md5",
+                expected=expected_md5,
+                actual=None,
+                error="file not found",
+            )
         actual = await asyncio.to_thread(self._calc_md5, path)
         if expected_md5 is None:
-            return VerifyResult(ok=True, strategy="md5",
-                                expected=None, actual=actual)
+            return VerifyResult(ok=True, strategy="md5", expected=None, actual=actual)
         return VerifyResult(
             ok=(actual == expected_md5),
             strategy="md5",
@@ -176,6 +186,7 @@ class HybridVerifier(VerifierStrategy):
 # Download Engine
 # ---------------------------------------------------------------------------
 
+
 class DownloadEngine:
     """
     Handles streaming file downloads.
@@ -206,9 +217,7 @@ class DownloadEngine:
             dest.parent.mkdir(parents=True, exist_ok=True)
             temp = dest.with_suffix(dest.suffix + ".download.tmp")
             try:
-                actual_md5 = await self._stream_to_temp(
-                    session, url, temp, on_progress
-                )
+                actual_md5 = await self._stream_to_temp(session, url, temp, on_progress)
                 if expected_md5 and actual_md5 != expected_md5:
                     raise IntegrityError(
                         f"MD5 mismatch for {dest.name}: "
@@ -233,7 +242,6 @@ class DownloadEngine:
         temp: Path,
         on_progress: Callable[[int], None] | None,
     ) -> str:
-        proxy = self._proxy_router.choose_proxy()
         md5_h = hashlib.md5()
         downloaded = 0
         t0 = time.monotonic()
@@ -262,8 +270,12 @@ class DownloadEngine:
                 return md5_h.hexdigest()
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 last_exc = exc
-                LOGGER.debug("download_proxy_fail proxy=%s url=%s error=%s",
-                             proxy_candidate, url, exc)
+                LOGGER.debug(
+                    "download_proxy_fail proxy=%s url=%s error=%s",
+                    proxy_candidate,
+                    url,
+                    exc,
+                )
                 # Reset temp file for retry
                 try:
                     if temp.exists():
@@ -313,7 +325,9 @@ class SuggestionFilter:
         request: PythonMirrorSuggestRequest,
     ) -> PythonMirrorSuggestResponse:
         all_versions = await self._provider.get_versions(session, cache)
-        target_versions = self._resolve_version_query(request.version_query, all_versions)
+        target_versions = self._resolve_version_query(
+            request.version_query, all_versions
+        )
 
         candidates: list[PythonMirrorSuggestion] = []
         for version in target_versions[:5]:  # cap at 5 versions
@@ -327,15 +341,17 @@ class SuggestionFilter:
                 if request.file_type and f.file_type != request.file_type:
                     continue
                 is_installed = (self._data_dir / version / f.filename).exists()
-                candidates.append(PythonMirrorSuggestion(
-                    version=version,
-                    filename=f.filename,
-                    os_type=f.os_type,
-                    arch=f.arch,
-                    file_type=f.file_type,
-                    is_installed=is_installed,
-                    download_url=f.download_url,
-                ))
+                candidates.append(
+                    PythonMirrorSuggestion(
+                        version=version,
+                        filename=f.filename,
+                        os_type=f.os_type,
+                        arch=f.arch,
+                        file_type=f.file_type,
+                        is_installed=is_installed,
+                        download_url=f.download_url,
+                    )
+                )
 
         # Sort: installed first, then by file_type priority
         candidates.sort(
@@ -376,11 +392,12 @@ class SuggestionFilter:
 # Job tracking
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PythonMirrorJob:
     job_id: str
-    kind: str       # "install" | "verify" | "verify_all" | "repair"
-    status: str     # "pending" | "running" | "done" | "error" | "cancelled"
+    kind: str  # "install" | "verify" | "verify_all" | "repair"
+    status: str  # "pending" | "running" | "done" | "error" | "cancelled"
     version: str | None
     total: int = 0
     done: int = 0
@@ -424,6 +441,7 @@ class PythonMirrorJob:
 # ---------------------------------------------------------------------------
 # Main service
 # ---------------------------------------------------------------------------
+
 
 class PythonMirrorService:
     """
@@ -484,7 +502,7 @@ class PythonMirrorService:
 
     def _check_disk_space(self, required_bytes: int) -> None:
         _, _, free = shutil.disk_usage(self.cfg.data_dir)
-        min_bytes = self.cfg.min_safe_space_gb * 1024 ** 3
+        min_bytes = self.cfg.min_safe_space_gb * 1024**3
         if (free - required_bytes) < min_bytes:
             raise IOError(
                 f"Insufficient disk space: free={_fmt_size(int(free))}, "
@@ -536,15 +554,18 @@ class PythonMirrorService:
             if not ver_dir.is_dir() or ver_dir.name.startswith("."):
                 continue
             files = [
-                fp for fp in ver_dir.iterdir()
+                fp
+                for fp in ver_dir.iterdir()
                 if fp.is_file() and fp.name != CACHE_FILENAME
             ]
             total_size = sum(fp.stat().st_size for fp in files)
-            items.append(PythonMirrorListItem(
-                version=ver_dir.name,
-                files_count=len(files),
-                total_size_human=_fmt_size(total_size),
-            ))
+            items.append(
+                PythonMirrorListItem(
+                    version=ver_dir.name,
+                    files_count=len(files),
+                    total_size_human=_fmt_size(total_size),
+                )
+            )
 
         return PythonMirrorListResponse(items=items, count=len(items))
 
@@ -572,16 +593,18 @@ class PythonMirrorService:
             else:
                 os_type, arch, file_type = "source", "", "tarball"
 
-            files.append(PythonMirrorFile(
-                name=fp.name,
-                os_type=os_type,
-                arch=arch,
-                file_type=file_type,
-                size_bytes=size,
-                size_human=_fmt_size(size),
-                md5=cached_meta.get("md5"),
-                downloaded_at=cached_meta.get("downloaded_at"),
-            ))
+            files.append(
+                PythonMirrorFile(
+                    name=fp.name,
+                    os_type=os_type,
+                    arch=arch,
+                    file_type=file_type,
+                    size_bytes=size,
+                    size_human=_fmt_size(size),
+                    md5=cached_meta.get("md5"),
+                    downloaded_at=cached_meta.get("downloaded_at"),
+                )
+            )
 
         return PythonMirrorVersion(
             version=version,
@@ -603,14 +626,14 @@ class PythonMirrorService:
     # Operations — return Job status immediately
     # ------------------------------------------------------------------
 
-    def install_version(
-        self, version: str, actor: Any = None
-    ) -> PythonMirrorJobStatus:
+    def install_version(self, version: str, actor: Any = None) -> PythonMirrorJobStatus:
         job = self._create_job("install", version=version)
         job.task = asyncio.create_task(
             self._run_with_error_handling(job, self._run_install, version)
         )
-        LOGGER.info("job_created kind=install version=%s job_id=%s", version, job.job_id)
+        LOGGER.info(
+            "job_created kind=install version=%s job_id=%s", version, job.job_id
+        )
         return job.to_status()
 
     def verify_version(self, version: str) -> PythonMirrorJobStatus:
@@ -722,12 +745,14 @@ class PythonMirrorService:
             collection = self._db.collection(PYTHON_MIRROR_JOBS)
             await collection.update_many(
                 {"status": "running"},
-                {"$set": {
-                    "status": "error",
-                    "message": "Interrupted by server restart",
-                    "updated_at": datetime.now(UTC).isoformat(),
-                    "finished_at": datetime.now(UTC).isoformat(),
-                }},
+                {
+                    "$set": {
+                        "status": "error",
+                        "message": "Interrupted by server restart",
+                        "updated_at": datetime.now(UTC).isoformat(),
+                        "finished_at": datetime.now(UTC).isoformat(),
+                    }
+                },
             )
             LOGGER.info("python_mirror.recover_jobs completed")
         except Exception as exc:
@@ -811,7 +836,9 @@ class PythonMirrorService:
             await asyncio.to_thread(temp.write_text, text, "utf-8")
             await asyncio.to_thread(os.replace, temp, cache_path)
         except Exception as exc:
-            LOGGER.warning("write_version_cache error version=%s error=%s", version, exc)
+            LOGGER.warning(
+                "write_version_cache error version=%s error=%s", version, exc
+            )
 
     # ------------------------------------------------------------------
     # Job management internals
@@ -843,8 +870,13 @@ class PythonMirrorService:
             job.updated_at = datetime.now(UTC)
             await self._persist_job(job)
         except Exception as exc:
-            LOGGER.error("job_error job_id=%s kind=%s error=%s",
-                         job.job_id, job.kind, exc, exc_info=True)
+            LOGGER.error(
+                "job_error job_id=%s kind=%s error=%s",
+                job.job_id,
+                job.kind,
+                exc,
+                exc_info=True,
+            )
             job.status = "error"
             job.message = str(exc)
             job.finished_at = datetime.now(UTC)
@@ -857,20 +889,24 @@ class PythonMirrorService:
             collection = self._db.collection(PYTHON_MIRROR_JOBS)
             await collection.update_one(
                 {"job_id": job.job_id},
-                {"$set": {
-                    "job_id": job.job_id,
-                    "kind": job.kind,
-                    "status": job.status,
-                    "version": job.version,
-                    "total": job.total,
-                    "done": job.done,
-                    "failed": job.failed,
-                    "message": job.message,
-                    "retry_count": job.retry_count,
-                    "started_at": job.started_at.isoformat(),
-                    "updated_at": datetime.now(UTC).isoformat(),
-                    "finished_at": job.finished_at.isoformat() if job.finished_at else None,
-                }},
+                {
+                    "$set": {
+                        "job_id": job.job_id,
+                        "kind": job.kind,
+                        "status": job.status,
+                        "version": job.version,
+                        "total": job.total,
+                        "done": job.done,
+                        "failed": job.failed,
+                        "message": job.message,
+                        "retry_count": job.retry_count,
+                        "started_at": job.started_at.isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
+                        "finished_at": job.finished_at.isoformat()
+                        if job.finished_at
+                        else None,
+                    }
+                },
                 upsert=True,
             )
         except Exception as exc:
@@ -943,17 +979,25 @@ class PythonMirrorService:
                             await self._persist_job(job)
                         break
                     except IntegrityError as exc:
-                        LOGGER.warning("integrity_error file=%s attempt=%d error=%s",
-                                       f.filename, attempt + 1, exc)
+                        LOGGER.warning(
+                            "integrity_error file=%s attempt=%d error=%s",
+                            f.filename,
+                            attempt + 1,
+                            exc,
+                        )
                         if attempt == self.cfg.max_retries - 1:
                             async with job_lock:
                                 job.failed += 1
                                 await self._persist_job(job)
                     except Exception as exc:
-                        LOGGER.warning("download_error file=%s attempt=%d error=%s",
-                                       f.filename, attempt + 1, exc)
+                        LOGGER.warning(
+                            "download_error file=%s attempt=%d error=%s",
+                            f.filename,
+                            attempt + 1,
+                            exc,
+                        )
                         if attempt < self.cfg.max_retries - 1:
-                            await asyncio.sleep(2 ** attempt)
+                            await asyncio.sleep(2**attempt)
                         else:
                             async with job_lock:
                                 job.failed += 1
@@ -963,15 +1007,15 @@ class PythonMirrorService:
 
         job.status = "done" if job.failed == 0 else "error"
         job.message = (
-            None if job.failed == 0
-            else f"{job.failed} file(s) failed to download"
+            None if job.failed == 0 else f"{job.failed} file(s) failed to download"
         )
         job.current_file = None
         job.finished_at = datetime.now(UTC)
         job.updated_at = datetime.now(UTC)
         await self._persist_job(job)
-        LOGGER.info("install_done version=%s done=%d failed=%d",
-                    version, job.done, job.failed)
+        LOGGER.info(
+            "install_done version=%s done=%d failed=%d", version, job.done, job.failed
+        )
 
     async def _run_verify(self, job: PythonMirrorJob, version: str) -> None:
         ver_dir = _safe_path(self.cfg.data_dir, version)
@@ -979,8 +1023,7 @@ class PythonMirrorService:
             raise RuntimeError(f"Version {version} is not installed")
 
         files = [
-            fp for fp in ver_dir.iterdir()
-            if fp.is_file() and fp.name != CACHE_FILENAME
+            fp for fp in ver_dir.iterdir() if fp.is_file() and fp.name != CACHE_FILENAME
         ]
         job.total = len(files)
         job.updated_at = datetime.now(UTC)
@@ -1003,15 +1046,15 @@ class PythonMirrorService:
             else:
                 job.failed += 1
                 failed_files.append(fp.name)
-                LOGGER.warning("verify_failed file=%s strategy=%s", fp.name, result.strategy)
+                LOGGER.warning(
+                    "verify_failed file=%s strategy=%s", fp.name, result.strategy
+                )
             job.updated_at = datetime.now(UTC)
             await self._persist_job(job)
 
         job.status = "done"
         job.message = (
-            "All files OK"
-            if not failed_files
-            else f"Failed: {', '.join(failed_files)}"
+            "All files OK" if not failed_files else f"Failed: {', '.join(failed_files)}"
         )
         job.current_file = None
         job.finished_at = datetime.now(UTC)
@@ -1019,16 +1062,22 @@ class PythonMirrorService:
         await self._persist_job(job)
 
     async def _run_verify_all(self, job: PythonMirrorJob) -> None:
-        installed = [
-            d.name for d in self.cfg.data_dir.iterdir()
-            if d.is_dir() and not d.name.startswith(".")
-        ] if self.cfg.data_dir.exists() else []
+        installed = (
+            [
+                d.name
+                for d in self.cfg.data_dir.iterdir()
+                if d.is_dir() and not d.name.startswith(".")
+            ]
+            if self.cfg.data_dir.exists()
+            else []
+        )
 
         total_files = 0
         for v in installed:
             ver_dir = _safe_path(self.cfg.data_dir, v)
             total_files += sum(
-                1 for fp in ver_dir.iterdir()
+                1
+                for fp in ver_dir.iterdir()
                 if fp.is_file() and fp.name != CACHE_FILENAME
             )
         job.total = total_files

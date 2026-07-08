@@ -3,21 +3,48 @@ from __future__ import annotations
 from typing import Any
 
 from server.mcp.plugins._common import bool_argument, require_argument
-from server.models import MCPTool, MCPToolManifest, PermissionDefinition, PluginDefinition, PluginManifest, ToolExecutionContext
+from server.models import (
+    MCPTool,
+    MCPToolManifest,
+    PermissionDefinition,
+    PluginDefinition,
+    PluginManifest,
+    ToolExecutionContext,
+)
 
 
-async def list_directory(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
-    return context.services.host_ops.list_directory(str(arguments.get("path") or "."), roots=context.services.host_ops.managed_file_roots())
+async def list_directory(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    return context.services.host_ops.list_directory(
+        str(arguments.get("path") or "."),
+        roots=context.services.host_ops.managed_file_roots(),
+    )
 
 
-async def read_file(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def read_file(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     path = require_argument(arguments, "path")
     offset = max(0, int(arguments.get("offset") or 0))
-    max_bytes = max(1, int(arguments.get("max_bytes") or context.services.settings.host_ops.max_output_bytes))
-    return context.services.host_ops.read_text(str(path), roots=context.services.host_ops.managed_file_roots(), offset=offset, max_bytes=max_bytes)
+    max_bytes = max(
+        1,
+        int(
+            arguments.get("max_bytes")
+            or context.services.settings.host_ops.max_output_bytes
+        ),
+    )
+    return context.services.host_ops.read_text(
+        str(path),
+        roots=context.services.host_ops.managed_file_roots(),
+        offset=offset,
+        max_bytes=max_bytes,
+    )
 
 
-async def write_file(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def write_file(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     path = require_argument(arguments, "path")
     content = str(arguments.get("content") or "")
     return context.services.host_ops.atomic_write_text(
@@ -28,7 +55,9 @@ async def write_file(context: ToolExecutionContext, arguments: dict[str, Any]) -
     )
 
 
-async def append_file(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def append_file(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     path = require_argument(arguments, "path")
     content = str(arguments.get("content") or "")
     return context.services.host_ops.atomic_write_text(
@@ -39,21 +68,37 @@ async def append_file(context: ToolExecutionContext, arguments: dict[str, Any]) 
     )
 
 
-async def move_path(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def move_path(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     source = require_argument(arguments, "source")
     destination = require_argument(arguments, "destination")
-    return context.services.host_ops.move_path(str(source), str(destination), roots=context.services.host_ops.managed_file_roots())
+    return context.services.host_ops.move_path(
+        str(source),
+        str(destination),
+        roots=context.services.host_ops.managed_file_roots(),
+    )
 
 
-async def delete_path(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def delete_path(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     path = require_argument(arguments, "path")
     recursive = bool_argument(arguments, "recursive", False)
-    return context.services.host_ops.delete_path(str(path), roots=context.services.host_ops.managed_file_roots(), recursive=recursive)
+    return context.services.host_ops.delete_path(
+        str(path),
+        roots=context.services.host_ops.managed_file_roots(),
+        recursive=recursive,
+    )
 
 
-async def make_directory(context: ToolExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+async def make_directory(
+    context: ToolExecutionContext, arguments: dict[str, Any]
+) -> dict[str, Any]:
     path = require_argument(arguments, "path")
-    return context.services.host_ops.mkdir(str(path), roots=context.services.host_ops.managed_file_roots())
+    return context.services.host_ops.mkdir(
+        str(path), roots=context.services.host_ops.managed_file_roots()
+    )
 
 
 PLUGIN = PluginDefinition(
@@ -63,8 +108,13 @@ PLUGIN = PluginDefinition(
         version="1.0.0",
         description="Читает и редактирует файлы внутри настроенных управляемых корней.",
         permissions=[
-            PermissionDefinition(key="files.read", description="Читать управляемые файлы и директории."),
-            PermissionDefinition(key="files.write", description="Записывать, перемещать и удалять управляемые файлы и директории."),
+            PermissionDefinition(
+                key="files.read", description="Читать управляемые файлы и директории."
+            ),
+            PermissionDefinition(
+                key="files.write",
+                description="Записывать, перемещать и удалять управляемые файлы и директории.",
+            ),
         ],
     ),
     tools={
