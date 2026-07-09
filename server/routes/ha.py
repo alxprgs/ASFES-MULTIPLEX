@@ -195,7 +195,7 @@ async def ha_state(
     # Determine Redis client (optional)
     redis_client: object | None = None
     if services.settings.redis.mode != "disabled":
-        redis_client = getattr(services.cache, "redis", None)
+        redis_client = getattr(services.cache, "_redis", None)
 
     return await services.ha_service.get_full_state(
         redis_client=redis_client,
