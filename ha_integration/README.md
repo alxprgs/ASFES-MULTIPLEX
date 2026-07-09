@@ -65,3 +65,73 @@ HA tokens are completely isolated from regular API tokens:
 
 After installation, go to the integration options to configure:
 - **Update Interval** (10–300 seconds, default: 30)
+
+---
+
+# ASFES Multiplex — Интеграция с Home Assistant
+
+Эта кастомная интеграция позволяет Home Assistant отслеживать состояние и управлять вашим инстансом ASFES Multiplex.
+
+## Установка
+
+1. Скопируйте папку `custom_components/asfes_multiplex` в директорию `config/custom_components/` вашего Home Assistant.
+2. Перезагрузите Home Assistant.
+3. Перейдите в **Настройки → Устройства и службы → Добавить интеграцию**.
+4. Найдите **ASFES Multiplex** и следуйте подсказкам мастера настройки.
+
+## Настройка
+
+При первоначальной настройке вам потребуется указать:
+- **Server URL** — например, `http://192.168.1.100:8000`
+- **Username** и **Password** — учетные данные вашего пользователя ASFES Multiplex
+- **Connection Label** — понятное название для этого подключения (необязательно)
+
+Если для вашей учетной записи включена двухфакторная аутентификация (2FA), система попросит ввести ваш одноразовый TOTP-код.
+
+## Сущности
+
+### Сенсоры (Sensors)
+- Загрузка CPU (%)
+- Загрузка RAM (%)
+- Загрузка диска (%)
+- Время работы / Uptime (в секундах)
+- Получено / Отправлено по сети (в байтах, накопительно)
+- Температура (°C, если поддерживается платформой)
+- Запущенные Docker-контейнеры
+- Запущенные процессы
+- Активные клиенты Redis
+- Активные клиенты MongoDB
+
+### Бинарные сенсоры (Binary Sensors)
+- MongoDB онлайн (MongoDB Online)
+- Redis онлайн (Redis Online)
+- Здоровье API (API Healthy)
+- Здоровье MCP (MCP Healthy)
+- Зеркало Python активно (Python Mirror Running)
+- Зеркало PyPI активно (PyPI Mirror Running)
+
+### Выключатели (Switches, требует `HA__SWITCHES_ENABLED=true` на сервере)
+- Включение регистрации (Enable Registration)
+- Включение MCP (Enable MCP)
+- Включение Redis (Enable Redis)
+
+### Кнопки (Buttons)
+- Перезагрузить плагины (Reload Plugins)
+- Обновить зеркало Python (Refresh Python Mirror)
+- Обновить PyPI (Refresh PyPI)
+- Перезапустить Multiplex *(требует `HA__DESTRUCTIVE_BUTTONS_ENABLED=true`)*
+- Перезапустить Docker *(требует `HA__DESTRUCTIVE_BUTTONS_ENABLED=true`)*
+
+## Безопасность
+
+Токены для Home Assistant полностью изолированы от основных токенов API:
+- Отдельные секретные ключи JWT (`HA__JWT_SECRET` и `HA__REFRESH_JWT_SECRET`)
+- Отдельный идентификатор получателя (`home-assistant` в поле aud)
+- Токены дают доступ исключительно к эндпоинтам `/api/ha/*`
+- Короткоживущие access-токены (30 минут) + долгоживущие refresh-токены (365 дней)
+- Автоматическая ротация и обновление токенов до истечения срока их действия
+
+## Параметры (Options)
+
+После настройки интеграции в меню «Параметры» можно настроить:
+- **Интервал опроса** (от 10 до 300 секунд, по умолчанию: 30)

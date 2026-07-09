@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 DOMAIN = "asfes_multiplex"
-VERSION = "1.0.0"
+VERSION = "1.0.3"
 MANUFACTURER = "ASFES"
 
 # Config entry data keys

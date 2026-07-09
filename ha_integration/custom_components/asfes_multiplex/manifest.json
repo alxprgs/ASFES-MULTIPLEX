@@ -1,7 +1,7 @@
 {
   "domain": "asfes_multiplex",
   "name": "ASFES Multiplex",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "documentation": "https://github.com/proshar/ASFES-MULTIPLEX",
   "issue_tracker": "https://github.com/proshar/ASFES-MULTIPLEX/issues",
   "codeowners": [],
