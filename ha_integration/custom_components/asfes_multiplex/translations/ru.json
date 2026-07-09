@@ -1,0 +1,52 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Подключение к ASFES Multiplex",
+        "description": "Введите данные вашего сервера ASFES Multiplex.",
+        "data": {
+          "host": "URL сервера",
+          "username": "Имя пользователя",
+          "password": "Пароль",
+          "account_label": "Название подключения"
+        }
+      },
+      "2fa": {
+        "title": "Двухфакторная аутентификация",
+        "description": "Введите 6-значный код из вашего приложения аутентификатора.",
+        "data": {
+          "totp_code": "Код подтверждения"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Повторная авторизация ASFES Multiplex",
+        "description": "Ваш токен авторизации истек. Пожалуйста, введите учетные данные заново.",
+        "data": {
+          "username": "Имя пользователя",
+          "password": "Пароль"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Не удалось подключиться к серверу ASFES Multiplex",
+      "invalid_auth": "Неверное имя пользователя или пароль",
+      "invalid_totp": "Неверный или истекший код подтверждения",
+      "token_expired": "Токен авторизации истек",
+      "unknown": "Произошла непредвиденная ошибка"
+    },
+    "abort": {
+      "already_configured": "Этот сервер ASFES Multiplex уже настроен",
+      "reauth_successful": "Повторная авторизация прошла успешно"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Настройки ASFES Multiplex",
+        "data": {
+          "poll_interval": "Интервал обновления (в секундах)"
+        }
+      }
+    }
+  }
+}
