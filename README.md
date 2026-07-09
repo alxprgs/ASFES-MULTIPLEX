@@ -38,6 +38,7 @@ ASFES Multiplex — централизованный control plane для упр
   - [Update Manager (обновления)](#-update-manager-обновления)
   - [React Admin UI](#-react-admin-ui)
   - [Home Assistant Integration](#-home-assistant-integration)
+  - [Observability (мониторинг и логи)](#-observability-мониторинг-и-логи)
 - [Первый запуск](#-первый-запуск)
   - [Windows / PowerShell](#windows--powershell)
   - [Debian / Ubuntu](#debianubuntu-production)
@@ -349,6 +350,18 @@ PYPI__NETWORK_MODE=direct    # direct | proxy | mix
 
 ---
 
+### 📊 Observability (мониторинг и логи)
+
+Встроенный стек для сбора логов, метрик и трассировок, полностью отключаемый и настраиваемый через `.env`.
+
+- **Prometheus метрики**: Экспорт более чем 20 метрик через единый эндпоинт `/api/metrics` (активные http-запросы, CPU/RAM/Disk, скачивания PyPI, события алертов, нарушения целостности логов и т.д.). Доступ к эндпоинту может быть защищен пермишеном `system.metrics.read` или сделан публичным для скрейпинга Prometheus.
+- **Loki Log Forwarding**: Асинхронный, буферизированный форвардер логов в Grafana Loki на основе `asyncio.Queue`. Работает без блокировки основного потока исполнения и поддерживает batch-отправку, экспоненциальный retry и защиту от переполнения памяти при падении Loki.
+- **OpenTelemetry Tracing**: Опциональная трассировка HTTP-запросов и операций баз данных. Настраивается через conditional import и не создает оверхеда, если OTel-пакеты не установлены в системе.
+
+---
+
+---
+
 ## 🚀 Первый запуск
 
 ### Требования перед стартом
@@ -641,8 +654,10 @@ cd ..
 | `GET/POST` | `/api/proxy/*` | Управление прокси | ✅ |
 | `GET/POST` | `/api/python-mirror/*` | Управление Python-зеркалом | ✅ |
 | `GET/POST/DELETE` | `/api/ha/*` | Интеграция Home Assistant | ✅ HA Bearer / API JWT |
+| `GET` | `/api/metrics` | Метрики Prometheus | optional (system.metrics.read) |
 | `*` | `/mcp/*` | MCP Gateway (FastMCP) | OAuth |
 | `GET` | `/*` | React SPA (catch-all) | — |
+
 
 ---
 

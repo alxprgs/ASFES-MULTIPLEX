@@ -268,6 +268,13 @@ class AlertingService:
             {"_id": rule["_id"]},
             {"$set": {"last_triggered_at": created_at, "updated_at": created_at}},
         )
+        # Update Prometheus alert fires counter
+        try:
+            from server.observability.metrics import inc_alert_fire
+
+            inc_alert_fire(str(rule.get("_id", "unknown")))
+        except Exception:
+            pass
 
     def _normalize_rule(self, payload: dict[str, Any]) -> dict[str, Any]:
         recipients = [

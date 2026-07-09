@@ -86,14 +86,23 @@ class IntegrityLogManager:
         self._current_file_path: Path | None = None
         self._last_line_hash_by_file: dict[str, str] = {}
 
-    def initialize(self) -> None:
+    def initialize(
+        self,
+        extra_handlers: list[logging.Handler] | None = None,
+    ) -> None:
+        """Initialize logging infrastructure.
+
+        Args:
+            extra_handlers: Optional list of additional handlers to attach
+                to the root logger (e.g. ``LokiHandler``).
+        """
         self.config.directory.mkdir(parents=True, exist_ok=True)
         self.config.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(self.config.sqlite_path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._initialize_schema()
         self._load_last_hashes()
-        self.install_logging()
+        self.install_logging(extra_handlers=extra_handlers)
 
     def _initialize_schema(self) -> None:
         assert self._db is not None
@@ -143,7 +152,17 @@ class IntegrityLogManager:
         for row in cursor.fetchall():
             self._last_line_hash_by_file[row["file_path"]] = row["line_hash"]
 
-    def install_logging(self) -> None:
+    def install_logging(
+        self,
+        extra_handlers: list[logging.Handler] | None = None,
+    ) -> None:
+        """Configure the root Python logger.
+
+        Args:
+            extra_handlers: Optional list of additional handlers to attach
+                (e.g. a ``LokiHandler`` for log forwarding). Handlers are
+                added after the built-in Rich and integrity handlers.
+        """
         root_logger = logging.getLogger()
         root_logger.handlers.clear()
         root_logger.setLevel(self.config.level)
@@ -158,6 +177,9 @@ class IntegrityLogManager:
         integrity_handler.setLevel(self.config.level)
         root_logger.addHandler(rich_handler)
         root_logger.addHandler(integrity_handler)
+        if extra_handlers:
+            for handler in extra_handlers:
+                root_logger.addHandler(handler)
 
     def _hour_key_for(self, created_at: datetime) -> str:
         return created_at.strftime("%Y%m%d%H")
@@ -402,6 +424,14 @@ class IntegrityLogManager:
                     indent=2,
                 ),
             )
+
+        # Update Prometheus integrity violation counter
+        try:
+            from server.observability.metrics import inc_log_integrity_violation
+
+            inc_log_integrity_violation()
+        except Exception:
+            pass
 
     def finalize(self) -> None:
         with self._lock:

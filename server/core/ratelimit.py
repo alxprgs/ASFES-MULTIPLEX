@@ -159,5 +159,12 @@ class RateLimiter:
     async def enforce(self, policy_name: str, key: str) -> RateLimitResult:
         result = await self.consume(policy_name, key)
         if not result.allowed:
+            # Update Prometheus rate limit hits counter
+            try:
+                from server.observability.metrics import inc_rate_limit_hit
+
+                inc_rate_limit_hit(policy_name)
+            except Exception:
+                pass
             raise RateLimitError(policy_name, result.retry_after)
         return result

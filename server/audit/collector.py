@@ -72,6 +72,13 @@ class AuditCollector:
             result=result,
         )
         self.dispatch(event)
+        # Update Prometheus audit events counter
+        try:
+            from server.observability.metrics import inc_audit_event
+
+            inc_audit_event(event_type)
+        except Exception:
+            pass
         # return dummy doc for legacy compatibility
         return {"event_id": event.event_id}
 

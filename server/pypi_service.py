@@ -710,6 +710,13 @@ class PyPIMirrorService:
             ok = await self._mirror.download_version(session, norm, best_version)
             if ok:
                 job.done += 1
+                # Update Prometheus downloads counter
+                try:
+                    from server.observability.metrics import inc_pypi_download
+
+                    inc_pypi_download()
+                except Exception:
+                    pass
                 requires_dist = metadata.get("info", {}).get("requires_dist") or []
                 for dist in requires_dist:
                     try:

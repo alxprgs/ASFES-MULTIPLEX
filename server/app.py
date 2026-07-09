@@ -77,6 +77,7 @@ async def lifespan(app: FastAPI):
                 )
                 await services.audit.start()
                 await services.audit_archiver.start()
+                await services.observability.start()
                 progress.update(task_id, completed=4, description="Startup complete")
         else:
             services = await build_application_services(
@@ -87,6 +88,7 @@ async def lifespan(app: FastAPI):
             )
             await services.audit.start()
             await services.audit_archiver.start()
+            await services.observability.start()
 
         app.state.services = services
         await app.state.mcp_gateway.refresh_tools()

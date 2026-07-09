@@ -312,6 +312,82 @@ class PythonMirrorConfig(BaseModel):
     cache_ttl_files: int = 7200
 
 
+class ObservabilityConfig(BaseModel):
+    """Configuration for observability: Prometheus metrics, Loki log forwarding, OpenTelemetry."""
+
+    # ── Prometheus ──────────────────────────────────────────────────────────
+    prometheus_enabled: bool = False
+    """Enable Prometheus metrics export via /api/metrics."""
+
+    metrics_public: bool = False
+    """If true, /api/metrics is accessible without authorization (for Prometheus scraper)."""
+
+    system_metrics_interval_seconds: int = Field(default=30, ge=5)
+    """Interval for updating system metrics (CPU, RAM, Disk), seconds."""
+
+    # ── Loki ─────────────────────────────────────────────────────────────────
+    loki_enabled: bool = False
+    """Enable log forwarding to Grafana Loki."""
+
+    loki_url: str = "http://localhost:3100"
+    """Base URL of the Loki server."""
+
+    loki_push_path: str = "/loki/api/v1/push"
+    """Loki Push API path."""
+
+    loki_timeout_seconds: float = Field(default=5.0, gt=0)
+    """HTTP request timeout to Loki, seconds."""
+
+    loki_batch_size: int = Field(default=100, ge=1)
+    """Maximum number of log records per Loki push batch."""
+
+    loki_flush_interval_seconds: float = Field(default=5.0, gt=0)
+    """Interval for flushing the buffer to Loki (if batch is not full), seconds."""
+
+    loki_buffer_max_size: int = Field(default=10000, ge=100)
+    """Maximum buffer queue size. Records are silently dropped when the queue is full."""
+
+    loki_max_retries: int = Field(default=3, ge=0)
+    """Number of retry attempts on Loki push failure."""
+
+    loki_retry_interval_seconds: float = Field(default=1.0, gt=0)
+    """Initial interval between retries (exponential backoff), seconds."""
+
+    loki_extra_labels: dict[str, str] = Field(default_factory=dict)
+    """Additional static labels for all Loki streams.
+    Example: {"host": "my-server", "datacenter": "home"}"""
+
+    loki_min_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    """Minimum log level to forward to Loki (independent of the global logging level)."""
+
+    # ── OpenTelemetry ─────────────────────────────────────────────────────────
+    otel_enabled: bool = False
+    """Enable OpenTelemetry. Requires additional pip packages (opentelemetry-sdk etc.)."""
+
+    otlp_endpoint: str = "http://localhost:4318"
+    """OTLP HTTP collector endpoint (Jaeger, Tempo, OTel Collector, etc.)."""
+
+    otlp_headers: dict[str, str] = Field(default_factory=dict)
+    """Additional HTTP headers for OTLP (e.g., for cloud collector authorization)."""
+
+    otlp_export_timeout_seconds: float = Field(default=10.0, gt=0)
+    """OTLP export timeout, seconds."""
+
+    otel_traces_enabled: bool = True
+    """Export traces via OTel (if otel_enabled=true)."""
+
+    otel_metrics_enabled: bool = False
+    """Export metrics via OTel OTLP (if otel_enabled=true).
+    Usually not needed when Prometheus is already used."""
+
+    otel_logs_enabled: bool = False
+    """Export logs via OTel OTLP (if otel_enabled=true).
+    Usually not needed when Loki is already used."""
+
+    otel_sample_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+    """Fraction of traces to export (1.0 = 100%, 0.1 = 10%)."""
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -334,6 +410,7 @@ class Settings(BaseSettings):
     pypi: PyPIConfig = Field(default_factory=PyPIConfig)
     python_mirror: PythonMirrorConfig = Field(default_factory=PythonMirrorConfig)
     ha: HAConfig = Field(default_factory=HAConfig)
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 
     @model_validator(mode="after")
     def finalize_paths(self) -> "Settings":

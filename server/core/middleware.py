@@ -6,6 +6,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import Response
 
 from server.core.logging import get_logger
+from server.observability import metrics as _obs_metrics
 
 LOGGER = get_logger("multiplex.access")
 
@@ -20,7 +21,19 @@ class AuditMetricsMiddleware(BaseHTTPMiddleware):
         correlation_id = str(uuid.uuid4())
         request.state.correlation_id = correlation_id
 
-        response = await call_next(request)
+        # Track in-flight requests
+        try:
+            _obs_metrics.inc_http_in_flight(1)
+        except Exception:
+            pass
+
+        try:
+            response = await call_next(request)
+        finally:
+            try:
+                _obs_metrics.inc_http_in_flight(-1)
+            except Exception:
+                pass
 
         process_time = time.time() - start_time
 
@@ -38,6 +51,17 @@ class AuditMetricsMiddleware(BaseHTTPMiddleware):
                 "client_ip": client_ip,
             },
         )
+
+        # Update Prometheus HTTP metrics
+        try:
+            _obs_metrics.observe_http_request(
+                method=request.method,
+                path=request.url.path,
+                status=str(response.status_code),
+                duration=process_time,
+            )
+        except Exception:
+            pass
 
         # Optionally inject correlation ID into response headers
         response.headers["X-Correlation-ID"] = correlation_id

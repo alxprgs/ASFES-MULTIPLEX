@@ -86,6 +86,7 @@ from server.proxy_service import ProxyService
 from server.pypi_service import PyPIMirrorService
 from server.python_mirror_service import PythonMirrorService
 from server.ha_service import HAService
+from server.observability.service import ObservabilityService
 
 
 LOGGER = get_logger("multiplex.services")
@@ -107,6 +108,7 @@ CORE_PERMISSIONS = {
     "python_mirror.manage": "Скачивать, удалять версии Python, управлять зеркалом.",
     "ha.write": "Управлять переключателями и безопасными действиями через HA-интеграцию.",
     "ha.admin": "Выполнять деструктивные операции через HA-интеграцию (перезапуск, Docker).",
+    "system.metrics.read": "Читать метрики Prometheus через /api/metrics.",
 }
 
 
@@ -2226,6 +2228,7 @@ class ApplicationServices:
     pypi_mirror: PyPIMirrorService
     python_mirror: PythonMirrorService
     ha_service: HAService
+    observability: ObservabilityService
     verifier_task: asyncio.Task[Any] | None = None
 
 
@@ -2293,6 +2296,41 @@ async def build_application_services(
     settings: Settings, logger_manager: IntegrityLogManager, mailer: Mailer
 ) -> ApplicationServices:
     validate_runtime_security(settings)
+
+    # ── Observability: create Loki handler BEFORE logger initialization ──────
+    from server.observability.metrics import init_metrics
+    from server.observability.otel import setup_otel
+
+    loki_handler = None
+    if settings.observability.loki_enabled:
+        from server.observability.loki import LokiHandler
+
+        loki_handler = LokiHandler(settings.observability)
+        loki_handler.set_env(settings.app.env)
+
+    prometheus_enabled = init_metrics(settings.observability)
+
+    otel_handle = None
+    if settings.observability.otel_enabled:
+        otel_handle = setup_otel(
+            settings.observability,
+            app_version=settings.app.version,
+            app_env=settings.app.env,
+        )
+
+    observability_svc = ObservabilityService(
+        config=settings.observability,
+        prometheus_enabled=prometheus_enabled,
+        loki_handler=loki_handler,
+        otel_handle=otel_handle,
+    )
+
+    # Re-install logging to attach the Loki handler (if enabled).
+    # logger_manager is already initialized (called from app.py lifespan);
+    # this call replaces all handlers atomically: Rich + Integrity + optional Loki.
+    if loki_handler is not None:
+        logger_manager.install_logging(extra_handlers=[loki_handler])
+
     db = DatabaseManager(settings)
     await db.connect()
     await db.ensure_indexes()
@@ -2381,6 +2419,7 @@ async def build_application_services(
         pypi_mirror=pypi_mirror_service,
         python_mirror=python_mirror_service,
         ha_service=ha_svc,
+        observability=observability_svc,
     )
     plugins.attach_services(services)
     await users.ensure_root_user()
@@ -2400,6 +2439,7 @@ async def shutdown_application_services(services: ApplicationServices) -> None:
         services.verifier_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await services.verifier_task
+    await services.observability.stop()
     await services.python_mirror.shutdown()
     await services.pypi_mirror.shutdown()
     await services.rate_limiter.shutdown()
