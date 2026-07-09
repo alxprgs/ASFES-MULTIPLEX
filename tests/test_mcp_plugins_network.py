@@ -282,9 +282,9 @@ async def test_ports_scanner_probes(host_ops) -> None:
         assert tcp_res["reachable"] is True
 
     # 2. probe_tcp disallowed host -> raises error
-    # (dns lookup for arbitrary host, mock to return external ip)
+    # (dns lookup for arbitrary host, mock to return blocked ip)
     with patch(
-        "socket.getaddrinfo", return_value=[(None, None, None, None, ("8.8.8.8", 0))]
+        "socket.getaddrinfo", return_value=[(None, None, None, None, ("127.0.0.1", 0))]
     ):
         with pytest.raises(RuntimeError) as exc:
             await probe_tcp(context, {"host": "google.com", "port": 80})

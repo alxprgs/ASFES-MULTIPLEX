@@ -41,6 +41,7 @@ def test_exact_mcp_path_is_rewritten_before_routing() -> None:
 
 def test_oauth_well_known_metadata_routes_without_runtime_services() -> None:
     cfg = Settings(_env_file=None)
+    cfg.app.public_base_url = "http://testserver"
     app = FastAPI()
     app.state.services = SimpleNamespace(
         settings=cfg,

@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from server.core.deps import enforce_api_rate_limit, get_services, require_permission
+from server.core.deps import enforce_api_rate_limit, get_services, require_permission, get_current_api_user
 from server.core.ratelimit import RateLimitError
 from server.models import (
     OAuthClientCreateRequest,
@@ -737,6 +737,7 @@ async def register_oauth_client(
     payload: OAuthDynamicClientRegistrationRequest,
     request: Request,
     services: ApplicationServices = Depends(get_services),
+    current_user: UserPrincipal = Depends(get_current_api_user),
 ) -> JSONResponse:
     await enforce_api_rate_limit(request, services, policy_name="rest_write")
     if payload.token_endpoint_auth_method != "none":

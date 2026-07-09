@@ -101,22 +101,28 @@ async def test_proxy_crud_and_isolation(integration_env) -> None:
     # 8. Export checks
     # Export URL
     p_id = proxy_data["proxy_id"]
-    exp_url = await client.get(
-        f"/api/proxy/proxies/{p_id}/export/url", headers=alice_headers
+    exp_url = await client.post(
+        f"/api/proxy/proxies/{p_id}/export/url",
+        headers=alice_headers,
+        json={"current_password": "AlicePassword123!"},
     )
     assert exp_url.status_code == 200
     assert exp_url.json()["url"] == "socks5://alice_user:alice_password@1.1.1.1:1080"
 
     # Export Lines
-    exp_lines = await client.get(
-        f"/api/proxy/proxies/{p_id}/export/lines", headers=alice_headers
+    exp_lines = await client.post(
+        f"/api/proxy/proxies/{p_id}/export/lines",
+        headers=alice_headers,
+        json={"current_password": "AlicePassword123!"},
     )
     assert exp_lines.status_code == 200
     assert exp_lines.json()["lines"] == "alice_user\nalice_password\n1.1.1.1\n1080"
 
     # Export TG (SOCKS5 is supported)
-    exp_tg = await client.get(
-        f"/api/proxy/proxies/{p_id}/export/tg?secret=dd112233", headers=alice_headers
+    exp_tg = await client.post(
+        f"/api/proxy/proxies/{p_id}/export/tg",
+        headers=alice_headers,
+        json={"current_password": "AlicePassword123!", "secret": "dd112233"},
     )
     assert exp_tg.status_code == 200
     assert (
@@ -126,8 +132,10 @@ async def test_proxy_crud_and_isolation(integration_env) -> None:
 
     # Export TG (HTTP is not supported for TG proxy)
     bob_id = url_resp.json()["proxy_id"]
-    exp_tg_err = await client.get(
-        f"/api/proxy/proxies/{bob_id}/export/tg", headers=alice_headers
+    exp_tg_err = await client.post(
+        f"/api/proxy/proxies/{bob_id}/export/tg",
+        headers=alice_headers,
+        json={"current_password": "AlicePassword123!"},
     )
     assert exp_tg_err.status_code == 400
 
@@ -196,7 +204,10 @@ async def test_proxifier_import_export(integration_env) -> None:
     exp_resp = await client.post(
         "/api/proxy/proxies/export/proxifier",
         headers=headers,
-        json={"proxy_ids": proxy_ids},
+        json={
+            "proxy_ids": proxy_ids,
+            "current_password": cfg.root.password.get_secret_value(),
+        },
     )
     assert exp_resp.status_code == 200
     export_xml = exp_resp.json()["xml_content"]

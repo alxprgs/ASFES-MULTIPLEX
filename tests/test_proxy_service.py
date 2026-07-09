@@ -154,6 +154,9 @@ def test_encryption_decryption() -> None:
     mock_settings.security.api_jwt_secret = SecretStr(
         "my-super-secret-key-1234567890123"
     )
+    mock_settings.security.proxy_encryption_key = SecretStr(
+        "my-super-secret-key-1234567890123"
+    )
 
     srv = ProxyService(MagicMock(), mock_settings)
 

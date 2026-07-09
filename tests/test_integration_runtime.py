@@ -151,7 +151,7 @@ async def test_rest_oauth_and_mcp_flow_respects_user_scoping(integration_env) ->
         },
     )
     assert authorize_page.status_code == 200
-    assert "Authorize Integration MCP Client" in authorize_page.text
+    assert "Подключить Integration MCP Client" in authorize_page.text
 
     authorize = await client.post(
         "/api/oauth/authorize",
@@ -630,7 +630,7 @@ async def test_two_factor_protects_api_login_and_mcp_oauth_authorize(
         "/api/oauth/authorize", data=authorize_payload, follow_redirects=False
     )
     assert oauth_denied.status_code == 200
-    assert "Invalid authenticator code" in oauth_denied.text
+    assert "Неверный код аутентификатора." in oauth_denied.text
 
     oauth_allowed = await client.post(
         "/api/oauth/authorize",
